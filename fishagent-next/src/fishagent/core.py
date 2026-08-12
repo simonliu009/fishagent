@@ -1,6 +1,6 @@
-import os
 import json
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -78,7 +78,7 @@ class AppConfig:
     auth_enabled: bool = False
     auth_username: str = "admin"
     auth_password: str = ""
-    llm: LLMConfig = None
+    llm: LLMConfig = field(default_factory=LLMConfig)
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -107,7 +107,7 @@ class AppConfig:
 
 
 class RuntimeConfigStore:
-    def __init__(self, data_dir: str = None) -> None:
+    def __init__(self, data_dir: str | None = None) -> None:
         self.data_dir = Path(data_dir or os.environ.get("FISHAGENT_DATA_DIR", "data"))
         self.path = self.data_dir / "runtime_config.json"
 

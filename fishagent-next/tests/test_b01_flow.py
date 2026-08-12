@@ -1,5 +1,5 @@
-import unittest
 import json
+import unittest
 from tempfile import TemporaryDirectory
 
 from fishagent.application.agent_service import FishAgentSystem

@@ -2,7 +2,6 @@
 
 from alembic import op
 
-
 revision = "0003_domain_tables"
 down_revision = "0002_global_event_sequence"
 branch_labels = None

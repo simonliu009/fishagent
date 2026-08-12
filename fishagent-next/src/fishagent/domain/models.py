@@ -75,11 +75,37 @@ class JobStatus(str, Enum):
     DEAD_LETTER = "DEAD_LETTER"
 
 
+class AgentRunStatus(str, Enum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    WAITING_APPROVAL = "WAITING_APPROVAL"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    TIMED_OUT = "TIMED_OUT"
+    CANCELLED = "CANCELLED"
+
+
+class HealthStatus(str, Enum):
+    ONLINE = "ONLINE"
+    OFFLINE = "OFFLINE"
+    DRIFTING = "DRIFTING"
+    ERROR = "ERROR"
+
+
 @dataclass
 class Farm:
     id: str
     name: str
     location: str = ""
+
+
+@dataclass
+class Zone:
+    id: str
+    farm_id: str
+    name: str
+    location: str = ""
+    status: str = "ACTIVE"
 
 
 @dataclass
@@ -100,6 +126,17 @@ class Sensor:
     unit: str
     status: str = "ONLINE"
     freshness_seconds: int = 120
+
+
+@dataclass
+class SensorHealth:
+    sensor_id: str
+    status: HealthStatus = HealthStatus.ONLINE
+    last_heartbeat_at: Optional[datetime] = None
+    last_reading_at: Optional[datetime] = None
+    error_count: int = 0
+    drift_score: float = 0.0
+    message: str = ""
 
 
 @dataclass
@@ -136,6 +173,25 @@ class CameraSource:
     source_type: str
     status: str = "UNAVAILABLE"
     last_frame_at: Optional[datetime] = None
+    source_url: str = ""
+    privacy_policy: str = "EVENT_ONLY"
+    last_frame_id: Optional[str] = None
+    last_frame_hash: Optional[str] = None
+    last_frame_width: Optional[int] = None
+    last_frame_height: Optional[int] = None
+
+
+@dataclass
+class VisionFrame:
+    id: str
+    camera_id: str
+    source_url: str
+    object_name: str
+    content_type: str
+    sha256: str
+    width: int
+    height: int
+    captured_at: datetime = field(default_factory=utcnow)
 
 
 @dataclass
@@ -248,6 +304,42 @@ class ScheduledJob:
 
 
 @dataclass
+class PatrolFinding:
+    id: str
+    patrol_run_id: str
+    pond_id: str
+    status: str
+    summary: str
+    evidence_refs: List[str] = field(default_factory=list)
+    confidence: Optional[float] = None
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class Escalation:
+    id: str
+    incident_id: str
+    level: str
+    reason: str
+    status: str = "OPEN"
+    manual_task_id: Optional[str] = None
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class AuditEvent:
+    id: str
+    actor_type: str
+    actor_id: str
+    action: str
+    resource_type: str
+    resource_id: Optional[str] = None
+    correlation_id: Optional[str] = None
+    payload: Dict[str, object] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
 class Incident:
     id: str
     pond_id: str
@@ -302,7 +394,7 @@ class AgentRun:
     id: str
     goal: str
     incident_id: Optional[str] = None
-    status: str = "QUEUED"
+    status: str = AgentRunStatus.QUEUED.value
     stop_reason: Optional[str] = None
     steps: List[AgentStep] = field(default_factory=list)
     delegated_agents: List[str] = field(default_factory=list)

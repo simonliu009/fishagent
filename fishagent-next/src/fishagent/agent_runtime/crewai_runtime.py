@@ -4,8 +4,8 @@ CrewAI can investigate and propose; it never receives a direct device-write
 tool. The application service remains the only policy and execution boundary.
 """
 
-import json
 import io
+import json
 import os
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
@@ -33,7 +33,7 @@ class CrewAIOrchestrator:
         self.available = bool(llm_config.enabled and llm_config.api_key)
         self.last_error: Optional[str] = None
         try:
-            from crewai import Agent, Crew, LLM, Process, Task
+            from crewai import LLM, Agent, Crew, Process, Task
             from crewai.flow.flow import Flow, listen, start
             from crewai.tools import tool
         except ImportError as exc:  # optional extra is intentionally isolated
@@ -195,7 +195,7 @@ class CrewAIOrchestrator:
             listen = self._listen
             orchestrator = self
 
-            class InvestigationFlow(self._Flow):
+            class InvestigationFlow(self._Flow):  # type: ignore[name-defined,misc,valid-type]
                 @start()
                 def validate_trigger(self):
                     steps.append(("supervisor-agent", "validate_trigger", "确认目标和池塘范围，限制委派与工具预算"))

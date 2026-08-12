@@ -43,6 +43,32 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(celery_app.conf.task_default_queue, "default")
         self.assertIn("dispatch-due-jobs-every-five-seconds", celery_app.conf.beat_schedule)
 
+    def test_resource_contract_and_device_command_idempotency(self) -> None:
+        with TestClient(app) as client:
+            client.post("/api/v1/demo/init")
+            zone = client.post("/api/v1/zones", json={"id": "zone-api", "farm_id": "farm-demo", "name": "西区"})
+            self.assertEqual(zone.status_code, 201)
+            self.assertEqual(client.get("/api/v1/sensors/do-b-01/health").status_code, 200)
+            state = client.post(
+                "/api/v1/telemetry/readings:batch",
+                json={"readings": [{"pond_id": "B-01", "value": 2.0, "source_event_id": "api-command-reading", "auto_run": False}]},
+            ).json()["state"]
+            incident_id = state["incidents"][0]["id"]
+            headers = {"Idempotency-Key": "api-command-1"}
+            first = client.post(
+                "/api/v1/device-commands",
+                headers=headers,
+                json={"incident_id": incident_id, "device_id": "aerator-b01-1", "target_state": "on", "risk": "L1"},
+            )
+            second = client.post(
+                "/api/v1/device-commands",
+                headers=headers,
+                json={"incident_id": incident_id, "device_id": "aerator-b01-1", "target_state": "on", "risk": "L1"},
+            )
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(second.status_code, 200)
+            self.assertEqual(first.json()["device_command"]["id"], second.json()["device_command"]["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

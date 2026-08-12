@@ -9,22 +9,21 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from fishagent.application.agent_service import FishAgentSystem
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
+from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import AppConfig, RuntimeConfigStore
-from fishagent.domain.models import RiskLevel, ScheduleStatus
+from fishagent.domain.models import RiskLevel, ScheduleStatus, VisionFrame, new_id, utcnow
 from fishagent.infrastructure.auth import auth_from_config
-from fishagent.infrastructure.object_store import object_store_from_config
 from fishagent.infrastructure.mqtt import MqttTelemetryAdapter
+from fishagent.infrastructure.object_store import object_store_from_config
 from fishagent.infrastructure.persistence import PersistenceError, repository_from_config
 from fishagent.infrastructure.realtime import publisher_from_config
 from fishagent.web.server import page, test_llm_connection
-
 
 CONFIG = AppConfig.from_env()
 REPOSITORY = repository_from_config(CONFIG.database_url)
@@ -84,10 +83,14 @@ class AssetPayload(BaseModel):
     name: str = ""
     location: str = ""
     farm_id: str = ""
+    zone_id: str = ""
     pond_id: str = ""
     species: str = ""
     metric: str = "DO"
     unit: str = "mg/L"
+    source_type: str = "HTTP_SNAPSHOT"
+    source_url: str = ""
+    privacy_policy: str = "EVENT_ONLY"
 
 
 class TelemetryReadingPayload(BaseModel):
@@ -100,6 +103,7 @@ class TelemetryReadingPayload(BaseModel):
     sensor_id: Optional[str] = None
     seconds_old: int = Field(default=0, ge=0)
     quality: str = "GOOD"
+    auto_run: bool = True
 
 
 class TelemetryBatchPayload(BaseModel):
@@ -133,7 +137,7 @@ def state_item(collection: str, item_id: str) -> dict | None:
 def auth_roles_for_path(path: str) -> set[str]:
     if "/approve" in path or "/reject" in path or path.startswith("/api/v1/config"):
         return {"admin", "manager"}
-    if any(path.startswith("/api/v1/" + name) for name in ("farms", "ponds", "sensors", "devices", "cameras")):
+    if any(path.startswith("/api/v1/" + name) for name in ("farms", "zones", "ponds", "sensors", "devices", "cameras")):
         return {"admin", "manager"}
     return {"admin", "manager", "operator", "viewer"}
 
@@ -264,7 +268,7 @@ async def update_llm_config(request: Request, payload: JsonPayload) -> dict:
 
 
 @app.post("/api/v1/config/llm/test")
-async def test_llm(request: Request) -> dict:
+async def test_llm(request: Request) -> Any:
     authenticate(request, "/api/v1/config/llm/test", write=True)
     try:
         result = test_llm_connection(CONFIG.llm)
@@ -296,6 +300,20 @@ async def incident(request: Request, incident_id: str) -> Any:
     authenticate(request, request.url.path)
     item = state_item("incidents", incident_id)
     return {"incident": item} if item else problem(404, "Incident not found")
+
+
+@app.get("/api/v1/incidents/{incident_id}/timeline")
+async def incident_timeline(request: Request, incident_id: str) -> Any:
+    authenticate(request, request.url.path)
+    if state_item("incidents", incident_id) is None:
+        return problem(404, "Incident not found")
+    events = [
+        event
+        for event in SYSTEM.read_snapshot()["events"]
+        if event.get("payload", {}).get("incident_id") == incident_id
+        or event.get("correlation_id") == incident_id
+    ]
+    return {"events": events}
 
 
 @app.get("/api/v1/action-proposals")
@@ -345,7 +363,8 @@ async def cancel_agent_run(request: Request, run_id: str) -> Any:
     run.status = "CANCELLED"
     run.stop_reason = "USER_CANCELLED"
     SYSTEM.store.emit("agent.run.cancelled", "Agent Run 已取消", {"run_id": run.id}, correlation_id=run.id)
-    return {"run": state_item("agent_runs", run.id), "state": SYSTEM.snapshot()}
+    state = SYSTEM.snapshot()
+    return {"run": next(item for item in state["agent_runs"] if item["id"] == run.id), "state": state}
 
 
 @app.get("/api/v1/patrol-runs")
@@ -362,10 +381,64 @@ async def create_patrol_run(request: Request) -> Any:
     return encoded_response(202, {"run": state_item("agent_runs", run.id), "state": SYSTEM.snapshot()})
 
 
+@app.get("/api/v1/patrol-runs/{run_id}")
+async def patrol_run(request: Request, run_id: str) -> Any:
+    authenticate(request, request.url.path)
+    item = state_item("agent_runs", run_id)
+    if item is None or item.get("goal") != "执行全场巡查":
+        return problem(404, "Patrol run not found")
+    findings = [finding for finding in SYSTEM.read_snapshot()["patrol_findings"] if finding["patrol_run_id"] == run_id]
+    return {"run": item, "findings": findings}
+
+
 @app.get("/api/v1/device-commands")
 async def device_commands(request: Request) -> dict:
     authenticate(request, request.url.path)
     return {"device_commands": SYSTEM.read_snapshot()["commands"]}
+
+
+@app.get("/api/v1/device-commands/{command_id}")
+async def device_command(request: Request, command_id: str) -> Any:
+    authenticate(request, request.url.path)
+    item = next((command for command in SYSTEM.read_snapshot()["commands"] if command["id"] == command_id), None)
+    return {"device_command": item} if item else problem(404, "Device command not found")
+
+
+@app.post("/api/v1/device-commands")
+async def create_device_command(
+    request: Request,
+    payload: JsonPayload,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+) -> Any:
+    authenticate(request, request.url.path, write=True)
+    data = payload.model_dump()
+    incident_id = str(data.get("incident_id") or "")
+    incident = SYSTEM.store.incidents.get(incident_id)
+    if incident is None:
+        return problem(400, "Invalid device command", "incident_id is required")
+    device_id = str(data.get("device_id") or "")
+    target_state = str(data.get("target_state") or "on")
+    try:
+        risk = RiskLevel(str(data.get("risk") or "L1").upper())
+        run = SYSTEM.store.agent_runs.get(str(data.get("run_id") or ""))
+        if run is None:
+            from fishagent.domain.models import AgentRun, new_id
+
+            run = AgentRun(id=new_id("run"), goal="执行设备命令", incident_id=incident.id, status="RUNNING")
+            SYSTEM.store.agent_runs[run.id] = run
+        command = SYSTEM.request_action_execution(
+            run,
+            incident,
+            device_id=device_id,
+            target_state=target_state,
+            risk=risk,
+            approval_granted=bool(data.get("approval_granted", False)),
+            idempotency_key=idempotency_key or None,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return problem(400, "Invalid device command", str(exc))
+    status = 200 if command.idempotency_key in SYSTEM.store.executed_idempotency_keys else 202
+    return encoded_response(status, {"device_command": command.__dict__, "state": SYSTEM.snapshot()})
 
 
 @app.post("/api/v1/action-proposals")
@@ -411,6 +484,13 @@ async def schedule_action(request: Request, schedule_id: str, action: str) -> An
     return problem(404, "Unknown schedule action")
 
 
+@app.get("/api/v1/schedules/{schedule_id}")
+async def schedule(request: Request, schedule_id: str) -> Any:
+    authenticate(request, request.url.path)
+    item = state_item("schedules", schedule_id)
+    return {"schedule": item} if item else problem(404, "Schedule not found")
+
+
 def assets(collection: str) -> dict:
     return {collection: SYSTEM.read_snapshot().get(collection, [])}
 
@@ -447,6 +527,67 @@ async def analyze_camera(request: Request, camera_id: str) -> Any:
         return problem(503, "Vision queue unavailable", str(exc))
 
 
+@app.post("/api/v1/cameras/{camera_id}/capture")
+async def capture_camera(request: Request, camera_id: str) -> Any:
+    authenticate(request, request.url.path, write=True)
+    if state_item("cameras", camera_id) is None:
+        return problem(404, "Camera not found")
+    try:
+        from fishagent.infrastructure.queue.celery_app import capture_camera_frame
+
+        task = capture_camera_frame.delay(camera_id)
+        return encoded_response(202, {"task_id": task.id, "camera_id": camera_id, "status": "QUEUED"})
+    except Exception as exc:
+        return problem(503, "Vision queue unavailable", str(exc))
+
+
+@app.post("/api/v1/cameras/{camera_id}/upload")
+async def upload_camera_frame(request: Request, camera_id: str, file: UploadFile = File(...)) -> Any:
+    authenticate(request, request.url.path, write=True)
+    camera = SYSTEM.store.cameras.get(camera_id)
+    if camera is None:
+        return problem(404, "Camera not found")
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        return problem(413, "Frame too large", "单个摄像头帧不能超过 10MB")
+    try:
+        from fishagent.infrastructure.vision import FrameCaptureError, validate_frame
+
+        frame = validate_frame(data, "upload://%s" % (file.filename or camera_id))
+        if OBJECT_STORE is None:
+            return problem(503, "Object storage unavailable", "MinIO 未配置")
+        object_info = OBJECT_STORE.put_bytes(data, frame.content_type, prefix="frames/%s" % camera_id)
+        vision_frame = VisionFrame(
+            id=new_id("frame"),
+            camera_id=camera_id,
+            source_url=frame.source_url,
+            object_name=object_info["object_name"],
+            content_type=frame.content_type,
+            sha256=frame.sha256,
+            width=frame.width,
+            height=frame.height,
+            captured_at=frame.captured_at or utcnow(),
+        )
+    except (ValueError, FrameCaptureError) as exc:
+        return problem(400, "Invalid camera frame", str(exc))
+    except Exception as exc:
+        return problem(503, "Camera frame upload failed", str(exc))
+    SYSTEM.store.vision_frames[vision_frame.id] = vision_frame
+    camera.status = "ONLINE"
+    camera.last_frame_at = vision_frame.captured_at
+    camera.last_frame_id = vision_frame.id
+    camera.last_frame_hash = vision_frame.sha256
+    camera.last_frame_width = vision_frame.width
+    camera.last_frame_height = vision_frame.height
+    SYSTEM.store.emit(
+        "vision.frame.uploaded",
+        "摄像头帧已上传",
+        {"camera_id": camera_id, "frame_id": vision_frame.id, "object_name": vision_frame.object_name},
+        correlation_id=camera_id,
+    )
+    return encoded_response(201, {"frame": vision_frame.__dict__, "state": SYSTEM.snapshot()})
+
+
 @app.get("/api/v1/evidence/{object_name:path}")
 async def evidence_url(request: Request, object_name: str) -> Any:
     authenticate(request, request.url.path)
@@ -462,8 +603,8 @@ async def evidence_url(request: Request, object_name: str) -> Any:
 async def list_assets(request: Request, collection: str) -> Any:
     authenticate(request, request.url.path)
     if collection == "events":
-        return {"events": SYSTEM.store.events}
-    if collection not in {"farms", "ponds", "sensors", "devices", "cameras", "schedules", "scheduled-jobs"}:
+        return {"events": SYSTEM.read_snapshot()["events"]}
+    if collection not in {"farms", "zones", "ponds", "sensors", "devices", "cameras", "schedules", "scheduled-jobs", "sensor-health", "patrol-findings", "escalations", "audit-events"}:
         return problem(404, "Not Found")
     return assets(collection.replace("-", "_"))
 
@@ -471,31 +612,51 @@ async def list_assets(request: Request, collection: str) -> Any:
 @app.post("/api/v1/{collection}")
 async def create_collection(request: Request, collection: str, payload: AssetPayload | JsonPayload) -> Any:
     authenticate(request, request.url.path, write=True)
-    if collection not in {"farms", "ponds", "sensors", "devices", "cameras"}:
+    if collection not in {"farms", "zones", "ponds", "sensors", "devices", "cameras"}:
         return problem(404, "Not Found")
     try:
-        asset = {"farms": SYSTEM.create_farm, "ponds": SYSTEM.create_pond, "sensors": SYSTEM.create_sensor, "devices": SYSTEM.create_device, "cameras": SYSTEM.create_camera}[collection](payload.model_dump(exclude_none=True))
+        asset = {"farms": SYSTEM.create_farm, "zones": SYSTEM.create_zone, "ponds": SYSTEM.create_pond, "sensors": SYSTEM.create_sensor, "devices": SYSTEM.create_device, "cameras": SYSTEM.create_camera}[collection](payload.model_dump(exclude_none=True))
     except (KeyError, TypeError, ValueError) as exc:
         return problem(400, "Invalid asset payload", str(exc))
     return encoded_response(201, {"asset": asset.__dict__, "state": SYSTEM.snapshot()})
 
 
+@app.get("/api/v1/sensors/{sensor_id}/health")
+async def sensor_health(request: Request, sensor_id: str) -> Any:
+    authenticate(request, request.url.path)
+    item = next((health for health in SYSTEM.read_snapshot()["sensor_health"] if health["sensor_id"] == sensor_id), None)
+    return {"sensor_health": item} if item else problem(404, "Sensor health not found")
+
+
+@app.get("/api/v1/audit-events")
+async def audit_events(request: Request, resource_type: str = "", resource_id: str = "", limit: int = 100) -> dict:
+    authenticate(request, request.url.path)
+    limit = min(max(limit, 1), 1000)
+    items = SYSTEM.read_snapshot()["audit_events"]
+    if resource_type:
+        items = [item for item in items if item["resource_type"] == resource_type]
+    if resource_id:
+        items = [item for item in items if item.get("resource_id") == resource_id]
+    return {"audit_events": items[-limit:]}
+
+
 @app.post("/api/v1/telemetry/readings:batch")
-async def telemetry_batch(request: Request, payload: TelemetryBatchPayload) -> Any:
+async def telemetry_batch(request: Request, payload: TelemetryBatchPayload, idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key")) -> Any:
     authenticate(request, "/api/v1/telemetry/readings:batch", write=True)
     accepted = 0
     incident_ids = []
     try:
-        for item in payload.readings:
+        for index, item in enumerate(payload.readings):
             if item.metric != "DO":
                 continue
             incident = SYSTEM.ingest_do(
                 pond_id=item.pond_id,
                 value=item.value,
-                source_event_id=item.source_event_id,
+                source_event_id=item.source_event_id or (f"{idempotency_key}:{index}" if idempotency_key else None),
                 seconds_old=item.seconds_old,
                 sensor_id=item.sensor_id,
                 quality=item.quality,
+                auto_run=item.auto_run,
             )
             accepted += 1
             if incident:
@@ -545,6 +706,68 @@ async def decide_proposal(request: Request, proposal_id: str, decision: str, pay
     except (KeyError, ValueError) as exc:
         return problem(400, "Invalid approval decision", str(exc))
     return problem(404, "Unknown approval decision")
+
+
+def proposal_for_incident(incident_id: str) -> Optional[str]:
+    incident = SYSTEM.store.incidents.get(incident_id)
+    if not incident:
+        return None
+    for proposal_id in reversed(incident.action_proposal_ids):
+        proposal = SYSTEM.store.action_proposals.get(proposal_id)
+        if proposal and proposal.status in {"PENDING_APPROVAL", "PROPOSED"}:
+            return proposal_id
+    return None
+
+
+@app.post("/api/v1/incidents/{incident_id}/approve")
+async def approve_incident(request: Request, incident_id: str, payload: JsonPayload) -> Any:
+    authenticate(request, request.url.path, write=True)
+    proposal_id = proposal_for_incident(incident_id)
+    if proposal_id is None:
+        return problem(409, "No pending approval", "事件没有待审批动作")
+    data = payload.model_dump()
+    try:
+        command = SYSTEM.approve_action(
+            proposal_id,
+            str(data.get("approver") or "现场负责人"),
+            str(data.get("reason") or ""),
+        )
+    except (KeyError, ValueError) as exc:
+        return problem(409, "Approval unavailable", str(exc))
+    return encoded_response(200, {"command": command.__dict__, "state": SYSTEM.snapshot()})
+
+
+@app.post("/api/v1/incidents/{incident_id}/reject")
+async def reject_incident(request: Request, incident_id: str, payload: JsonPayload) -> Any:
+    authenticate(request, request.url.path, write=True)
+    proposal_id = proposal_for_incident(incident_id)
+    if proposal_id is None:
+        return problem(409, "No pending approval", "事件没有待审批动作")
+    data = payload.model_dump()
+    try:
+        approval = SYSTEM.reject_action(
+            proposal_id,
+            str(data.get("approver") or "现场负责人"),
+            str(data.get("reason") or ""),
+        )
+    except (KeyError, ValueError) as exc:
+        return problem(409, "Rejection unavailable", str(exc))
+    return encoded_response(200, {"approval": approval.__dict__, "state": SYSTEM.snapshot()})
+
+
+@app.post("/api/v1/incidents/{incident_id}/assign")
+async def assign_incident(request: Request, incident_id: str, payload: JsonPayload) -> Any:
+    authenticate(request, request.url.path, write=True)
+    incident = SYSTEM.store.incidents.get(incident_id)
+    if incident is None:
+        return problem(404, "Incident not found")
+    assignee = str(payload.model_dump().get("assignee") or "").strip()
+    if not assignee:
+        return problem(400, "Invalid assignee", "assignee is required")
+    incident.assignee = assignee
+    SYSTEM.store.emit("incident.assigned", "事件已分派给 %s" % assignee, {"incident_id": incident_id, "assignee": assignee})
+    state = SYSTEM.snapshot()
+    return {"incident": next(item for item in state["incidents"] if item["id"] == incident_id), "state": state}
 
 
 @app.post("/api/v1/incidents/{incident_id}/verify")

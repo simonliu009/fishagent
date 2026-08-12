@@ -7,26 +7,33 @@ from fishagent.domain.models import (
     AgentStep,
     Approval,
     ApprovalStatus,
+    AuditEvent,
     CameraSource,
     CommandStatus,
     Device,
     DeviceCommand,
+    Escalation,
     Evidence,
     Farm,
+    HealthStatus,
     Incident,
     IncidentStatus,
     JobStatus,
     ManualTask,
+    PatrolFinding,
     Pond,
     RiskLevel,
     ScheduleDefinition,
-    ScheduleStatus,
     ScheduledJob,
+    ScheduleStatus,
     Sensor,
+    SensorHealth,
     SensorReading,
     TaskStatus,
     VerificationPlan,
     VerificationResult,
+    VisionFrame,
+    Zone,
     new_id,
     utcnow,
 )
@@ -35,10 +42,13 @@ from fishagent.domain.models import (
 class InMemoryStore:
     def __init__(self) -> None:
         self.farms: Dict[str, Farm] = {}
+        self.zones: Dict[str, Zone] = {}
         self.ponds: Dict[str, Pond] = {}
         self.sensors: Dict[str, Sensor] = {}
+        self.sensor_health: Dict[str, SensorHealth] = {}
         self.devices: Dict[str, Device] = {}
         self.cameras: Dict[str, CameraSource] = {}
+        self.vision_frames: Dict[str, VisionFrame] = {}
         self.readings: List[SensorReading] = []
         self.incidents: Dict[str, Incident] = {}
         self.action_proposals: Dict[str, ActionProposal] = {}
@@ -50,6 +60,9 @@ class InMemoryStore:
         self.schedules: Dict[str, ScheduleDefinition] = {}
         self.scheduled_jobs: Dict[str, ScheduledJob] = {}
         self.agent_runs: Dict[str, AgentRun] = {}
+        self.patrol_findings: Dict[str, PatrolFinding] = {}
+        self.escalations: Dict[str, Escalation] = {}
+        self.audit_events: List[AuditEvent] = []
         self.events: List[dict] = []
         self.executed_idempotency_keys: Dict[str, str] = {}
         self._event_sequence = 0
@@ -57,10 +70,13 @@ class InMemoryStore:
 
     def reset_demo(self) -> None:
         self.farms.clear()
+        self.zones.clear()
         self.ponds.clear()
         self.sensors.clear()
+        self.sensor_health.clear()
         self.devices.clear()
         self.cameras.clear()
+        self.vision_frames.clear()
         self.readings.clear()
         self.incidents.clear()
         self.action_proposals.clear()
@@ -72,9 +88,13 @@ class InMemoryStore:
         self.schedules.clear()
         self.scheduled_jobs.clear()
         self.agent_runs.clear()
+        self.patrol_findings.clear()
+        self.escalations.clear()
+        self.audit_events.clear()
         self.events.clear()
         self.executed_idempotency_keys.clear()
         self.farms["farm-demo"] = Farm(id="farm-demo", name="青湾智慧渔场", location="浙江湖州")
+        self.zones["zone-demo"] = Zone(id="zone-demo", farm_id="farm-demo", name="东区")
         self.ponds["B-01"] = Pond(id="B-01", name="B-01 精养池", species="加州鲈", farm_id="farm-demo")
         self.sensors["do-b-01"] = Sensor(
             id="do-b-01",
@@ -83,6 +103,7 @@ class InMemoryStore:
             metric="DO",
             unit="mg/L",
         )
+        self.sensor_health["do-b-01"] = SensorHealth(sensor_id="do-b-01", last_heartbeat_at=utcnow())
         self.devices["aerator-b01-1"] = Device(
             id="aerator-b01-1",
             pond_id="B-01",
@@ -100,8 +121,7 @@ class InMemoryStore:
 
     def emit(self, event_type: str, summary: str, payload: Optional[dict] = None, correlation_id: Optional[str] = None) -> None:
         self._event_sequence += 1
-        self.events.append(
-            {
+        event = {
                 "sequence": self._event_sequence,
                 "event_id": new_id("evt"),
                 "occurred_at": utcnow().isoformat(),
@@ -110,6 +130,18 @@ class InMemoryStore:
                 "summary": summary,
                 "payload": payload or {},
             }
+        self.events.append(event)
+        self.audit_events.append(
+            AuditEvent(
+                id=str(event["event_id"]),
+                actor_type="system",
+                actor_id="fishagent",
+                action=event_type,
+                resource_type="event",
+                resource_id=str(event["event_id"]),
+                correlation_id=correlation_id,
+                payload=payload or {},
+            )
         )
 
     @staticmethod
@@ -123,8 +155,21 @@ class InMemoryStore:
     def restore_snapshot(self, payload: dict) -> None:
         """Restore a JSON-safe state snapshot without emitting seed events."""
         self.farms = {item["id"]: Farm(**item) for item in payload.get("farms", [])}
+        self.zones = {item["id"]: Zone(**item) for item in payload.get("zones", [])}
         self.ponds = {item["id"]: Pond(**item) for item in payload.get("ponds", [])}
         self.sensors = {item["id"]: Sensor(**item) for item in payload.get("sensors", [])}
+        self.sensor_health = {
+            item["sensor_id"]: SensorHealth(
+                sensor_id=item["sensor_id"],
+                status=HealthStatus(item.get("status", HealthStatus.ONLINE.value)),
+                last_heartbeat_at=self._datetime(item.get("last_heartbeat_at")),
+                last_reading_at=self._datetime(item.get("last_reading_at")),
+                error_count=int(item.get("error_count", 0)),
+                drift_score=float(item.get("drift_score", 0.0)),
+                message=item.get("message", ""),
+            )
+            for item in payload.get("sensor_health", [])
+        }
         self.devices = {item["id"]: Device(**item) for item in payload.get("devices", [])}
         self.cameras = {
             item["id"]: CameraSource(
@@ -134,8 +179,28 @@ class InMemoryStore:
                 source_type=item["source_type"],
                 status=item.get("status", "UNAVAILABLE"),
                 last_frame_at=self._datetime(item.get("last_frame_at")),
+                source_url=item.get("source_url", ""),
+                privacy_policy=item.get("privacy_policy", "EVENT_ONLY"),
+                last_frame_id=item.get("last_frame_id"),
+                last_frame_hash=item.get("last_frame_hash"),
+                last_frame_width=item.get("last_frame_width"),
+                last_frame_height=item.get("last_frame_height"),
             )
             for item in payload.get("cameras", [])
+        }
+        self.vision_frames = {
+            item["id"]: VisionFrame(
+                id=item["id"],
+                camera_id=item["camera_id"],
+                source_url=item.get("source_url", ""),
+                object_name=item["object_name"],
+                content_type=item.get("content_type", "application/octet-stream"),
+                sha256=item["sha256"],
+                width=int(item["width"]),
+                height=int(item["height"]),
+                captured_at=self._datetime(item.get("captured_at")) or utcnow(),
+            )
+            for item in payload.get("vision_frames", [])
         }
         self.readings = [
             SensorReading(
@@ -307,9 +372,66 @@ class InMemoryStore:
                 for step in item.get("steps", [])
             ]
             self.agent_runs[run.id] = run
+        self.patrol_findings = {
+            item["id"]: PatrolFinding(
+                id=item["id"],
+                patrol_run_id=item["patrol_run_id"],
+                pond_id=item["pond_id"],
+                status=item["status"],
+                summary=item["summary"],
+                evidence_refs=item.get("evidence_refs", []),
+                confidence=item.get("confidence"),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+            )
+            for item in payload.get("patrol_findings", [])
+        }
+        self.escalations = {
+            item["id"]: Escalation(
+                id=item["id"],
+                incident_id=item["incident_id"],
+                level=item["level"],
+                reason=item["reason"],
+                status=item.get("status", "OPEN"),
+                manual_task_id=item.get("manual_task_id"),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+            )
+            for item in payload.get("escalations", [])
+        }
+        self.audit_events = [
+            AuditEvent(
+                id=item["id"],
+                actor_type=item.get("actor_type", "system"),
+                actor_id=item.get("actor_id", "fishagent"),
+                action=item["action"],
+                resource_type=item["resource_type"],
+                resource_id=item.get("resource_id"),
+                correlation_id=item.get("correlation_id"),
+                payload=item.get("payload", {}),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+            )
+            for item in payload.get("audit_events", [])
+        ]
         self.events = payload.get("events", [])
         self._event_sequence = int(payload.get("event_sequence", max((event.get("sequence", 0) for event in self.events), default=0)))
         self.executed_idempotency_keys = payload.get("executed_idempotency_keys", {})
+
+    def mark_sensor_health(
+        self,
+        sensor_id: str,
+        status: HealthStatus = HealthStatus.ONLINE,
+        message: str = "",
+        reading_at: Optional[datetime] = None,
+    ) -> SensorHealth:
+        health = self.sensor_health.setdefault(sensor_id, SensorHealth(sensor_id=sensor_id))
+        health.status = status
+        health.message = message
+        health.last_heartbeat_at = utcnow()
+        if reading_at:
+            health.last_reading_at = reading_at
+        if status == HealthStatus.ERROR:
+            health.error_count += 1
+        self.emit("sensor.health.changed", "传感器 %s 状态：%s" % (sensor_id, status.value), {"sensor_id": sensor_id, "status": status.value})
+        return health
 
     def add_reading(self, reading: SensorReading) -> Optional[Incident]:
         if any(item.source_event_id == reading.source_event_id for item in self.readings):
@@ -383,7 +505,7 @@ class InMemoryStore:
         return [
             job
             for job in self.scheduled_jobs.values()
-            if job.status == JobStatus.DUE and job.due_at <= now
+            if job.status in {JobStatus.DUE, JobStatus.RETRY_WAIT} and job.due_at <= now
         ]
 
     def force_verification_due(self, incident_id: str) -> None:

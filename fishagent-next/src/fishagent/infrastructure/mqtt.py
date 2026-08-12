@@ -6,8 +6,7 @@ Payload: {"metric":"DO", "value":2.1, "source_event_id":"..."}
 
 import json
 import re
-from typing import Callable, Optional
-
+from typing import Any, Callable, Optional
 
 TOPIC_PATTERN = re.compile(r"^farms/(?P<farm_id>[^/]+)/ponds/(?P<pond_id>[^/]+)/sensors/(?P<sensor_id>[^/]+)$")
 
@@ -18,7 +17,7 @@ class MqttTelemetryAdapter:
         self.port = port
         self.topic = topic
         self.ingest = ingest
-        self.client = None
+        self.client: Any = None
         self.last_error: Optional[str] = None
 
     def start(self) -> None:

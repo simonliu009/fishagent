@@ -147,6 +147,13 @@ class PostgresStateRepository:
             [(item["id"], item["name"], item.get("location", "")) for item in payload.get("farms", [])],
         )
         cursor.executemany(
+            "INSERT INTO zones (id, farm_id, name, location, status) VALUES (%s, %s, %s, %s, %s)",
+            [
+                (item["id"], item["farm_id"], item["name"], item.get("location", ""), item.get("status", "ACTIVE"))
+                for item in payload.get("zones", [])
+            ],
+        )
+        cursor.executemany(
             "INSERT INTO ponds (id, farm_id, name, species, dissolved_oxygen_min) VALUES (%s, %s, %s, %s, %s)",
             [
                 (item["id"], item.get("farm_id") or None, item["name"], item.get("species", ""), item.get("dissolved_oxygen_min", 4.0))
@@ -168,10 +175,24 @@ class PostgresStateRepository:
             ],
         )
         cursor.executemany(
-            "INSERT INTO cameras (id, pond_id, name, source_type, status, last_frame_at) VALUES (%s, %s, %s, %s, %s, %s)",
+            "INSERT INTO cameras (id, pond_id, name, source_type, status, last_frame_at, source_url, privacy_policy, last_frame_id, last_frame_hash, last_frame_width, last_frame_height) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             [
-                (item["id"], item["pond_id"], item["name"], item["source_type"], item.get("status", "UNAVAILABLE"), item.get("last_frame_at"))
+                (
+                    item["id"], item["pond_id"], item["name"], item["source_type"], item.get("status", "UNAVAILABLE"),
+                    item.get("last_frame_at"), item.get("source_url", ""), item.get("privacy_policy", "EVENT_ONLY"),
+                    item.get("last_frame_id"), item.get("last_frame_hash"), item.get("last_frame_width"), item.get("last_frame_height"),
+                )
                 for item in payload.get("cameras", [])
+            ],
+        )
+        cursor.executemany(
+            "INSERT INTO vision_frames (id, camera_id, source_url, object_name, content_type, sha256, width, height, captured_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::timestamptz)",
+            [
+                (
+                    item["id"], item["camera_id"], item.get("source_url", ""), item["object_name"], item["content_type"],
+                    item["sha256"], item["width"], item["height"], item["captured_at"],
+                )
+                for item in payload.get("vision_frames", [])
             ],
         )
         cursor.executemany(
@@ -179,6 +200,13 @@ class PostgresStateRepository:
             [
                 (item["source_event_id"], item["pond_id"], item.get("sensor_id") if item.get("sensor_id") in sensor_ids else None, item["metric"], item["value"], item["unit"], item.get("quality", "GOOD"), item["sampled_at"], item["received_at"])
                 for item in payload.get("readings", [])
+            ],
+        )
+        cursor.executemany(
+            "INSERT INTO sensor_health (sensor_id, status, last_heartbeat_at, last_reading_at, error_count, drift_score, message) VALUES (%s, %s, %s::timestamptz, %s::timestamptz, %s, %s, %s)",
+            [
+                (item["sensor_id"], item.get("status", "ONLINE"), item.get("last_heartbeat_at"), item.get("last_reading_at"), item.get("error_count", 0), item.get("drift_score", 0.0), item.get("message", ""))
+                for item in payload.get("sensor_health", [])
             ],
         )
         cursor.executemany(
@@ -249,6 +277,20 @@ class PostgresStateRepository:
             [
                 (item["id"], item["goal"], item.get("incident_id"), item["status"], item.get("stop_reason"), json.dumps(item.get("delegated_agents", []), ensure_ascii=False), json.dumps(item.get("steps", []), ensure_ascii=False, default=str))
                 for item in payload.get("agent_runs", [])
+            ],
+        )
+        cursor.executemany(
+            "INSERT INTO patrol_findings (id, patrol_run_id, pond_id, status, summary, evidence_refs, confidence, created_at) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s::timestamptz)",
+            [
+                (item["id"], item["patrol_run_id"], item["pond_id"], item["status"], item["summary"], json.dumps(item.get("evidence_refs", [])), item.get("confidence"), item["created_at"])
+                for item in payload.get("patrol_findings", [])
+            ],
+        )
+        cursor.executemany(
+            "INSERT INTO escalations (id, incident_id, level, reason, status, manual_task_id, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s::timestamptz)",
+            [
+                (item["id"], item["incident_id"], item["level"], item["reason"], item.get("status", "OPEN"), item.get("manual_task_id"), item["created_at"])
+                for item in payload.get("escalations", [])
             ],
         )
         cursor.executemany(

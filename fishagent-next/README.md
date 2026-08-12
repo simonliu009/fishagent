@@ -52,7 +52,7 @@ cp .env.example .env
 
 - **PostgreSQL**：业务状态的最终来源，保存养殖资产、读数、事件闭环、审批、命令和调度状态；同时记录 Outbox 事件，重启后可恢复。当前兼容快照和关系投影在同一事务内写入，领域表由 Alembic 管理。
 - **Redis**：实时事件加速通道，用于发布 `fishagent.events`；Redis 不承担业务数据最终持久化，短暂不可用时健康检查会标记 degraded。
-- **MinIO**：S3 兼容对象存储，已支持证据文件上传和短期签名下载；视觉帧生命周期与 RTSP 抽帧 Worker 仍是后续增强。
+- **MinIO**：S3 兼容对象存储，保存证据文件和经过校验的相机视觉帧，并提供短期签名下载；它不参与业务表查询和事务。
 
 SQLite 适合单进程、本地演示或单元测试，所以测试仍可以通过清空 `FISHAGENT_DATABASE_URL` 使用内存存储。但生产运行需要并发写入、事务、Outbox、重启恢复和多进程部署，SQLite 的文件锁和单机边界不适合作为此系统的共享业务源；因此默认采用 PostgreSQL，而不是把 SQLite 伪装成生产持久层。
 
@@ -143,6 +143,6 @@ PYTHONPATH=src uv run python -m unittest discover -s tests
 
 ## 边界说明
 
-当前是可运行的模块化单体：PostgreSQL、Redis、MinIO、FastAPI、NiceGUI、Celery Worker/Beat、MQTT 和可选 CrewAI 已接入运行时；真实厂商设备协议、RTSP/OpenCV 视觉 Worker、疾病/投喂分析和多用户持久化目录仍是后续扩展。
+当前是可运行的模块化单体：PostgreSQL、Redis、MinIO、FastAPI、NiceGUI、Celery Worker/Beat、MQTT 和可选 CrewAI 已接入运行时；HTTP Snapshot/RTSP 抽帧、视觉上传校验和视觉 Worker 已接入，真实厂商设备协议、实际模型推理、疾病/投喂分析和多用户持久化目录仍是后续扩展。
 
 当前实现不在启动时隐式 seed；演示数据通过页面按钮、`/api/v1/demo/init` 或 demo 命令显式初始化。大模型配置保存到 `data/runtime_config.json`，API 响应不会回显完整密钥。

@@ -20,11 +20,23 @@ def main() -> None:
         config = AppConfig.from_env()
         checks = {}
         try:
-            checks["postgres"] = (repository_from_config(config.database_url).health() if config.database_url else {"status": "disabled", "backend": "memory"})
+            if config.database_url:
+                postgres = repository_from_config(config.database_url)
+                checks["postgres"] = postgres.health() if postgres else {"status": "disabled", "backend": "memory"}
+            else:
+                checks["postgres"] = {"status": "disabled", "backend": "memory"}
         except PersistenceError as exc:
             checks["postgres"] = {"status": "not_ready", "detail": str(exc)}
-        checks["redis"] = publisher_from_config(config.redis_url).health() if config.redis_url else {"status": "disabled"}
-        checks["minio"] = object_store_from_config(config.minio_endpoint, config.minio_access_key, config.minio_secret_key, config.minio_bucket).health() if config.minio_endpoint else {"status": "disabled"}
+        if config.redis_url:
+            redis = publisher_from_config(config.redis_url)
+            checks["redis"] = redis.health() if redis else {"status": "disabled"}
+        else:
+            checks["redis"] = {"status": "disabled"}
+        if config.minio_endpoint:
+            minio = object_store_from_config(config.minio_endpoint, config.minio_access_key, config.minio_secret_key, config.minio_bucket)
+            checks["minio"] = minio.health() if minio else {"status": "disabled"}
+        else:
+            checks["minio"] = {"status": "disabled"}
         checks["llm"] = {"status": "configured" if config.llm.api_key else "not_configured", "model": config.llm.model}
         print(json.dumps(checks, ensure_ascii=False, indent=2))
         raise SystemExit(0 if checks["postgres"]["status"] in {"ok", "disabled"} else 1)

@@ -2,7 +2,6 @@
 
 from alembic import op
 
-
 revision = "0004_workflow_tables"
 down_revision = "0003_domain_tables"
 branch_labels = None

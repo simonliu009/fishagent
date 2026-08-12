@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from threading import RLock
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from fishagent.application.policy import evaluate_action
 from fishagent.application.store import InMemoryStore
@@ -13,27 +13,32 @@ from fishagent.domain.models import (
     CommandStatus,
     Device,
     DeviceCommand,
+    Escalation,
     Farm,
+    HealthStatus,
     Incident,
     IncidentStatus,
     JobStatus,
     ManualTask,
+    PatrolFinding,
     Pond,
     RiskLevel,
     ScheduleDefinition,
-    ScheduleStatus,
     ScheduledJob,
+    ScheduleStatus,
     Sensor,
+    SensorHealth,
     SensorReading,
     TaskStatus,
     VerificationPlan,
     VerificationResult,
+    Zone,
     new_id,
     utcnow,
 )
+from fishagent.infrastructure.gateways import DeviceGateway, SimulatorDeviceGateway
 from fishagent.infrastructure.persistence import PostgresStateRepository
 from fishagent.infrastructure.realtime import RedisEventPublisher
-from fishagent.infrastructure.gateways import DeviceGateway, SimulatorDeviceGateway
 
 
 class FishAgentSystem:
@@ -70,6 +75,21 @@ class FishAgentSystem:
         self.store.emit("asset.farm.created", "创建养殖场：%s" % farm.name, {"farm_id": farm.id})
         return farm
 
+    def create_zone(self, payload: dict) -> Zone:
+        farm_id = str(payload.get("farm_id") or "")
+        if farm_id not in self.store.farms:
+            raise ValueError("farm_id does not exist")
+        zone = Zone(
+            id=str(payload.get("id") or new_id("zone")),
+            farm_id=farm_id,
+            name=str(payload.get("name") or "未命名区域"),
+            location=str(payload.get("location") or ""),
+            status=str(payload.get("status") or "ACTIVE"),
+        )
+        self.store.zones[zone.id] = zone
+        self.store.emit("asset.zone.created", "创建区域：%s" % zone.name, {"zone_id": zone.id, "farm_id": farm_id})
+        return zone
+
     def create_pond(self, payload: dict) -> Pond:
         farm_id = str(payload.get("farm_id") or "")
         if farm_id and farm_id not in self.store.farms:
@@ -99,6 +119,7 @@ class FishAgentSystem:
             freshness_seconds=int(payload.get("freshness_seconds") or 120),
         )
         self.store.sensors[sensor.id] = sensor
+        self.store.sensor_health.setdefault(sensor.id, SensorHealth(sensor_id=sensor.id, last_heartbeat_at=utcnow()))
         self.store.emit("asset.sensor.created", "创建传感器：%s" % sensor.name, {"sensor_id": sensor.id})
         return sensor
 
@@ -128,6 +149,8 @@ class FishAgentSystem:
             name=str(payload.get("name") or "未命名摄像头"),
             source_type=str(payload.get("source_type") or "HTTP_SNAPSHOT"),
             status=str(payload.get("status") or "UNAVAILABLE"),
+            source_url=str(payload.get("source_url") or ""),
+            privacy_policy=str(payload.get("privacy_policy") or "EVENT_ONLY"),
         )
         self.store.cameras[camera.id] = camera
         self.store.emit("asset.camera.created", "创建摄像头：%s" % camera.name, {"camera_id": camera.id})
@@ -208,6 +231,15 @@ class FishAgentSystem:
             latest = self.store.latest_reading(pond.id, "DO")
             summary = "最新溶氧 %.2fmg/L" % latest.value if latest else "暂无最新溶氧读数"
             run.step("sensor-monitor-agent", "inspect_pond", "%s：%s" % (pond.name, summary))
+            finding = PatrolFinding(
+                id=new_id("finding"),
+                patrol_run_id=run.id,
+                pond_id=pond.id,
+                status="NORMAL" if latest and latest.value >= pond.dissolved_oxygen_min else "NEEDS_ATTENTION",
+                summary=summary,
+                evidence_refs=[latest.source_event_id] if latest else [],
+            )
+            self.store.patrol_findings[finding.id] = finding
         run.status = "COMPLETED"
         run.stop_reason = "PATROL_COMPLETED"
         self.store.emit("patrol.completed", "全场巡查完成", {"run_id": run.id}, correlation_id=run.id)
@@ -353,6 +385,11 @@ class FishAgentSystem:
             quality=quality,
             source_event_id=source_event_id or new_id("reading"),
         )
+        health = self.store.sensor_health.setdefault(sensor_id or "do-%s" % pond_id.lower(), SensorHealth(sensor_id=sensor_id or "do-%s" % pond_id.lower()))
+        health.last_heartbeat_at = utcnow()
+        health.last_reading_at = reading.sampled_at
+        health.status = HealthStatus.ONLINE if quality == "GOOD" else HealthStatus.ERROR
+        health.message = "" if quality == "GOOD" else "读数质量：%s" % quality
         incident = self.store.add_reading(reading)
         if incident and incident.status == IncidentStatus.DETECTED and auto_run:
             self.run_incident_flow(incident.id)
@@ -582,10 +619,18 @@ class FishAgentSystem:
         target_state: str,
         risk: RiskLevel,
         approval_granted: bool = False,
+        idempotency_key: Optional[str] = None,
     ) -> DeviceCommand:
         device = self.store.devices[device_id]
         latest_do = self.store.latest_reading(incident.pond_id, "DO")
-        idempotency_key = "%s:%s:%s" % (incident.pond_id, device_id, target_state)
+        idempotency_key = idempotency_key or "%s:%s:%s" % (incident.pond_id, device_id, target_state)
+        existing = next(
+            (item for item in self.store.commands.values() if item.idempotency_key == idempotency_key),
+            None,
+        )
+        if existing:
+            run.step("execution-agent", "deduplicate_command", "幂等键已存在，复用已有设备命令")
+            return existing
         policy = evaluate_action(
             actor="execution-agent",
             device=device,
@@ -675,11 +720,19 @@ class FishAgentSystem:
             incident.transition(IncidentStatus.ESCALATED)
             incident.assignee = "现场操作员"
             run.step("verification-agent", "create_manual_task", "复核未恢复，升级设备故障与人工处理")
-            self.create_manual_task(
+            manual_task = self.create_manual_task(
                 title="处理复核失败：%s" % incident.title,
                 description="复核溶氧仍未达到安全线，请检查增氧设备、供电和水体状态。",
                 incident_id=incident.id,
             )
+            escalation = Escalation(
+                id=new_id("escalation"),
+                incident_id=incident.id,
+                level="L2",
+                reason="复核失败，设备动作效果未被新鲜传感器证据确认",
+                manual_task_id=manual_task.id,
+            )
+            self.store.escalations[escalation.id] = escalation
             run.status = "COMPLETED"
             run.stop_reason = "ESCALATED"
             self.store.emit("verification.escalated", "复核失败，已升级人工任务", {"incident_id": incident.id}, correlation_id=run.id)
@@ -702,6 +755,7 @@ class FishAgentSystem:
         """Atomically move due work out of DUE before a worker executes it."""
         with self._job_lock:
             self._enqueue_due_schedules()
+            self.recover_stuck_jobs()
             jobs = self.store.due_jobs()[:limit]
             for job in jobs:
                 job.status = JobStatus.RUNNING
@@ -710,6 +764,25 @@ class FishAgentSystem:
             if jobs:
                 self.snapshot()
             return jobs
+
+    def recover_stuck_jobs(self, max_age_seconds: int = 300) -> list[ScheduledJob]:
+        """Return abandoned RUNNING jobs to the durable queue after a worker restart."""
+        cutoff = utcnow() - timedelta(seconds=max_age_seconds)
+        recovered: list[ScheduledJob] = []
+        for job in self.store.scheduled_jobs.values():
+            if job.status != JobStatus.RUNNING or job.created_at > cutoff:
+                continue
+            if job.attempts >= 3:
+                job.status = JobStatus.DEAD_LETTER
+                self.store.emit("schedule.job.dead_letter", "作业重启恢复次数已耗尽", {"job_id": job.id})
+            else:
+                job.status = JobStatus.DUE
+                job.due_at = utcnow()
+                recovered.append(job)
+                self.store.emit("schedule.job.recovered", "Worker 重启后恢复作业", {"job_id": job.id})
+        if recovered:
+            self.snapshot()
+        return recovered
 
     def execute_scheduled_job(self, job_id: str) -> ScheduledJob:
         """Execute one claimed job with retry and dead-letter semantics."""
@@ -729,6 +802,8 @@ class FishAgentSystem:
                 self.store.emit("schedule.job.completed", "后台作业已完成", {"job_id": job.id})
             except Exception as exc:
                 job.status = JobStatus.RETRY_WAIT if job.attempts < 3 else JobStatus.DEAD_LETTER
+                if job.status == JobStatus.RETRY_WAIT:
+                    job.due_at = utcnow() + timedelta(seconds=2 ** job.attempts)
                 self.store.emit(
                     "schedule.job.failed",
                     "后台作业执行失败：%s" % exc,
@@ -779,8 +854,21 @@ class FishAgentSystem:
     def _snapshot(self, persist: bool = True) -> dict:
         data = {
             "farms": [farm.__dict__ for farm in self.store.farms.values()],
+            "zones": [zone.__dict__ for zone in self.store.zones.values()],
             "ponds": [pond.__dict__ for pond in self.store.ponds.values()],
             "sensors": [sensor.__dict__ for sensor in self.store.sensors.values()],
+            "sensor_health": [
+                {
+                    "sensor_id": health.sensor_id,
+                    "status": health.status.value,
+                    "last_heartbeat_at": health.last_heartbeat_at.isoformat() if health.last_heartbeat_at else None,
+                    "last_reading_at": health.last_reading_at.isoformat() if health.last_reading_at else None,
+                    "error_count": health.error_count,
+                    "drift_score": health.drift_score,
+                    "message": health.message,
+                }
+                for health in self.store.sensor_health.values()
+            ],
             "devices": [device.__dict__ for device in self.store.devices.values()],
             "readings": [
                 {
@@ -804,8 +892,28 @@ class FishAgentSystem:
                     "source_type": camera.source_type,
                     "status": camera.status,
                     "last_frame_at": camera.last_frame_at.isoformat() if camera.last_frame_at else None,
+                    "source_url": camera.source_url,
+                    "privacy_policy": camera.privacy_policy,
+                    "last_frame_id": camera.last_frame_id,
+                    "last_frame_hash": camera.last_frame_hash,
+                    "last_frame_width": camera.last_frame_width,
+                    "last_frame_height": camera.last_frame_height,
                 }
                 for camera in self.store.cameras.values()
+            ],
+            "vision_frames": [
+                {
+                    "id": frame.id,
+                    "camera_id": frame.camera_id,
+                    "source_url": frame.source_url,
+                    "object_name": frame.object_name,
+                    "content_type": frame.content_type,
+                    "sha256": frame.sha256,
+                    "width": frame.width,
+                    "height": frame.height,
+                    "captured_at": frame.captured_at.isoformat(),
+                }
+                for frame in self.store.vision_frames.values()
             ],
             "incidents": [
                 {
@@ -963,6 +1071,45 @@ class FishAgentSystem:
                 }
                 for run in self.store.agent_runs.values()
             ],
+            "patrol_findings": [
+                {
+                    "id": finding.id,
+                    "patrol_run_id": finding.patrol_run_id,
+                    "pond_id": finding.pond_id,
+                    "status": finding.status,
+                    "summary": finding.summary,
+                    "evidence_refs": finding.evidence_refs,
+                    "confidence": finding.confidence,
+                    "created_at": finding.created_at.isoformat(),
+                }
+                for finding in self.store.patrol_findings.values()
+            ],
+            "escalations": [
+                {
+                    "id": escalation.id,
+                    "incident_id": escalation.incident_id,
+                    "level": escalation.level,
+                    "reason": escalation.reason,
+                    "status": escalation.status,
+                    "manual_task_id": escalation.manual_task_id,
+                    "created_at": escalation.created_at.isoformat(),
+                }
+                for escalation in self.store.escalations.values()
+            ],
+            "audit_events": [
+                {
+                    "id": event.id,
+                    "actor_type": event.actor_type,
+                    "actor_id": event.actor_id,
+                    "action": event.action,
+                    "resource_type": event.resource_type,
+                    "resource_id": event.resource_id,
+                    "correlation_id": event.correlation_id,
+                    "payload": event.payload,
+                    "created_at": event.created_at.isoformat(),
+                }
+                for event in self.store.audit_events[-200:]
+            ],
             "events": self.store.events[-80:],
             "event_sequence": self.store._event_sequence,
             "executed_idempotency_keys": self.store.executed_idempotency_keys,
@@ -974,7 +1121,7 @@ class FishAgentSystem:
                 self.store._event_sequence = max(self.store._event_sequence, persisted_sequence)
         if persist and self.event_publisher:
             try:
-                self.event_publisher.publish(data["events"])
+                self.event_publisher.publish(cast(list[dict], data["events"]))
             except Exception as exc:  # Redis is live acceleration, not the source of truth.
                 self.event_publisher.last_error = str(exc)
         return data

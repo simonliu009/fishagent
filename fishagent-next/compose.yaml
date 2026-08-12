@@ -9,7 +9,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["uv", "run", "alembic", "upgrade", "head"]
+    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
 
   web:
     build: .
@@ -54,7 +54,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    command: ["uv", "run", "uvicorn", "fishagent.web.app:app", "--host", "0.0.0.0", "--port", "3008"]
+    command: ["/app/.venv/bin/uvicorn", "fishagent.web.app:app", "--host", "0.0.0.0", "--port", "3008"]
 
   worker-default:
     build: .
@@ -89,7 +89,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    command: ["uv", "run", "celery", "-A", "fishagent.infrastructure.queue.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=default", "--concurrency=2"]
+    command: ["/app/.venv/bin/celery", "-A", "fishagent.infrastructure.queue.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=default", "--concurrency=2"]
 
   worker-vision:
     build: .
@@ -106,7 +106,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    command: ["uv", "run", "celery", "-A", "fishagent.infrastructure.queue.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=vision", "--concurrency=1"]
+    command: ["/app/.venv/bin/celery", "-A", "fishagent.infrastructure.queue.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=vision", "--concurrency=1"]
 
   beat:
     build: .
@@ -121,7 +121,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    command: ["uv", "run", "celery", "-A", "fishagent.infrastructure.queue.celery_app:celery_app", "beat", "--loglevel=INFO"]
+    command: ["/app/.venv/bin/celery", "-A", "fishagent.infrastructure.queue.celery_app:celery_app", "beat", "--loglevel=INFO"]
 
   postgres:
     image: postgres:16-alpine

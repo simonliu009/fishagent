@@ -2,10 +2,9 @@
 
 import io
 import uuid
-from urllib.error import URLError
-from urllib.request import urlopen
 from typing import Optional
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 
 class MinioObjectStore:

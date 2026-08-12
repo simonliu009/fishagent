@@ -1,22 +1,21 @@
 import argparse
 import json
 import threading
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Optional
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 
-from fishagent.application.agent_service import FishAgentSystem
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
+from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import AppConfig, LLMConfig, RuntimeConfigStore
 from fishagent.domain.models import RiskLevel, ScheduleStatus
+from fishagent.infrastructure.auth import auth_from_config
+from fishagent.infrastructure.object_store import object_store_from_config
 from fishagent.infrastructure.persistence import PersistenceError, repository_from_config
 from fishagent.infrastructure.realtime import publisher_from_config
-from fishagent.infrastructure.object_store import object_store_from_config
-from fishagent.infrastructure.auth import auth_from_config
-
 
 CONFIG = AppConfig.from_env()
 REPOSITORY = repository_from_config(CONFIG.database_url)
@@ -118,7 +117,7 @@ def auth_roles_for_path(path: str) -> set[str]:
 
 def authorize(handler: BaseHTTPRequestHandler, path: str, write: bool = False) -> bool:
     if not AUTH.enabled:
-        handler.auth_session = AUTH.authenticate("")
+        handler.auth_session = AUTH.authenticate("")  # type: ignore[attr-defined]
         return True
     session = AUTH.authenticate(handler.headers.get("Cookie", ""))
     if session is None:
@@ -130,7 +129,7 @@ def authorize(handler: BaseHTTPRequestHandler, path: str, write: bool = False) -
     if write and handler.headers.get("X-CSRF-Token") != session.csrf_token:
         problem(handler, 403, "CSRF validation failed", "缺少有效 CSRF Token")
         return False
-    handler.auth_session = session
+    handler.auth_session = session  # type: ignore[attr-defined]
     return True
 
 
@@ -177,7 +176,7 @@ def page() -> str:
       --ok: #15803d;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: Arial, "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--bg); }
+    body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--bg); overflow-x: hidden; }
     header { min-height: 86px; padding: 18px 28px; background: var(--brand-strong); color: white; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 4px solid #38bdf8; }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 260px; }
     .brand img { width: 42px; height: 42px; border-radius: 10px; box-shadow: 0 8px 22px rgba(0,0,0,.22); }
@@ -187,9 +186,9 @@ def page() -> str:
     .header-metric { border: 1px solid rgba(255,255,255,.22); background: rgba(255,255,255,.08); border-radius: 8px; padding: 10px; }
     .header-metric b { display:block; font-size: 18px; }
     .header-metric span { color:#cde8e5; font-size: 12px; }
-    main { padding: 22px; max-width: 1440px; margin: 0 auto; }
+    main { padding: 22px; max-width: 1440px; margin: 0 auto; min-width: 0; }
     .grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(360px, .8fr); gap: 16px; align-items: start; }
-    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: 0 10px 28px rgba(15, 23, 42, .06); }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; box-shadow: 0 10px 28px rgba(15, 23, 42, .06); min-width: 0; }
     .panel-title { display:flex; align-items:center; justify-content:space-between; gap: 10px; margin-bottom: 12px; }
     h2 { font-size: 16px; margin: 0; }
     h3 { font-size: 14px; margin: 16px 0 10px; }
@@ -218,6 +217,8 @@ def page() -> str:
     .asset-tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfc; min-height: 92px; }
     .asset-tile b { display:block; font-size: 13px; margin-bottom: 6px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #schedules, #asset_tables, #work_queue { max-width: 100%; overflow-x: auto; }
+    #schedules table, #asset_tables table, #work_queue table { min-width: 560px; }
     th, td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
     th { color: var(--muted); font-size: 12px; background: #f8faf9; }
     .split { display: grid; grid-template-columns: .95fr 1.05fr; gap: 14px; align-items: start; }
@@ -226,6 +227,8 @@ def page() -> str:
       header { align-items: flex-start; flex-direction: column; }
       main { padding: 12px; }
       .grid, .cards, .asset-grid, .split, .form-grid, .header-metrics { grid-template-columns: 1fr; }
+      .panel { padding: 12px; }
+      .header-metrics { width: 100%; }
     }
   </style>
 </head>
@@ -275,6 +278,7 @@ def page() -> str:
               <label id="asset_species_wrap">养殖品种<input id="asset_species" placeholder="加州鲈"></label>
               <label id="asset_metric_wrap">指标/能力<input id="asset_metric" placeholder="DO 或 aeration"></label>
               <label id="asset_unit_wrap">单位/来源<input id="asset_unit" placeholder="mg/L 或 HTTP_SNAPSHOT"></label>
+              <label id="asset_source_url_wrap" class="wide">摄像头来源地址<input id="asset_source_url" placeholder="http://camera.local/snapshot.jpg 或 rtsp://..."></label>
               <label id="asset_state_wrap">状态<input id="asset_state" placeholder="ONLINE / off / UNAVAILABLE"></label>
             </div>
             <div class="actions" style="margin-top:10px"><button class="blue" onclick="createAsset()">创建资产</button></div>
@@ -376,17 +380,18 @@ async function createAsset() {
   const species = document.getElementById('asset_species').value;
   const metric = document.getElementById('asset_metric').value;
   const unit = document.getElementById('asset_unit').value;
+  const sourceUrl = document.getElementById('asset_source_url').value;
   const state = document.getElementById('asset_state').value;
   const payload = {id, name};
   if (type === 'farms') payload.location = state;
   if (type === 'ponds') Object.assign(payload, {farm_id: farmId, species, dissolved_oxygen_min: Number(metric || 4)});
   if (type === 'sensors') Object.assign(payload, {pond_id: pondId, metric: metric || 'DO', unit: unit || 'mg/L', status: state || 'ONLINE'});
   if (type === 'devices') Object.assign(payload, {pond_id: pondId, capability: metric || 'aeration', shadow_state: state || 'off'});
-  if (type === 'cameras') Object.assign(payload, {pond_id: pondId, source_type: unit || 'HTTP_SNAPSHOT', status: state || 'UNAVAILABLE'});
+  if (type === 'cameras') Object.assign(payload, {pond_id: pondId, source_type: unit || 'HTTP_SNAPSHOT', source_url: sourceUrl, status: state || 'UNAVAILABLE'});
   try {
     await api('/api/v1/' + type, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
     document.getElementById('asset_message').textContent = '资产已创建：' + (name || id || type);
-    ['asset_name','asset_id','asset_metric','asset_unit','asset_state'].forEach(k => document.getElementById(k).value = '');
+    ['asset_name','asset_id','asset_metric','asset_unit','asset_source_url','asset_state'].forEach(k => document.getElementById(k).value = '');
     await refresh();
   } catch (err) {
     document.getElementById('asset_message').textContent = '创建失败：' + err.message;
@@ -399,6 +404,7 @@ function syncAssetForm() {
   document.getElementById('asset_species_wrap').style.display = type === 'ponds' ? 'block' : 'none';
   document.getElementById('asset_metric_wrap').style.display = ['ponds','sensors','devices'].includes(type) ? 'block' : 'none';
   document.getElementById('asset_unit_wrap').style.display = ['sensors','cameras'].includes(type) ? 'block' : 'none';
+  document.getElementById('asset_source_url_wrap').style.display = type === 'cameras' ? 'block' : 'none';
   document.getElementById('asset_state_wrap').style.display = ['farms','sensors','devices','cameras'].includes(type) ? 'block' : 'none';
   const labels = {
     farms: ['地址', '例如：浙江湖州'],
@@ -870,7 +876,7 @@ class Handler(BaseHTTPRequestHandler):
                 for item in readings:
                     if item.get("metric") != "DO":
                         continue
-                    incident = SYSTEM.ingest_do(
+                    new_incident = SYSTEM.ingest_do(
                         pond_id=str(item.get("pond_id", "")),
                         value=float(item.get("value")),
                         source_event_id=item.get("source_event_id"),
@@ -879,8 +885,8 @@ class Handler(BaseHTTPRequestHandler):
                         quality=str(item.get("quality") or "GOOD"),
                     )
                     accepted += 1
-                    if incident:
-                        incidents.append(incident.id)
+                    if new_incident:
+                        incidents.append(new_incident.id)
             except (TypeError, ValueError) as exc:
                 problem(self, 400, "Invalid telemetry payload", str(exc))
                 return
