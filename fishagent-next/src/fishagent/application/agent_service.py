@@ -5,11 +5,16 @@ from fishagent.application.policy import evaluate_action
 from fishagent.application.store import InMemoryStore
 from fishagent.domain.models import (
     AgentRun,
+    CameraSource,
     CommandStatus,
+    Device,
     DeviceCommand,
+    Farm,
     Incident,
     IncidentStatus,
+    Pond,
     RiskLevel,
+    Sensor,
     SensorReading,
     new_id,
     utcnow,
@@ -23,6 +28,79 @@ class FishAgentSystem:
     def initialize_demo(self) -> dict:
         self.store.reset_demo()
         return self.snapshot()
+
+    def create_farm(self, payload: dict) -> Farm:
+        farm = Farm(
+            id=str(payload.get("id") or new_id("farm")),
+            name=str(payload.get("name") or "未命名养殖场"),
+            location=str(payload.get("location") or ""),
+        )
+        self.store.farms[farm.id] = farm
+        self.store.emit("asset.farm.created", "创建养殖场：%s" % farm.name, {"farm_id": farm.id})
+        return farm
+
+    def create_pond(self, payload: dict) -> Pond:
+        farm_id = str(payload.get("farm_id") or "")
+        if farm_id and farm_id not in self.store.farms:
+            raise ValueError("farm_id does not exist")
+        pond = Pond(
+            id=str(payload.get("id") or new_id("pond")),
+            name=str(payload.get("name") or "未命名池塘"),
+            species=str(payload.get("species") or ""),
+            farm_id=farm_id,
+            dissolved_oxygen_min=float(payload.get("dissolved_oxygen_min") or 4.0),
+        )
+        self.store.ponds[pond.id] = pond
+        self.store.emit("asset.pond.created", "创建养殖单元：%s" % pond.name, {"pond_id": pond.id})
+        return pond
+
+    def create_sensor(self, payload: dict) -> Sensor:
+        pond_id = str(payload.get("pond_id") or "")
+        if pond_id not in self.store.ponds:
+            raise ValueError("pond_id does not exist")
+        sensor = Sensor(
+            id=str(payload.get("id") or new_id("sensor")),
+            pond_id=pond_id,
+            name=str(payload.get("name") or "未命名传感器"),
+            metric=str(payload.get("metric") or "DO"),
+            unit=str(payload.get("unit") or "mg/L"),
+            status=str(payload.get("status") or "ONLINE"),
+            freshness_seconds=int(payload.get("freshness_seconds") or 120),
+        )
+        self.store.sensors[sensor.id] = sensor
+        self.store.emit("asset.sensor.created", "创建传感器：%s" % sensor.name, {"sensor_id": sensor.id})
+        return sensor
+
+    def create_device(self, payload: dict) -> Device:
+        pond_id = str(payload.get("pond_id") or "")
+        if pond_id not in self.store.ponds:
+            raise ValueError("pond_id does not exist")
+        device = Device(
+            id=str(payload.get("id") or new_id("device")),
+            pond_id=pond_id,
+            name=str(payload.get("name") or "未命名设备"),
+            capability=str(payload.get("capability") or "aeration"),
+            shadow_state=str(payload.get("shadow_state") or "off"),
+            healthy=bool(payload.get("healthy", True)),
+        )
+        self.store.devices[device.id] = device
+        self.store.emit("asset.device.created", "创建设备：%s" % device.name, {"device_id": device.id})
+        return device
+
+    def create_camera(self, payload: dict) -> CameraSource:
+        pond_id = str(payload.get("pond_id") or "")
+        if pond_id not in self.store.ponds:
+            raise ValueError("pond_id does not exist")
+        camera = CameraSource(
+            id=str(payload.get("id") or new_id("camera")),
+            pond_id=pond_id,
+            name=str(payload.get("name") or "未命名摄像头"),
+            source_type=str(payload.get("source_type") or "HTTP_SNAPSHOT"),
+            status=str(payload.get("status") or "UNAVAILABLE"),
+        )
+        self.store.cameras[camera.id] = camera
+        self.store.emit("asset.camera.created", "创建摄像头：%s" % camera.name, {"camera_id": camera.id})
+        return camera
 
     def ingest_do(self, pond_id: str, value: float, source_event_id: Optional[str] = None, seconds_old: int = 0) -> Optional[Incident]:
         reading = SensorReading(
@@ -57,7 +135,16 @@ class FishAgentSystem:
             self.store.emit("agent.run.failed", "证据过期，未执行设备动作", {"run_id": run.id}, correlation_id=run.id)
             return run
 
-        device = self.store.devices["aerator-b01-1"]
+        device = self.store.aeration_device_for_pond(incident.pond_id)
+        if device is None:
+            run.step("patrol-analysis-agent", "get_device_capabilities", "未找到可用增氧设备，升级人工处理")
+            incident.transition(IncidentStatus.ACTION_PROPOSED)
+            incident.transition(IncidentStatus.MANUAL_REQUIRED)
+            incident.assignee = "现场操作员"
+            run.status = "COMPLETED"
+            run.stop_reason = "NO_CAPABLE_DEVICE"
+            self.store.emit("agent.run.completed", "未找到可用增氧设备，已转人工", {"run_id": run.id}, correlation_id=run.id)
+            return run
         run.step("patrol-analysis-agent", "get_device_shadow_state", "%s 当前为 %s" % (device.name, device.shadow_state))
 
         if device.shadow_state == "on":
@@ -71,7 +158,7 @@ class FishAgentSystem:
             self.store.emit("agent.run.completed", "设备已在目标状态，已抑制重复动作", {"run_id": run.id}, correlation_id=run.id)
             return run
 
-        run.step("action-planning-agent", "propose_action", "建议开启 B-01 一号增氧机，风险 L1，30 秒后复核溶氧")
+        run.step("action-planning-agent", "propose_action", "建议开启 %s，风险 L1，30 秒后复核溶氧" % device.name)
         incident.transition(IncidentStatus.ACTION_PROPOSED)
 
         command = self.request_action_execution(run, incident, device_id=device.id, target_state="on", risk=RiskLevel.L1)
@@ -189,8 +276,21 @@ class FishAgentSystem:
 
     def snapshot(self) -> dict:
         return {
+            "farms": [farm.__dict__ for farm in self.store.farms.values()],
             "ponds": [pond.__dict__ for pond in self.store.ponds.values()],
+            "sensors": [sensor.__dict__ for sensor in self.store.sensors.values()],
             "devices": [device.__dict__ for device in self.store.devices.values()],
+            "cameras": [
+                {
+                    "id": camera.id,
+                    "pond_id": camera.pond_id,
+                    "name": camera.name,
+                    "source_type": camera.source_type,
+                    "status": camera.status,
+                    "last_frame_at": camera.last_frame_at.isoformat() if camera.last_frame_at else None,
+                }
+                for camera in self.store.cameras.values()
+            ],
             "incidents": [
                 {
                     "id": item.id,

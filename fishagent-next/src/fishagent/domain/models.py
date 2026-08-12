@@ -49,11 +49,30 @@ class RiskLevel(str, Enum):
 
 
 @dataclass
+class Farm:
+    id: str
+    name: str
+    location: str = ""
+
+
+@dataclass
 class Pond:
     id: str
     name: str
     species: str
+    farm_id: str = ""
     dissolved_oxygen_min: float = 4.0
+
+
+@dataclass
+class Sensor:
+    id: str
+    pond_id: str
+    name: str
+    metric: str
+    unit: str
+    status: str = "ONLINE"
+    freshness_seconds: int = 120
 
 
 @dataclass
@@ -80,6 +99,16 @@ class Device:
     capability: str
     shadow_state: str = "off"
     healthy: bool = True
+
+
+@dataclass
+class CameraSource:
+    id: str
+    pond_id: str
+    name: str
+    source_type: str
+    status: str = "UNAVAILABLE"
+    last_frame_at: Optional[datetime] = None
 
 
 @dataclass

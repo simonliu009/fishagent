@@ -3,12 +3,15 @@ from typing import Dict, List, Optional
 
 from fishagent.domain.models import (
     AgentRun,
+    CameraSource,
     Device,
     DeviceCommand,
     Evidence,
+    Farm,
     Incident,
     IncidentStatus,
     Pond,
+    Sensor,
     SensorReading,
     new_id,
     utcnow,
@@ -17,8 +20,11 @@ from fishagent.domain.models import (
 
 class InMemoryStore:
     def __init__(self) -> None:
+        self.farms: Dict[str, Farm] = {}
         self.ponds: Dict[str, Pond] = {}
+        self.sensors: Dict[str, Sensor] = {}
         self.devices: Dict[str, Device] = {}
+        self.cameras: Dict[str, CameraSource] = {}
         self.readings: List[SensorReading] = []
         self.incidents: Dict[str, Incident] = {}
         self.commands: Dict[str, DeviceCommand] = {}
@@ -28,20 +34,38 @@ class InMemoryStore:
         self.emit("system.started", "系统已启动，等待显式初始化资产或接入真实数据")
 
     def reset_demo(self) -> None:
+        self.farms.clear()
         self.ponds.clear()
+        self.sensors.clear()
         self.devices.clear()
+        self.cameras.clear()
         self.readings.clear()
         self.incidents.clear()
         self.commands.clear()
         self.agent_runs.clear()
         self.events.clear()
         self.executed_idempotency_keys.clear()
-        self.ponds["B-01"] = Pond(id="B-01", name="B-01 精养池", species="加州鲈")
+        self.farms["farm-demo"] = Farm(id="farm-demo", name="青湾智慧渔场", location="浙江湖州")
+        self.ponds["B-01"] = Pond(id="B-01", name="B-01 精养池", species="加州鲈", farm_id="farm-demo")
+        self.sensors["do-b-01"] = Sensor(
+            id="do-b-01",
+            pond_id="B-01",
+            name="B-01 溶氧传感器",
+            metric="DO",
+            unit="mg/L",
+        )
         self.devices["aerator-b01-1"] = Device(
             id="aerator-b01-1",
             pond_id="B-01",
             name="B-01 一号增氧机",
             capability="aeration",
+        )
+        self.cameras["camera-b01"] = CameraSource(
+            id="camera-b01",
+            pond_id="B-01",
+            name="B-01 北侧摄像头",
+            source_type="HTTP_SNAPSHOT",
+            status="UNAVAILABLE",
         )
         self.emit("system.demo.initialized", "演示数据已初始化：B-01、溶氧传感器、增氧机")
 
@@ -101,6 +125,12 @@ class InMemoryStore:
         candidates = [r for r in self.readings if r.pond_id == pond_id and r.metric == metric]
         candidates.sort(key=lambda r: r.sampled_at, reverse=True)
         return candidates[0] if candidates else None
+
+    def aeration_device_for_pond(self, pond_id: str) -> Optional[Device]:
+        for device in self.devices.values():
+            if device.pond_id == pond_id and device.capability == "aeration" and device.healthy:
+                return device
+        return None
 
     def active_incident_for_pond(self, pond_id: str) -> Optional[Incident]:
         terminal = {IncidentStatus.RESOLVED, IncidentStatus.DISMISSED, IncidentStatus.ESCALATED}

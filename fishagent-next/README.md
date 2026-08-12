@@ -41,6 +41,18 @@ curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/demo/fai
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/demo/dedup
 ```
 
+资产管理接口：
+
+```bash
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/farms \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"farm-a","name":"东区养殖场","location":"湖州"}'
+
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/ponds \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"P-01","farm_id":"farm-a","name":"P-01 精养池","species":"草鱼"}'
+```
+
 传入真实形态的遥测批量读数：
 
 ```bash
