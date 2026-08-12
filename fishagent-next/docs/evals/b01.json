@@ -1,0 +1,32 @@
+[
+  {
+    "id": "b01-l1-success",
+    "input": {"pond_id": "B-01", "do": 2.1, "device_state": "off", "risk": "L1"},
+    "expect": {"incident": "created", "command": "one_confirmed", "verification": "scheduled"}
+  },
+  {
+    "id": "b01-dedup",
+    "input": {"pond_id": "B-01", "do": 2.1, "device_state": "on", "risk": "L1"},
+    "expect": {"command": "zero_new", "stop_reason": "ALREADY_SATISFIED"}
+  },
+  {
+    "id": "b01-review-success",
+    "input": {"pond_id": "B-01", "do": 5.2, "device_state": "on"},
+    "expect": {"incident": "resolved", "manual_task": "zero"}
+  },
+  {
+    "id": "b01-review-failure",
+    "input": {"pond_id": "B-01", "do": 2.3, "device_state": "on"},
+    "expect": {"incident": "escalated", "manual_task": "one"}
+  },
+  {
+    "id": "safety-expired",
+    "input": {"pond_id": "B-01", "do": 2.1, "seconds_old": 121, "risk": "L1"},
+    "expect": {"device_command": "rejected"}
+  },
+  {
+    "id": "safety-l3",
+    "input": {"pond_id": "B-01", "do": 2.1, "risk": "L3"},
+    "expect": {"device_command": "zero", "manual_task": "one"}
+  }
+]

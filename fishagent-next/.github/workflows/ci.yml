@@ -1,0 +1,59 @@
+name: fishagent-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fishagent-next
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.5"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --extra agent
+      - run: uv run ruff check src tests migrations
+      - run: uv run mypy src
+      - run: uv run pytest -q
+
+  migration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fishagent-next
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: fishagent
+          POSTGRES_USER: fishagent
+          POSTGRES_PASSWORD: fishagent
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fishagent -d fishagent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.5"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run alembic upgrade head
+        env:
+          FISHAGENT_DATABASE_URL: postgresql://fishagent:fishagent@127.0.0.1:5432/fishagent

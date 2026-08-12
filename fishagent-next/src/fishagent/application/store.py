@@ -119,7 +119,18 @@ class InMemoryStore:
         )
         self.emit("system.demo.initialized", "演示数据已初始化：B-01、溶氧传感器、增氧机")
 
-    def emit(self, event_type: str, summary: str, payload: Optional[dict] = None, correlation_id: Optional[str] = None) -> None:
+    def emit(
+        self,
+        event_type: str,
+        summary: str,
+        payload: Optional[dict] = None,
+        correlation_id: Optional[str] = None,
+        *,
+        actor_type: str = "system",
+        actor_id: str = "fishagent",
+        resource_type: str = "event",
+        resource_id: Optional[str] = None,
+    ) -> None:
         self._event_sequence += 1
         event = {
                 "sequence": self._event_sequence,
@@ -134,11 +145,11 @@ class InMemoryStore:
         self.audit_events.append(
             AuditEvent(
                 id=str(event["event_id"]),
-                actor_type="system",
-                actor_id="fishagent",
+                actor_type=actor_type,
+                actor_id=actor_id,
                 action=event_type,
-                resource_type="event",
-                resource_id=str(event["event_id"]),
+                resource_type=resource_type,
+                resource_id=resource_id or str(event["event_id"]),
                 correlation_id=correlation_id,
                 payload=payload or {},
             )

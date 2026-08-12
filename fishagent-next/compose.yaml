@@ -43,6 +43,11 @@ services:
       - fishagent-data:/app/data
     ports:
       - "127.0.0.1:3008:3008"
+    healthcheck:
+      test: ["CMD-SHELL", "/app/.venv/bin/python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:3008/health/ready', timeout=2)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     depends_on:
       postgres:
         condition: service_healthy

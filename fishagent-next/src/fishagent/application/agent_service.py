@@ -629,6 +629,8 @@ class FishAgentSystem:
             None,
         )
         if existing:
+            if existing.device_id != device_id or existing.pond_id != incident.pond_id or existing.target_state != target_state:
+                raise ValueError("idempotency key conflicts with an existing device command")
             run.step("execution-agent", "deduplicate_command", "幂等键已存在，复用已有设备命令")
             return existing
         policy = evaluate_action(

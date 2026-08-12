@@ -1,0 +1,181 @@
+openapi: 3.0.3
+info:
+  title: 智渔 Agent API
+  version: 0.2.0
+  description: 养殖感知、研判、执行、复核与升级 API。运行时完整契约由 /api/openapi.json 提供。
+servers:
+  - url: http://localhost:3001
+paths:
+  /health/live:
+    get:
+      summary: 进程存活检查
+      responses:
+        '200': {description: OK}
+  /health/ready:
+    get:
+      summary: 依赖就绪检查
+      responses:
+        '200': {description: Ready}
+        '503': {description: Not ready}
+  /api/v1/telemetry/readings:batch:
+    post:
+      summary: 批量接收传感器读数
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryBatch'
+      responses:
+        '202': {description: Accepted}
+        '400': {description: Invalid telemetry}
+  /api/v1/incidents/{incident_id}/approve:
+    post:
+      summary: 批准事件动作
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Decision'}
+      responses:
+        '200': {description: Approved and executed through policy gate}
+        '409': {description: Approval unavailable}
+  /api/v1/device-commands:
+    post:
+      summary: 提交策略门保护的设备命令
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCommandRequest'
+      responses:
+        '200': {description: Idempotent replay or confirmed command}
+        '202': {description: Accepted or rejected by policy}
+        '409': {description: Approval or idempotency conflict}
+  /api/v1/agent-runs:
+    post:
+      summary: 提交 Agent 目标
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goal]
+              properties:
+                goal: {type: string}
+                pond_id: {type: string, nullable: true}
+      responses:
+        '202': {description: Agent run created}
+  /api/v1/agent-runs/{run_id}/cancel:
+    post:
+      summary: 取消 Agent Run
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200': {description: Cancelled}
+  /api/v1/cameras/{camera_id}/upload:
+    post:
+      summary: 上传并校验视觉帧
+      parameters:
+        - $ref: '#/components/parameters/CameraId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+      responses:
+        '201': {description: Frame stored in MinIO}
+        '400': {description: Invalid image}
+  /api/v1/events:
+    get:
+      summary: 按序列补齐事件
+      parameters:
+        - name: after
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200': {description: Event list}
+  /api/v1/audit-events/export:
+    get:
+      summary: 导出审计记录
+      parameters:
+        - name: resource_type
+          in: query
+          schema: {type: string}
+        - name: resource_id
+          in: query
+          schema: {type: string}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 5000, default: 1000}
+        - name: format
+          in: query
+          schema: {type: string, enum: [json, csv], default: json}
+      responses:
+        '200': {description: JSON or CSV audit export}
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: {type: string}
+    IncidentId:
+      name: incident_id
+      in: path
+      required: true
+      schema: {type: string}
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema: {type: string}
+    CameraId:
+      name: camera_id
+      in: path
+      required: true
+      schema: {type: string}
+  schemas:
+    TelemetryBatch:
+      type: object
+      required: [readings]
+      properties:
+        readings:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            required: [pond_id, value]
+            properties:
+              pond_id: {type: string}
+              metric: {type: string, default: DO}
+              value: {type: number}
+              source_event_id: {type: string, nullable: true}
+              seconds_old: {type: integer, minimum: 0, default: 0}
+              quality: {type: string, enum: [GOOD, SUSPECT, STALE, INVALID]}
+              auto_run: {type: boolean, default: true}
+    DeviceCommandRequest:
+      type: object
+      required: [incident_id, device_id]
+      properties:
+        incident_id: {type: string}
+        device_id: {type: string}
+        target_state: {type: string, default: on}
+        risk: {type: string, enum: [L0, L1, L2, L3], default: L1}
+        approval_id: {type: string, nullable: true}
+    Decision:
+      type: object
+      properties:
+        approver: {type: string}
+        reason: {type: string}

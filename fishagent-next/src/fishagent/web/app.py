@@ -5,6 +5,10 @@ this module owns typed HTTP, WebSocket and NiceGUI process boundaries.
 """
 
 import asyncio
+import csv
+import io
+import time
+from collections import Counter
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -41,6 +45,8 @@ CONFIG.llm = CONFIG_STORE.load_llm(CONFIG.llm)
 SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
 STATIC_DIR = Path(__file__).parent / "static"
 MQTT_ADAPTER: MqttTelemetryAdapter | None = None
+REQUEST_COUNTS: Counter[tuple[str, str, int]] = Counter()
+REQUEST_LATENCY_MS: Counter[str] = Counter()
 
 
 def ingest_mqtt_and_persist(**payload: Any) -> Any:
@@ -70,10 +76,65 @@ app = FastAPI(
     title="智渔 Agent API",
     version="0.2.0",
     description="养殖感知、研判、执行、复核与升级 API",
+    openapi_url="/api/openapi.json",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     lifespan=lifespan,
 )
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def legacy_openapi() -> dict:
+    return app.openapi()
+
+
+@app.middleware("http")
+async def request_observability(request: Request, call_next):
+    correlation_id = request.headers.get("X-Correlation-ID") or new_id("req")
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        REQUEST_COUNTS[(request.method, request.url.path, 500)] += 1
+        REQUEST_LATENCY_MS[request.url.path] += elapsed_ms
+        raise
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    REQUEST_COUNTS[(request.method, request.url.path, response.status_code)] += 1
+    REQUEST_LATENCY_MS[request.url.path] += elapsed_ms
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    lines = [
+        "# HELP fishagent_http_requests_total HTTP requests handled by status.",
+        "# TYPE fishagent_http_requests_total counter",
+    ]
+    for (method, path, status), count in sorted(REQUEST_COUNTS.items()):
+        lines.append(
+            'fishagent_http_requests_total{method="%s",path="%s",status="%s"} %s'
+            % (method, path.replace('"', '\\"'), status, count)
+        )
+    lines.extend(
+        [
+            "# HELP fishagent_http_request_latency_ms_total Cumulative request latency in milliseconds.",
+            "# TYPE fishagent_http_request_latency_ms_total counter",
+        ]
+    )
+    for path, total in sorted(REQUEST_LATENCY_MS.items()):
+        lines.append('fishagent_http_request_latency_ms_total{path="%s"} %s' % (path.replace('"', '\\"'), total))
+    if MQTT_ADAPTER:
+        mqtt_status = "ok" if not MQTT_ADAPTER.last_error else "degraded"
+        lines.extend(
+            [
+                "# HELP fishagent_mqtt_adapter_up MQTT adapter availability.",
+                "# TYPE fishagent_mqtt_adapter_up gauge",
+                'fishagent_mqtt_adapter_up{status="%s"} %s' % (mqtt_status, 1 if mqtt_status == "ok" else 0),
+            ]
+        )
+    return Response("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 class AssetPayload(BaseModel):
@@ -157,6 +218,31 @@ def authenticate(request: Request, path: str, write: bool = False):
     return session
 
 
+def record_user_audit(
+    session: Any,
+    action: str,
+    summary: str,
+    payload: dict,
+    resource_type: str,
+    resource_id: Optional[str],
+    correlation_id: Optional[str] = None,
+) -> None:
+    """Record the authenticated actor alongside the domain event stream."""
+    if session is None:
+        return
+    SYSTEM.store.emit(
+        action,
+        summary,
+        payload,
+        correlation_id=correlation_id,
+        actor_type="user",
+        actor_id=session.username,
+        resource_type=resource_type,
+        resource_id=resource_id,
+    )
+    SYSTEM.snapshot()
+
+
 def authenticate_websocket(websocket: WebSocket) -> bool:
     if not AUTH.enabled:
         return True
@@ -198,7 +284,17 @@ async def health_ready() -> Any:
         return JSONResponse(status_code=503, content={"status": "not_ready", "detail": str(exc)})
     realtime = EVENT_PUBLISHER.health() if EVENT_PUBLISHER else {"status": "disabled", "backend": "redis"}
     media = OBJECT_STORE.health() if OBJECT_STORE else {"status": "disabled", "backend": "minio"}
-    return {"status": "ok", "port": CONFIG.port, "public_port": CONFIG.public_port, "persistence": persistence, "realtime": realtime, "media": media}
+    persistence_ready = persistence.get("status") == "ok"
+    degraded = any(item.get("status") == "degraded" for item in (realtime, media))
+    response = {
+        "status": "degraded" if degraded and persistence_ready else "ok",
+        "port": CONFIG.port,
+        "public_port": CONFIG.public_port,
+        "persistence": persistence,
+        "realtime": realtime,
+        "media": media,
+    }
+    return JSONResponse(status_code=200 if persistence_ready else 503, content=response)
 
 
 @app.get("/api/v1/auth/config")
@@ -213,6 +309,16 @@ async def login(payload: LoginPayload) -> JSONResponse:
     session = AUTH.login(payload.username, payload.password)
     if session is None:
         return problem(401, "Invalid credentials", "用户名或密码错误")
+    SYSTEM.store.emit(
+        "auth.login",
+        "用户登录成功",
+        {"username": session.username, "role": session.role},
+        actor_type="user",
+        actor_id=session.username,
+        resource_type="user",
+        resource_id=session.username,
+    )
+    SYSTEM.snapshot()
     response = JSONResponse(
         {"user": {"username": session.username, "role": session.role}, "csrf_token": session.csrf_token}
     )
@@ -230,7 +336,19 @@ async def login(payload: LoginPayload) -> JSONResponse:
 @app.post("/api/v1/auth/logout")
 @app.post("/auth/logout", include_in_schema=False)
 async def logout(request: Request) -> JSONResponse:
+    session = AUTH.authenticate(request.headers.get("cookie", ""))
     AUTH.logout(request.headers.get("cookie", ""))
+    if session and session.token != "disabled":
+        SYSTEM.store.emit(
+            "auth.logout",
+            "用户退出登录",
+            {"username": session.username},
+            actor_type="user",
+            actor_id=session.username,
+            resource_type="user",
+            resource_id=session.username,
+        )
+        SYSTEM.snapshot()
     response = JSONResponse({"logged_out": True})
     response.delete_cookie("fishagent_session", path="/")
     return response
@@ -257,13 +375,21 @@ async def get_llm_config(request: Request) -> dict:
 
 @app.post("/api/v1/config/llm")
 async def update_llm_config(request: Request, payload: JsonPayload) -> dict:
-    authenticate(request, "/api/v1/config/llm", write=True)
+    session = authenticate(request, "/api/v1/config/llm", write=True)
     data = payload.model_dump(exclude_none=True)
     if not data.get("api_key"):
         data.pop("api_key", None)
     CONFIG.llm.update_from_payload(data)
-    SYSTEM.store.emit("config.llm.updated", "大模型 API 配置已更新：%s / %s" % (CONFIG.llm.provider, CONFIG.llm.model))
+    SYSTEM.store.emit(
+        "config.llm.updated",
+        "大模型 API 配置已更新：%s / %s" % (CONFIG.llm.provider, CONFIG.llm.model),
+        actor_type="user",
+        actor_id=session.username,
+        resource_type="config",
+        resource_id="llm",
+    )
     CONFIG_STORE.save_llm(CONFIG.llm)
+    SYSTEM.snapshot()
     return {"llm": CONFIG.llm.public_dict()}
 
 
@@ -410,7 +536,7 @@ async def create_device_command(
     payload: JsonPayload,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ) -> Any:
-    authenticate(request, request.url.path, write=True)
+    session = authenticate(request, request.url.path, write=True)
     data = payload.model_dump()
     incident_id = str(data.get("incident_id") or "")
     incident = SYSTEM.store.incidents.get(incident_id)
@@ -420,6 +546,17 @@ async def create_device_command(
     target_state = str(data.get("target_state") or "on")
     try:
         risk = RiskLevel(str(data.get("risk") or "L1").upper())
+        approval_granted = False
+        if risk == RiskLevel.L2:
+            approval_id = str(data.get("approval_id") or "")
+            approval = SYSTEM.store.approvals.get(approval_id)
+            approval_granted = bool(
+                approval
+                and approval.incident_id == incident.id
+                and approval.status.value == "APPROVED"
+            )
+            if not approval_granted:
+                return problem(409, "Approval required", "L2 设备命令必须引用已批准的 approval_id")
         run = SYSTEM.store.agent_runs.get(str(data.get("run_id") or ""))
         if run is None:
             from fishagent.domain.models import AgentRun, new_id
@@ -432,12 +569,21 @@ async def create_device_command(
             device_id=device_id,
             target_state=target_state,
             risk=risk,
-            approval_granted=bool(data.get("approval_granted", False)),
+            approval_granted=approval_granted,
             idempotency_key=idempotency_key or None,
         )
     except (KeyError, TypeError, ValueError) as exc:
         return problem(400, "Invalid device command", str(exc))
     status = 200 if command.idempotency_key in SYSTEM.store.executed_idempotency_keys else 202
+    record_user_audit(
+        session,
+        "device.command.requested",
+        "用户请求设备命令",
+        {"command_id": command.id, "incident_id": incident.id, "device_id": device_id, "target_state": target_state},
+        "device_command",
+        command.id,
+        request.headers.get("X-Correlation-ID"),
+    )
     return encoded_response(status, {"device_command": command.__dict__, "state": SYSTEM.snapshot()})
 
 
@@ -497,7 +643,7 @@ def assets(collection: str) -> dict:
 
 @app.post("/api/v1/evidence")
 async def upload_evidence(request: Request, file: UploadFile = File(...)) -> Any:
-    authenticate(request, request.url.path, write=True)
+    session = authenticate(request, request.url.path, write=True)
     if OBJECT_STORE is None:
         return problem(503, "Object storage unavailable", "MinIO 未配置")
     data = await file.read()
@@ -508,7 +654,15 @@ async def upload_evidence(request: Request, file: UploadFile = File(...)) -> Any
         result = OBJECT_STORE.put_bytes(data, file.content_type or "application/octet-stream")
     except Exception as exc:
         return problem(503, "Evidence upload failed", str(exc))
-    SYSTEM.store.emit("evidence.uploaded", "证据文件已上传", {"object_name": result["object_name"], "content_type": file.content_type})
+    SYSTEM.store.emit(
+        "evidence.uploaded",
+        "证据文件已上传",
+        {"object_name": result["object_name"], "content_type": file.content_type},
+        actor_type="user",
+        actor_id=session.username,
+        resource_type="evidence",
+        resource_id=result["object_name"],
+    )
     return {"evidence": result, "state": SYSTEM.snapshot()}
 
 
@@ -543,7 +697,7 @@ async def capture_camera(request: Request, camera_id: str) -> Any:
 
 @app.post("/api/v1/cameras/{camera_id}/upload")
 async def upload_camera_frame(request: Request, camera_id: str, file: UploadFile = File(...)) -> Any:
-    authenticate(request, request.url.path, write=True)
+    session = authenticate(request, request.url.path, write=True)
     camera = SYSTEM.store.cameras.get(camera_id)
     if camera is None:
         return problem(404, "Camera not found")
@@ -585,16 +739,36 @@ async def upload_camera_frame(request: Request, camera_id: str, file: UploadFile
         {"camera_id": camera_id, "frame_id": vision_frame.id, "object_name": vision_frame.object_name},
         correlation_id=camera_id,
     )
+    record_user_audit(
+        session,
+        "vision.frame.upload.requested",
+        "用户上传摄像头帧",
+        {"camera_id": camera_id, "frame_id": vision_frame.id},
+        "vision_frame",
+        vision_frame.id,
+        request.headers.get("X-Correlation-ID"),
+    )
     return encoded_response(201, {"frame": vision_frame.__dict__, "state": SYSTEM.snapshot()})
 
 
 @app.get("/api/v1/evidence/{object_name:path}")
 async def evidence_url(request: Request, object_name: str) -> Any:
-    authenticate(request, request.url.path)
+    session = authenticate(request, request.url.path)
     if OBJECT_STORE is None:
         return problem(503, "Object storage unavailable", "MinIO 未配置")
     try:
-        return {"url": OBJECT_STORE.presigned_get(object_name)}
+        url = OBJECT_STORE.presigned_get(object_name)
+        SYSTEM.store.emit(
+            "evidence.accessed",
+            "证据访问地址已签发",
+            {"object_name": object_name},
+            actor_type="user",
+            actor_id=session.username,
+            resource_type="evidence",
+            resource_id=object_name,
+        )
+        SYSTEM.snapshot()
+        return {"url": url}
     except Exception as exc:
         return problem(404, "Evidence not found", str(exc))
 
@@ -638,6 +812,46 @@ async def audit_events(request: Request, resource_type: str = "", resource_id: s
     if resource_id:
         items = [item for item in items if item.get("resource_id") == resource_id]
     return {"audit_events": items[-limit:]}
+
+
+@app.get("/api/v1/audit-events/export")
+async def export_audit_events(
+    request: Request,
+    resource_type: str = "",
+    resource_id: str = "",
+    limit: int = 1000,
+    format: str = "json",
+) -> Any:
+    session = authenticate(request, request.url.path)
+    limit = min(max(limit, 1), 5000)
+    items = SYSTEM.read_snapshot()["audit_events"]
+    if resource_type:
+        items = [item for item in items if item["resource_type"] == resource_type]
+    if resource_id:
+        items = [item for item in items if item.get("resource_id") == resource_id]
+    items = items[-limit:]
+    record_user_audit(
+        session,
+        "audit.exported",
+        "用户导出审计记录",
+        {"resource_type": resource_type, "resource_id": resource_id, "limit": limit, "format": format},
+        "audit_export",
+        None,
+        request.headers.get("X-Correlation-ID"),
+    )
+    if format.lower() != "csv":
+        return {"audit_events": items}
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=["id", "actor_type", "actor_id", "action", "resource_type", "resource_id", "correlation_id", "created_at", "payload"],
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    writer.writerows(items)
+    response = Response(output.getvalue(), media_type="text/csv; charset=utf-8")
+    response.headers["Content-Disposition"] = 'attachment; filename="fishagent-audit-events.csv"'
+    return response
 
 
 @app.post("/api/v1/telemetry/readings:batch")
@@ -721,7 +935,7 @@ def proposal_for_incident(incident_id: str) -> Optional[str]:
 
 @app.post("/api/v1/incidents/{incident_id}/approve")
 async def approve_incident(request: Request, incident_id: str, payload: JsonPayload) -> Any:
-    authenticate(request, request.url.path, write=True)
+    session = authenticate(request, request.url.path, write=True)
     proposal_id = proposal_for_incident(incident_id)
     if proposal_id is None:
         return problem(409, "No pending approval", "事件没有待审批动作")
@@ -734,12 +948,21 @@ async def approve_incident(request: Request, incident_id: str, payload: JsonPayl
         )
     except (KeyError, ValueError) as exc:
         return problem(409, "Approval unavailable", str(exc))
+    record_user_audit(
+        session,
+        "approval.approved.by_user",
+        "用户批准事件动作",
+        {"incident_id": incident_id, "command_id": command.id},
+        "incident",
+        incident_id,
+        request.headers.get("X-Correlation-ID"),
+    )
     return encoded_response(200, {"command": command.__dict__, "state": SYSTEM.snapshot()})
 
 
 @app.post("/api/v1/incidents/{incident_id}/reject")
 async def reject_incident(request: Request, incident_id: str, payload: JsonPayload) -> Any:
-    authenticate(request, request.url.path, write=True)
+    session = authenticate(request, request.url.path, write=True)
     proposal_id = proposal_for_incident(incident_id)
     if proposal_id is None:
         return problem(409, "No pending approval", "事件没有待审批动作")
@@ -752,12 +975,21 @@ async def reject_incident(request: Request, incident_id: str, payload: JsonPaylo
         )
     except (KeyError, ValueError) as exc:
         return problem(409, "Rejection unavailable", str(exc))
+    record_user_audit(
+        session,
+        "approval.rejected.by_user",
+        "用户拒绝事件动作",
+        {"incident_id": incident_id, "approval_id": approval.id},
+        "incident",
+        incident_id,
+        request.headers.get("X-Correlation-ID"),
+    )
     return encoded_response(200, {"approval": approval.__dict__, "state": SYSTEM.snapshot()})
 
 
 @app.post("/api/v1/incidents/{incident_id}/assign")
 async def assign_incident(request: Request, incident_id: str, payload: JsonPayload) -> Any:
-    authenticate(request, request.url.path, write=True)
+    session = authenticate(request, request.url.path, write=True)
     incident = SYSTEM.store.incidents.get(incident_id)
     if incident is None:
         return problem(404, "Incident not found")
@@ -766,6 +998,15 @@ async def assign_incident(request: Request, incident_id: str, payload: JsonPaylo
         return problem(400, "Invalid assignee", "assignee is required")
     incident.assignee = assignee
     SYSTEM.store.emit("incident.assigned", "事件已分派给 %s" % assignee, {"incident_id": incident_id, "assignee": assignee})
+    record_user_audit(
+        session,
+        "incident.assigned.by_user",
+        "用户分派事件",
+        {"incident_id": incident_id, "assignee": assignee},
+        "incident",
+        incident_id,
+        request.headers.get("X-Correlation-ID"),
+    )
     state = SYSTEM.snapshot()
     return {"incident": next(item for item in state["incidents"] if item["id"] == incident_id), "state": state}
 

@@ -296,8 +296,16 @@ class PostgresStateRepository:
         cursor.executemany(
             "INSERT INTO audit_events (actor, action, resource_type, resource_id, correlation_id, payload, created_at) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::timestamptz)",
             [
-                ("system", event["event_type"], "event", event.get("event_id"), event.get("correlation_id"), json.dumps(event.get("payload", {}), ensure_ascii=False, default=str), event["occurred_at"])
-                for event in payload.get("events", [])
+                (
+                    "%s:%s" % (event.get("actor_type", "system"), event.get("actor_id", "fishagent")),
+                    event["action"],
+                    event.get("resource_type", "event"),
+                    event.get("resource_id"),
+                    event.get("correlation_id"),
+                    json.dumps(event.get("payload", {}), ensure_ascii=False, default=str),
+                    event["created_at"],
+                )
+                for event in payload.get("audit_events", [])
             ],
         )
 
