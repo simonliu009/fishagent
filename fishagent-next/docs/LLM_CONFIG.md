@@ -1,0 +1,26 @@
+# 大模型 API 配置入口
+
+当前系统预留 OpenAI-compatible 模型配置，用于后续接入 CrewAI LLM Adapter。
+
+## 环境变量
+
+- `FISHAGENT_LLM_PROVIDER`：`zai`、`openai` 或 `compatible`。
+- `FISHAGENT_LLM_BASE_URL`：模型 API Base URL。
+- `FISHAGENT_LLM_MODEL`：模型名。
+- `FISHAGENT_LLM_API_KEY`：API Key。
+- `FISHAGENT_LLM_ENABLED`：是否启用模型调用。
+
+## HTTP API
+
+- `GET /api/v1/config/llm`
+- `POST /api/v1/config/llm`
+
+写入示例：
+
+```bash
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/config/llm \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"zai","base_url":"https://api.z.ai/api/paas/v4","model":"glm-4.5","api_key":"sk-***","enabled":true}'
+```
+
+API 响应不会回显完整密钥，只返回是否已配置和前缀预览。
