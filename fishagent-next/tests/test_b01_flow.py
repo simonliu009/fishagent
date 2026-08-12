@@ -1,10 +1,12 @@
 import unittest
+import json
 from tempfile import TemporaryDirectory
 
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.application.policy import evaluate_action
 from fishagent.core import LLMConfig, RuntimeConfigStore
 from fishagent.domain.models import IncidentStatus, JobStatus, RiskLevel, SensorReading, utcnow
+from fishagent.infrastructure.auth import AuthManager
 
 
 class B01FlowTest(unittest.TestCase):
@@ -217,6 +219,42 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(run.status, "COMPLETED")
         self.assertEqual(run.stop_reason, "PATROL_COMPLETED")
         self.assertIn("sensor-monitor-agent", run.delegated_agents)
+
+    def test_state_snapshot_restores_after_process_restart(self) -> None:
+        class SnapshotRepository:
+            def __init__(self) -> None:
+                self.payload = None
+
+            def load(self):
+                return json.loads(json.dumps(self.payload)) if self.payload else None
+
+            def save(self, payload):
+                self.payload = json.loads(json.dumps(payload))
+
+        repository = SnapshotRepository()
+        original = FishAgentSystem(repository=repository)
+        state = original.run_demo("failure")
+        restored = FishAgentSystem(repository=repository)
+        recovered = restored.snapshot()
+        self.assertEqual(recovered["incidents"][0]["status"], "ESCALATED")
+        self.assertEqual(recovered["commands"][0]["status"], "CONFIRMED")
+        self.assertEqual(recovered["event_sequence"], state["event_sequence"])
+        self.assertTrue(recovered["manual_tasks"])
+
+    def test_demo_reset_keeps_event_sequence_monotonic(self) -> None:
+        system = FishAgentSystem()
+        first = system.initialize_demo()["event_sequence"]
+        second = system.initialize_demo()["event_sequence"]
+        self.assertGreater(second, first)
+
+    def test_auth_session_requires_password_and_expires(self) -> None:
+        auth = AuthManager(enabled=True, username="admin", password="secret")
+        self.assertIsNone(auth.login("admin", "wrong"))
+        session = auth.login("admin", "secret", ttl_seconds=60)
+        self.assertIsNotNone(session)
+        self.assertEqual(auth.authenticate("fishagent_session=%s" % session.token).role, "admin")
+        auth.logout("fishagent_session=%s" % session.token)
+        self.assertIsNone(auth.authenticate("fishagent_session=%s" % session.token))
 
 
 if __name__ == "__main__":

@@ -31,12 +31,25 @@ from fishagent.domain.models import (
     new_id,
     utcnow,
 )
+from fishagent.infrastructure.persistence import PostgresStateRepository
+from fishagent.infrastructure.realtime import RedisEventPublisher
 
 
 class FishAgentSystem:
-    def __init__(self, store: Optional[InMemoryStore] = None) -> None:
+    def __init__(
+        self,
+        store: Optional[InMemoryStore] = None,
+        repository: Optional[PostgresStateRepository] = None,
+        event_publisher: Optional[RedisEventPublisher] = None,
+    ) -> None:
         self.store = store or InMemoryStore()
+        self.repository = repository
+        self.event_publisher = event_publisher
         self._job_lock = RLock()
+        if self.repository:
+            persisted = self.repository.load()
+            if persisted:
+                self.store.restore_snapshot(persisted)
 
     def initialize_demo(self) -> dict:
         self.store.reset_demo()
@@ -682,7 +695,7 @@ class FishAgentSystem:
         return self.snapshot()
 
     def snapshot(self) -> dict:
-        return {
+        data = {
             "farms": [farm.__dict__ for farm in self.store.farms.values()],
             "ponds": [pond.__dict__ for pond in self.store.ponds.values()],
             "sensors": [sensor.__dict__ for sensor in self.store.sensors.values()],
@@ -719,7 +732,16 @@ class FishAgentSystem:
                     "title": item.title,
                     "status": item.status.value,
                     "risk": item.risk.value,
-                    "evidence": [e.__dict__ for e in item.evidence],
+                    "evidence": [
+                        {
+                            "id": evidence.id,
+                            "type": evidence.type,
+                            "summary": evidence.summary,
+                            "created_at": evidence.created_at.isoformat(),
+                            "refs": evidence.refs,
+                        }
+                        for evidence in item.evidence
+                    ],
                     "action_proposal_ids": item.action_proposal_ids,
                     "command_ids": item.command_ids,
                     "verification_plan_id": item.verification_plan_id,
@@ -770,6 +792,7 @@ class FishAgentSystem:
                     "status": item.status.value,
                     "policy_reason": item.policy_reason,
                     "idempotency_key": item.idempotency_key,
+                    "created_at": item.created_at.isoformat(),
                 }
                 for item in self.store.commands.values()
             ],
@@ -845,10 +868,28 @@ class FishAgentSystem:
                     "status": run.status,
                     "stop_reason": run.stop_reason,
                     "delegated_agents": run.delegated_agents,
-                    "steps": [step.__dict__ for step in run.steps],
+                    "steps": [
+                        {
+                            "agent": step.agent,
+                            "action": step.action,
+                            "summary": step.summary,
+                            "created_at": step.created_at.isoformat(),
+                        }
+                        for step in run.steps
+                    ],
                     "budget": run.budget,
                 }
                 for run in self.store.agent_runs.values()
             ],
             "events": self.store.events[-80:],
+            "event_sequence": self.store._event_sequence,
+            "executed_idempotency_keys": self.store.executed_idempotency_keys,
         }
+        if self.repository:
+            self.repository.save(data)
+        if self.event_publisher:
+            try:
+                self.event_publisher.publish(data["events"])
+            except Exception as exc:  # Redis is live acceleration, not the source of truth.
+                self.event_publisher.last_error = str(exc)
+        return data

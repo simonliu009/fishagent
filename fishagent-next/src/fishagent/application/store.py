@@ -1,12 +1,14 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from fishagent.domain.models import (
     ActionProposal,
     AgentRun,
+    AgentStep,
     Approval,
     ApprovalStatus,
     CameraSource,
+    CommandStatus,
     Device,
     DeviceCommand,
     Evidence,
@@ -16,11 +18,13 @@ from fishagent.domain.models import (
     JobStatus,
     ManualTask,
     Pond,
+    RiskLevel,
     ScheduleDefinition,
     ScheduleStatus,
     ScheduledJob,
     Sensor,
     SensorReading,
+    TaskStatus,
     VerificationPlan,
     VerificationResult,
     new_id,
@@ -48,6 +52,7 @@ class InMemoryStore:
         self.agent_runs: Dict[str, AgentRun] = {}
         self.events: List[dict] = []
         self.executed_idempotency_keys: Dict[str, str] = {}
+        self._event_sequence = 0
         self.emit("system.started", "系统已启动，等待显式初始化资产或接入真实数据")
 
     def reset_demo(self) -> None:
@@ -94,9 +99,10 @@ class InMemoryStore:
         self.emit("system.demo.initialized", "演示数据已初始化：B-01、溶氧传感器、增氧机")
 
     def emit(self, event_type: str, summary: str, payload: Optional[dict] = None, correlation_id: Optional[str] = None) -> None:
+        self._event_sequence += 1
         self.events.append(
             {
-                "sequence": len(self.events) + 1,
+                "sequence": self._event_sequence,
                 "event_id": new_id("evt"),
                 "occurred_at": utcnow().isoformat(),
                 "correlation_id": correlation_id,
@@ -105,6 +111,205 @@ class InMemoryStore:
                 "payload": payload or {},
             }
         )
+
+    @staticmethod
+    def _datetime(value: object, default: Optional[datetime] = None) -> Optional[datetime]:
+        if value is None:
+            return default
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+    def restore_snapshot(self, payload: dict) -> None:
+        """Restore a JSON-safe state snapshot without emitting seed events."""
+        self.farms = {item["id"]: Farm(**item) for item in payload.get("farms", [])}
+        self.ponds = {item["id"]: Pond(**item) for item in payload.get("ponds", [])}
+        self.sensors = {item["id"]: Sensor(**item) for item in payload.get("sensors", [])}
+        self.devices = {item["id"]: Device(**item) for item in payload.get("devices", [])}
+        self.cameras = {
+            item["id"]: CameraSource(
+                id=item["id"],
+                pond_id=item["pond_id"],
+                name=item["name"],
+                source_type=item["source_type"],
+                status=item.get("status", "UNAVAILABLE"),
+                last_frame_at=self._datetime(item.get("last_frame_at")),
+            )
+            for item in payload.get("cameras", [])
+        }
+        self.readings = [
+            SensorReading(
+                pond_id=item["pond_id"],
+                sensor_id=item["sensor_id"],
+                metric=item["metric"],
+                value=float(item["value"]),
+                unit=item["unit"],
+                sampled_at=self._datetime(item["sampled_at"]) or utcnow(),
+                received_at=self._datetime(item.get("received_at")) or utcnow(),
+                quality=item.get("quality", "GOOD"),
+                source_event_id=item["source_event_id"],
+            )
+            for item in payload.get("readings", [])
+        ]
+        self.incidents = {}
+        for item in payload.get("incidents", []):
+            incident = Incident(
+                id=item["id"],
+                pond_id=item["pond_id"],
+                title=item["title"],
+                status=IncidentStatus(item.get("status", IncidentStatus.DETECTED.value)),
+                risk=RiskLevel(item.get("risk", RiskLevel.L1.value)),
+                evidence=[
+                    Evidence(
+                        id=evidence["id"],
+                        type=evidence["type"],
+                        summary=evidence["summary"],
+                        created_at=self._datetime(evidence.get("created_at")) or utcnow(),
+                        refs=evidence.get("refs", []),
+                    )
+                    for evidence in item.get("evidence", [])
+                ],
+                action_proposal_ids=item.get("action_proposal_ids", []),
+                command_ids=item.get("command_ids", []),
+                verification_plan_id=item.get("verification_plan_id"),
+                verification_result_ids=item.get("verification_result_ids", []),
+                manual_task_ids=item.get("manual_task_ids", []),
+                verification_due_at=self._datetime(item.get("verification_due_at")),
+                assignee=item.get("assignee"),
+            )
+            self.incidents[incident.id] = incident
+        self.action_proposals = {
+            item["id"]: ActionProposal(
+                id=item["id"],
+                incident_id=item["incident_id"],
+                device_id=item["device_id"],
+                pond_id=item["pond_id"],
+                target_state=item["target_state"],
+                risk=RiskLevel(item["risk"]),
+                rationale=item["rationale"],
+                evidence_refs=item.get("evidence_refs", []),
+                status=item.get("status", "PROPOSED"),
+                approval_id=item.get("approval_id"),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+            )
+            for item in payload.get("action_proposals", [])
+        }
+        self.approvals = {
+            item["id"]: Approval(
+                id=item["id"],
+                proposal_id=item["proposal_id"],
+                incident_id=item["incident_id"],
+                status=ApprovalStatus(item.get("status", ApprovalStatus.PENDING.value)),
+                requested_by=item.get("requested_by", "execution-agent"),
+                decided_by=item.get("decided_by"),
+                reason=item.get("reason", ""),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+                decided_at=self._datetime(item.get("decided_at")),
+            )
+            for item in payload.get("approvals", [])
+        }
+        self.commands = {
+            item["id"]: DeviceCommand(
+                id=item["id"],
+                device_id=item["device_id"],
+                pond_id=item["pond_id"],
+                target_state=item["target_state"],
+                risk=RiskLevel(item["risk"]),
+                idempotency_key=item["idempotency_key"],
+                status=CommandStatus(item.get("status", CommandStatus.PROPOSED.value)),
+                policy_reason=item.get("policy_reason", ""),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+            )
+            for item in payload.get("commands", [])
+        }
+        self.verification_plans = {
+            item["id"]: VerificationPlan(
+                id=item["id"],
+                incident_id=item["incident_id"],
+                metric=item.get("metric", "DO"),
+                threshold=float(item.get("threshold", 4.0)),
+                earliest_at=self._datetime(item.get("earliest_at")),
+                latest_at=self._datetime(item.get("latest_at")),
+                status=item.get("status", "PENDING"),
+            )
+            for item in payload.get("verification_plans", [])
+        }
+        self.verification_results = {
+            item["id"]: VerificationResult(
+                id=item["id"],
+                incident_id=item["incident_id"],
+                plan_id=item["plan_id"],
+                outcome=item["outcome"],
+                observed_value=item.get("observed_value"),
+                evidence_refs=item.get("evidence_refs", []),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+            )
+            for item in payload.get("verification_results", [])
+        }
+        self.manual_tasks = {
+            item["id"]: ManualTask(
+                id=item["id"],
+                incident_id=item.get("incident_id"),
+                title=item["title"],
+                description=item["description"],
+                assignee=item.get("assignee", "现场操作员"),
+                priority=item.get("priority", "HIGH"),
+                status=TaskStatus(item.get("status", TaskStatus.OPEN.value)),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+                completed_at=self._datetime(item.get("completed_at")),
+            )
+            for item in payload.get("manual_tasks", [])
+        }
+        self.schedules = {
+            item["id"]: ScheduleDefinition(
+                id=item["id"],
+                name=item["name"],
+                job_type=item["job_type"],
+                interval_seconds=int(item["interval_seconds"]),
+                status=ScheduleStatus(item.get("status", ScheduleStatus.ACTIVE.value)),
+                next_run_at=self._datetime(item.get("next_run_at")),
+                last_run_at=self._datetime(item.get("last_run_at")),
+            )
+            for item in payload.get("schedules", [])
+        }
+        self.scheduled_jobs = {
+            item["id"]: ScheduledJob(
+                id=item["id"],
+                job_type=item["job_type"],
+                idempotency_key=item["idempotency_key"],
+                due_at=self._datetime(item["due_at"]) or utcnow(),
+                incident_id=item.get("incident_id"),
+                schedule_id=item.get("schedule_id"),
+                status=JobStatus(item.get("status", JobStatus.DUE.value)),
+                attempts=int(item.get("attempts", 0)),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+            )
+            for item in payload.get("scheduled_jobs", [])
+        }
+        self.agent_runs = {}
+        for item in payload.get("agent_runs", []):
+            run = AgentRun(
+                id=item["id"],
+                goal=item["goal"],
+                incident_id=item.get("incident_id"),
+                status=item.get("status", "QUEUED"),
+                stop_reason=item.get("stop_reason"),
+                delegated_agents=item.get("delegated_agents", []),
+                budget=item.get("budget", {"delegations": 8, "tool_calls": 20, "seconds": 90}),
+            )
+            run.steps = [
+                AgentStep(
+                    agent=step["agent"],
+                    action=step["action"],
+                    summary=step["summary"],
+                    created_at=self._datetime(step.get("created_at")) or utcnow(),
+                )
+                for step in item.get("steps", [])
+            ]
+            self.agent_runs[run.id] = run
+        self.events = payload.get("events", [])
+        self._event_sequence = int(payload.get("event_sequence", max((event.get("sequence", 0) for event in self.events), default=0)))
+        self.executed_idempotency_keys = payload.get("executed_idempotency_keys", {})
 
     def add_reading(self, reading: SensorReading) -> Optional[Incident]:
         if any(item.source_event_id == reading.source_event_id for item in self.readings):

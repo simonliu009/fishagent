@@ -61,6 +61,12 @@ class LLMConfig:
 class AppConfig:
     host: str = "0.0.0.0"
     port: int = 3008
+    database_url: str = ""
+    redis_url: str = ""
+    minio_endpoint: str = ""
+    auth_enabled: bool = False
+    auth_username: str = "admin"
+    auth_password: str = ""
     llm: LLMConfig = None
 
     @classmethod
@@ -68,6 +74,12 @@ class AppConfig:
         return cls(
             host=os.environ.get("FISHAGENT_HOST", "0.0.0.0"),
             port=int(os.environ.get("FISHAGENT_PORT", "3008")),
+            database_url=os.environ.get("FISHAGENT_DATABASE_URL", ""),
+            redis_url=os.environ.get("FISHAGENT_REDIS_URL", ""),
+            minio_endpoint=os.environ.get("FISHAGENT_MINIO_ENDPOINT", ""),
+            auth_enabled=_bool_env("FISHAGENT_AUTH_ENABLED", False),
+            auth_username=os.environ.get("FISHAGENT_ADMIN_USERNAME", "admin"),
+            auth_password=os.environ.get("FISHAGENT_ADMIN_PASSWORD", ""),
             llm=LLMConfig.from_env(),
         )
 

@@ -5,25 +5,41 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import AppConfig, RuntimeConfigStore
 from fishagent.domain.models import RiskLevel, ScheduleStatus
+from fishagent.infrastructure.persistence import PersistenceError, repository_from_config
+from fishagent.infrastructure.realtime import publisher_from_config
+from fishagent.infrastructure.object_store import object_store_from_config
+from fishagent.infrastructure.auth import auth_from_config
 
 
-SYSTEM = FishAgentSystem()
 CONFIG = AppConfig.from_env()
+REPOSITORY = repository_from_config(CONFIG.database_url)
+EVENT_PUBLISHER = publisher_from_config(CONFIG.redis_url)
+OBJECT_STORE = object_store_from_config(CONFIG.minio_endpoint)
+SYSTEM = FishAgentSystem(repository=REPOSITORY, event_publisher=EVENT_PUBLISHER)
+AUTH = auth_from_config(CONFIG.auth_enabled, CONFIG.auth_username, CONFIG.auth_password)
 CONFIG_STORE = RuntimeConfigStore()
 CONFIG.llm = CONFIG_STORE.load_llm(CONFIG.llm)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
+def json_response(
+    handler: BaseHTTPRequestHandler,
+    status: int,
+    payload: dict,
+    headers: Optional[dict[str, str]] = None,
+) -> None:
     data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(data)))
+    for key, value in (headers or {}).items():
+        handler.send_header(key, value)
     handler.end_headers()
     handler.wfile.write(data)
 
@@ -81,6 +97,34 @@ def parse_risk(value: object) -> RiskLevel:
         return RiskLevel(str(value or "L2").upper())
     except ValueError as exc:
         raise ValueError("risk must be L0, L1, L2 or L3") from exc
+
+
+def auth_roles_for_path(path: str) -> set[str]:
+    if "/approve" in path or "/reject" in path or path.startswith("/api/v1/config"):
+        return {"admin", "manager"}
+    if path.startswith("/api/v1/farms") or path.startswith("/api/v1/ponds") or path.startswith("/api/v1/sensors"):
+        return {"admin", "manager"}
+    if path.startswith("/api/v1/devices") or path.startswith("/api/v1/cameras"):
+        return {"admin", "manager"}
+    return {"admin", "manager", "operator", "viewer"}
+
+
+def authorize(handler: BaseHTTPRequestHandler, path: str, write: bool = False) -> bool:
+    if not AUTH.enabled:
+        handler.auth_session = AUTH.authenticate("")
+        return True
+    session = AUTH.authenticate(handler.headers.get("Cookie", ""))
+    if session is None:
+        problem(handler, 401, "Authentication required", "请先登录")
+        return False
+    if session.role not in auth_roles_for_path(path):
+        problem(handler, 403, "Forbidden", "当前角色没有此操作权限")
+        return False
+    if write and handler.headers.get("X-CSRF-Token") != session.csrf_token:
+        problem(handler, 403, "CSRF validation failed", "缺少有效 CSRF Token")
+        return False
+    handler.auth_session = session
+    return True
 
 
 def test_llm_connection() -> dict:
@@ -189,6 +233,15 @@ def page() -> str:
     <div class="header-metrics" id="top_metrics"></div>
   </header>
   <main>
+    <section class="panel" id="login_panel" style="display:none; margin-bottom:16px">
+      <div class="panel-title"><h2>登录</h2><span class="status warn">需要身份验证</span></div>
+      <div class="form-grid">
+        <label>用户名<input id="auth_username" value="admin" autocomplete="username"></label>
+        <label>密码<input id="auth_password" type="password" autocomplete="current-password"></label>
+      </div>
+      <div class="actions" style="margin-top:10px"><button class="blue" onclick="login()">登录</button></div>
+      <div id="auth_message" class="muted" style="margin-top:8px"></div>
+    </section>
     <div class="grid">
       <section class="panel">
         <div class="panel-title"><h2>运营总览</h2><span class="status badge-blue">实时状态</span></div>
@@ -276,10 +329,27 @@ def page() -> str:
     </section>
   </main>
 <script>
+let csrfToken = '';
 async function api(path, options) {
-  const res = await fetch(path, options || {});
+  const request = options || {};
+  request.headers = Object.assign({}, request.headers || {});
+  if (csrfToken && request.method && request.method !== 'GET') request.headers['X-CSRF-Token'] = csrfToken;
+  const res = await fetch(path, request);
   if (!res.ok) throw new Error(await res.text());
   return await res.json();
+}
+async function login() {
+  try {
+    const result = await api('/api/v1/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      username: document.getElementById('auth_username').value,
+      password: document.getElementById('auth_password').value
+    })});
+    csrfToken = result.csrf_token;
+    document.getElementById('login_panel').style.display = 'none';
+    await refresh();
+  } catch (err) {
+    document.getElementById('auth_message').textContent = '登录失败：' + err.message;
+  }
 }
 async function demo(mode) {
   await api('/api/v1/demo/' + mode, {method:'POST'});
@@ -475,12 +545,16 @@ function renderAssets(data) {
   ].join('');
 }
 async function refresh() {
-  const state = await api('/api/v1/state');
-  render(state);
-  const cfg = await api('/api/v1/config/llm');
-  renderLLM(cfg.llm);
+  try {
+    const state = await api('/api/v1/state');
+    render(state);
+    const cfg = await api('/api/v1/config/llm');
+    renderLLM(cfg.llm);
+  } catch (err) {
+    if (String(err.message).includes('401')) document.getElementById('login_panel').style.display = 'block';
+  }
 }
-refresh();
+api('/api/v1/auth/config').then(config => { if (config.enabled) document.getElementById('login_panel').style.display = 'block'; }).finally(refresh);
 syncAssetForm();
 setInterval(refresh, 5000);
 </script>
@@ -494,12 +568,51 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        if path in {"/api/v1/auth/config", "/auth/config"}:
+            json_response(self, 200, {"enabled": AUTH.enabled})
+            return
+        if path in {"/me", "/api/v1/me"}:
+            if not authorize(self, path):
+                return
+            session = getattr(self, "auth_session")
+            json_response(self, 200, {"username": session.username, "role": session.role})
+            return
+        if path not in {"/", "/static/fish.svg", "/health/live", "/health/ready"} and not authorize(self, path):
+            return
         if path == "/":
             html_response(self, page())
         elif path == "/static/fish.svg":
             svg_response(self, (STATIC_DIR / "fish.svg").read_text(encoding="utf-8"))
-        elif path in {"/health/live", "/health/ready"}:
+        elif path == "/health/live":
             json_response(self, 200, {"status": "ok", "port": CONFIG.port})
+        elif path == "/health/ready":
+            if AUTH.enabled and not CONFIG.auth_password:
+                json_response(
+                    self,
+                    503,
+                    {
+                        "status": "not_ready",
+                        "port": CONFIG.port,
+                        "detail": "FISHAGENT_ADMIN_PASSWORD must be set when authentication is enabled",
+                    },
+                )
+                return
+            try:
+                persistence = REPOSITORY.health() if REPOSITORY else {"status": "ok", "backend": "memory"}
+            except PersistenceError as exc:
+                json_response(
+                    self,
+                    503,
+                    {"status": "not_ready", "port": CONFIG.port, "backend": "postgres", "detail": str(exc)},
+                )
+                return
+            realtime = EVENT_PUBLISHER.health() if EVENT_PUBLISHER else {"status": "disabled", "backend": "redis"}
+            media = OBJECT_STORE.health() if OBJECT_STORE else {"status": "disabled", "backend": "minio"}
+            json_response(
+                self,
+                200,
+                {"status": "ok", "port": CONFIG.port, "persistence": persistence, "realtime": realtime, "media": media},
+            )
         elif path == "/api/v1/state":
             json_response(self, 200, SYSTEM.snapshot())
         elif path == "/api/v1/config/llm":
@@ -552,6 +665,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if path in {"/auth/login", "/api/v1/auth/login"}:
+            payload = read_json_body(self)
+            session = AUTH.login(str(payload.get("username") or ""), str(payload.get("password") or ""))
+            if session is None:
+                problem(self, 401, "Invalid credentials", "用户名或密码错误")
+                return
+            json_response(
+                self,
+                200,
+                {"user": {"username": session.username, "role": session.role}, "csrf_token": session.csrf_token},
+                headers={
+                    "Set-Cookie": "fishagent_session=%s; HttpOnly; Path=/; SameSite=Strict" % session.token,
+                },
+            )
+            return
+        if path in {"/auth/logout", "/api/v1/auth/logout"}:
+            AUTH.logout(self.headers.get("Cookie", ""))
+            json_response(
+                self,
+                200,
+                {"logged_out": True},
+                headers={"Set-Cookie": "fishagent_session=; Max-Age=0; HttpOnly; Path=/; SameSite=Strict"},
+            )
+            return
+        if not authorize(self, path, write=True):
+            return
         if path.startswith("/api/v1/demo/"):
             mode = path.rsplit("/", 1)[-1]
             if mode == "init":
