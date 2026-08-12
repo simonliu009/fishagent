@@ -1,11 +1,15 @@
 import argparse
 import json
+import threading
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import AppConfig, RuntimeConfigStore
+from fishagent.domain.models import RiskLevel, ScheduleStatus
 
 
 SYSTEM = FishAgentSystem()
@@ -68,6 +72,35 @@ def create_asset(name: str, payload: dict):
     return creators[name](payload)
 
 
+def state_item(collection: str, item_id: str) -> dict | None:
+    return next((item for item in SYSTEM.snapshot().get(collection, []) if item.get("id") == item_id), None)
+
+
+def parse_risk(value: object) -> RiskLevel:
+    try:
+        return RiskLevel(str(value or "L2").upper())
+    except ValueError as exc:
+        raise ValueError("risk must be L0, L1, L2 or L3") from exc
+
+
+def test_llm_connection() -> dict:
+    if not CONFIG.llm.api_key:
+        raise ValueError("API Key 未配置")
+    url = CONFIG.llm.base_url.rstrip("/") + "/models"
+    request = Request(
+        url,
+        headers={"Authorization": "Bearer %s" % CONFIG.llm.api_key, "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=8) as response:
+            return {"ok": 200 <= response.status < 300, "status_code": response.status, "endpoint": url}
+    except HTTPError as exc:
+        return {"ok": False, "status_code": exc.code, "endpoint": url, "detail": "模型服务拒绝了连接"}
+    except URLError as exc:
+        return {"ok": False, "status_code": 0, "endpoint": url, "detail": "无法连接模型服务：%s" % exc.reason}
+
+
 def page() -> str:
     return """<!doctype html>
 <html lang="zh-CN">
@@ -98,7 +131,7 @@ def page() -> str:
     .brand img { width: 42px; height: 42px; border-radius: 10px; box-shadow: 0 8px 22px rgba(0,0,0,.22); }
     h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
     .topline { color: #c8f7ef; font-size: 13px; margin-top: 4px; }
-    .header-metrics { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 10px; width: min(560px, 100%); }
+    .header-metrics { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 10px; width: min(560px, 100%); }
     .header-metric { border: 1px solid rgba(255,255,255,.22); background: rgba(255,255,255,.08); border-radius: 8px; padding: 10px; }
     .header-metric b { display:block; font-size: 18px; }
     .header-metric span { color:#cde8e5; font-size: 12px; }
@@ -166,6 +199,7 @@ def page() -> str:
           <button onclick="demo('success')">成功闭环</button>
           <button onclick="demo('failure')">复核失败升级</button>
           <button onclick="demo('dedup')">防重复动作</button>
+          <button class="warn" onclick="demo('approval')">L2 审批演示</button>
           <button class="secondary" onclick="refresh()">刷新</button>
         </div>
         <h3>资产管理</h3>
@@ -195,7 +229,29 @@ def page() -> str:
     </div>
     <section class="panel" style="margin-top:16px">
       <div class="panel-title"><h2>Agent 控制室</h2><span class="status warn">确定性 Flow + 多 Agent 轨迹</span></div>
+      <div class="form-grid">
+        <label class="wide">用户目标<input id="agent_goal" value="巡查全场" placeholder="例如：巡查全场或检查 B-01 溶氧"></label>
+        <label>指定池塘（可选）<input id="agent_pond_id" placeholder="B-01"></label>
+      </div>
+      <div class="actions" style="margin:10px 0"><button class="blue" onclick="runGoal()">提交 Agent 目标</button></div>
+      <div id="agent_message" class="muted" style="margin-bottom:10px"></div>
       <div id="runs"></div>
+    </section>
+    <section class="panel" style="margin-top:16px">
+      <div class="panel-title"><h2>审批与人工任务</h2><span class="status warn">L2 必须审批 · L3 仅人工</span></div>
+      <div id="work_queue"></div>
+    </section>
+    <section class="panel" style="margin-top:16px">
+      <div class="panel-title"><h2>调度中心</h2><span class="status badge-blue">到期复核 / 全场巡查</span></div>
+      <div class="form-grid">
+        <label>调度名称<input id="schedule_name" value="全场巡查"></label>
+        <label>周期（秒）<input id="schedule_interval" type="number" min="5" value="300"></label>
+      </div>
+      <div class="actions" style="margin-top:10px">
+        <button class="blue" onclick="createSchedule()">创建调度</button>
+        <button class="secondary" onclick="dispatchJobs()">立即处理到期作业</button>
+      </div>
+      <div id="schedules" style="margin-top:12px"></div>
     </section>
     <section class="panel" style="margin-top:16px">
       <div class="panel-title"><h2>资产台账</h2><span class="status badge-blue">Farm / Pond / Sensor / Device / Camera</span></div>
@@ -211,7 +267,7 @@ def page() -> str:
         <label>API Key<input id="llm_api_key" type="password" placeholder="留空则保持当前密钥"></label>
         <label><input id="llm_enabled" type="checkbox" style="width:auto"> 启用模型调用</label>
       </div>
-      <div class="actions" style="margin-top:10px"><button onclick="saveModelConfig()">保存模型配置</button></div>
+      <div class="actions" style="margin-top:10px"><button onclick="saveModelConfig()">保存模型配置</button><button class="secondary" onclick="testModelConfig()">测试连接</button></div>
       <div id="llm_status" class="muted" style="margin-top:8px"></div>
     </section>
     <section class="panel" style="margin-top:16px">
@@ -286,6 +342,61 @@ async function saveModelConfig() {
   const data = await api('/api/v1/config/llm', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
   renderLLM(data.llm);
 }
+async function testModelConfig() {
+  const status = await api('/api/v1/config/llm/test', {method:'POST'});
+  document.getElementById('llm_status').textContent = status.ok ? '连接成功：HTTP ' + status.status_code : '连接失败：' + (status.detail || ('HTTP ' + status.status_code));
+}
+async function approveProposal(proposalId) {
+  await api('/api/v1/action-proposals/' + proposalId + '/approve', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({approver:'现场负责人', reason:'控制台确认执行'})
+  });
+  await refresh();
+}
+async function rejectProposal(proposalId) {
+  await api('/api/v1/action-proposals/' + proposalId + '/reject', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({approver:'现场负责人', reason:'控制台拒绝'})
+  });
+  await refresh();
+}
+async function completeTask(taskId) {
+  await api('/api/v1/manual-tasks/' + taskId + '/complete', {method:'POST'});
+  await refresh();
+}
+async function createSchedule() {
+  await api('/api/v1/schedules', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      name: document.getElementById('schedule_name').value,
+      interval_seconds: Number(document.getElementById('schedule_interval').value),
+      job_type: 'patrol'
+    })
+  });
+  await refresh();
+}
+async function dispatchJobs() {
+  await api('/api/v1/scheduled-jobs:dispatch', {method:'POST'});
+  await refresh();
+}
+async function runGoal() {
+  const goal = document.getElementById('agent_goal').value;
+  const pondId = document.getElementById('agent_pond_id').value;
+  try {
+    const data = await api('/api/v1/agent-runs', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({goal: goal, pond_id: pondId || null})
+    });
+    document.getElementById('agent_message').textContent = '目标已完成：' + data.run.stop_reason;
+    await refresh();
+  } catch (err) {
+    document.getElementById('agent_message').textContent = '目标提交失败：' + err.message;
+  }
+}
+async function scheduleAction(scheduleId, action) {
+  await api('/api/v1/schedules/' + scheduleId + '/' + action, {method:'POST'});
+  await refresh();
+}
 function renderLLM(llm) {
   document.getElementById('llm_provider').value = llm.provider;
   document.getElementById('llm_base_url').value = llm.base_url;
@@ -299,11 +410,14 @@ function render(data) {
   const ponds = data.ponds || [];
   const sensors = data.sensors || [];
   const cameras = data.cameras || [];
+  const approvals = data.approvals || [];
+  const tasks = data.manual_tasks || [];
   const latest = incidents[incidents.length - 1];
   document.getElementById('top_metrics').innerHTML = [
     ['池塘', ponds.length],
     ['活动事件', incidents.filter(i => !['RESOLVED','ESCALATED','DISMISSED'].includes(i.status)).length],
-    ['待复核', incidents.filter(i => i.status === 'VERIFY_PENDING').length]
+    ['待复核', incidents.filter(i => i.status === 'VERIFY_PENDING').length],
+    ['待审批', approvals.filter(a => a.status === 'PENDING').length]
   ].map(x => '<div class="header-metric"><b>'+x[1]+'</b><span>'+x[0]+'</span></div>').join('');
   document.getElementById('cards').innerHTML = [
     ['养殖场', (data.farms || []).length, '资产'],
@@ -320,8 +434,31 @@ function render(data) {
   ].map(x => '<div class="asset-tile"><b>'+x[0]+'</b><div class="metric">'+x[1].length+'</div><div class="muted">'+(x[1][0]?.name || '暂无')+'</div></div>').join('');
   document.getElementById('events').innerHTML = (data.events || []).slice().reverse().map(e => '<div class="event"><b>#'+e.sequence+' '+e.event_type+'</b><div>'+e.summary+'</div><div class="muted">'+e.occurred_at+'</div></div>').join('');
   document.getElementById('runs').innerHTML = (data.agent_runs || []).slice().reverse().map(r => '<div class="card" style="margin-bottom:8px"><b>'+r.goal+'</b> <span class="status">'+r.status+'</span><div class="muted">停止原因：'+(r.stop_reason || '-')+' · 委派：'+r.delegated_agents.join(' → ')+'</div><ol>'+r.steps.map(s => '<li>'+s.agent+' / '+s.action+'：'+s.summary+'</li>').join('')+'</ol></div>').join('');
+  renderWorkQueue(data);
+  renderSchedules(data);
   renderAssets(data);
   document.getElementById('raw').textContent = JSON.stringify(data, null, 2);
+}
+function renderWorkQueue(data) {
+  const proposals = data.action_proposals || [];
+  const approvals = data.approvals || [];
+  const tasks = data.manual_tasks || [];
+  const pending = approvals.filter(a => a.status === 'PENDING').map(a => {
+    const proposal = proposals.find(p => p.id === a.proposal_id) || {};
+    return '<div class="card" style="margin-bottom:8px"><b>审批：'+(proposal.rationale || proposal.id)+'</b><span class="status warn">风险 '+(proposal.risk || '?')+'</span><div class="muted">池塘：'+(proposal.pond_id || '-')+' · 设备：'+(proposal.device_id || '-')+'</div><div class="actions" style="margin-top:8px"><button data-id="'+proposal.id+'" onclick="approveProposal(this.dataset.id)">批准执行</button><button class="secondary" data-id="'+proposal.id+'" onclick="rejectProposal(this.dataset.id)">拒绝</button></div></div>';
+  }).join('');
+  const openTasks = tasks.filter(t => t.status !== 'COMPLETED' && t.status !== 'CANCELLED').map(t => '<div class="card" style="margin-bottom:8px"><b>'+t.title+'</b><span class="status warn">'+t.priority+'</span><div>'+t.description+'</div><div class="muted">负责人：'+t.assignee+' · '+t.status+'</div><div class="actions" style="margin-top:8px"><button class="blue" data-id="'+t.id+'" onclick="completeTask(this.dataset.id)">标记完成</button></div></div>').join('');
+  document.getElementById('work_queue').innerHTML = (pending || openTasks) ? (pending + openTasks) : '<div class="muted">当前没有待审批或人工任务</div>';
+}
+function renderSchedules(data) {
+  const schedules = data.schedules || [];
+  const jobs = data.scheduled_jobs || [];
+  if (!schedules.length && !jobs.length) {
+    document.getElementById('schedules').innerHTML = '<div class="muted">暂无调度。创建后将保留周期定义和每次作业状态。</div>';
+    return;
+  }
+  document.getElementById('schedules').innerHTML = renderTable('调度定义', schedules, [['id','ID'],['name','名称'],['job_type','类型'],['interval_seconds','周期秒'],['status','状态'],['next_run_at','下次运行']]) +
+    '<h3>最近作业</h3>' + (jobs.length ? '<table><thead><tr><th>ID</th><th>类型</th><th>状态</th><th>到期时间</th><th>尝试</th></tr></thead><tbody>'+jobs.slice().reverse().slice(0,10).map(j => '<tr><td>'+j.id+'</td><td>'+j.job_type+'</td><td>'+j.status+'</td><td>'+j.due_at+'</td><td>'+j.attempts+'</td></tr>').join('')+'</tbody></table>' : '<div class="muted">暂无作业</div>');
 }
 function renderTable(title, rows, columns) {
   if (!rows.length) return '<h3>'+title+'</h3><div class="muted">暂无数据</div>';
@@ -369,10 +506,47 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, 200, {"llm": CONFIG.llm.public_dict()})
         elif path in {"/api/v1/farms", "/api/v1/ponds", "/api/v1/sensors", "/api/v1/devices", "/api/v1/cameras"}:
             json_response(self, 200, {path.rsplit("/", 1)[-1]: asset_collection(path.rsplit("/", 1)[-1])})
+        elif path == "/api/v1/incidents":
+            json_response(self, 200, {"incidents": SYSTEM.snapshot()["incidents"]})
+        elif path == "/api/v1/action-proposals":
+            json_response(self, 200, {"action_proposals": SYSTEM.snapshot()["action_proposals"]})
+        elif path == "/api/v1/approvals":
+            json_response(self, 200, {"approvals": SYSTEM.snapshot()["approvals"]})
+        elif path == "/api/v1/manual-tasks":
+            json_response(self, 200, {"manual_tasks": SYSTEM.snapshot()["manual_tasks"]})
+        elif path == "/api/v1/schedules":
+            json_response(self, 200, {"schedules": SYSTEM.snapshot()["schedules"]})
+        elif path == "/api/v1/scheduled-jobs":
+            json_response(self, 200, {"scheduled_jobs": SYSTEM.snapshot()["scheduled_jobs"]})
+        elif path == "/api/v1/telemetry/snapshot":
+            readings = SYSTEM.snapshot()["readings"]
+            latest = {}
+            for reading in readings:
+                latest["%s:%s" % (reading["pond_id"], reading["metric"])] = reading
+            json_response(self, 200, {"readings": list(latest.values())})
+        elif path == "/api/v1/telemetry/series":
+            query = parse_qs(urlparse(self.path).query)
+            pond_id = query.get("pond_id", [""])[0]
+            metric = query.get("metric", ["DO"])[0]
+            limit = min(int(query.get("limit", ["100"])[0]), 1000)
+            readings = [
+                reading
+                for reading in SYSTEM.snapshot()["readings"]
+                if reading["pond_id"] == pond_id and reading["metric"] == metric
+            ]
+            json_response(self, 200, {"readings": readings[-limit:]})
         elif path == "/api/v1/events":
             query = parse_qs(urlparse(self.path).query)
             after = int(query.get("after", ["0"])[0])
             json_response(self, 200, {"events": [e for e in SYSTEM.store.events if e["sequence"] > after]})
+        elif path.startswith("/api/v1/incidents/") and path.count("/") == 4:
+            incident = state_item("incidents", path.rsplit("/", 1)[-1])
+            if incident is None:
+                problem(self, 404, "Incident not found")
+            else:
+                json_response(self, 200, {"incident": incident})
+        elif path.startswith("/api/v1/agent-runs"):
+            json_response(self, 200, {"agent_runs": SYSTEM.snapshot()["agent_runs"]})
         else:
             problem(self, 404, "Not Found")
 
@@ -383,10 +557,18 @@ class Handler(BaseHTTPRequestHandler):
             if mode == "init":
                 json_response(self, 200, SYSTEM.initialize_demo())
                 return
-            if mode not in {"success", "failure", "dedup"}:
+            if mode not in {"success", "failure", "dedup", "approval"}:
                 json_response(self, 400, {"type": "bad_request", "title": "Unknown demo mode", "status": 400})
                 return
             json_response(self, 200, SYSTEM.run_demo(mode))
+            return
+        if path == "/api/v1/config/llm/test":
+            try:
+                result = test_llm_connection()
+            except ValueError as exc:
+                problem(self, 400, "LLM connection test unavailable", str(exc))
+                return
+            json_response(self, 200 if result["ok"] else 502, result)
             return
         if path == "/api/v1/config/llm":
             payload = read_json_body(self)
@@ -400,6 +582,128 @@ class Handler(BaseHTTPRequestHandler):
             )
             CONFIG_STORE.save_llm(CONFIG.llm)
             json_response(self, 200, {"llm": CONFIG.llm.public_dict()})
+            return
+        if path == "/api/v1/agent-runs":
+            payload = read_json_body(self)
+            try:
+                run = SYSTEM.run_goal(str(payload.get("goal") or ""), payload.get("pond_id"))
+            except ValueError as exc:
+                problem(self, 400, "Invalid agent goal", str(exc))
+                return
+            snapshot_run = next(item for item in SYSTEM.snapshot()["agent_runs"] if item["id"] == run.id)
+            json_response(self, 202, {"run": snapshot_run, "state": SYSTEM.snapshot()})
+            return
+        if path == "/api/v1/action-proposals":
+            payload = read_json_body(self)
+            try:
+                proposal = SYSTEM.propose_action(
+                    incident_id=str(payload.get("incident_id") or ""),
+                    device_id=str(payload.get("device_id") or ""),
+                    target_state=str(payload.get("target_state") or "on"),
+                    risk=parse_risk(payload.get("risk")),
+                    rationale=str(payload.get("rationale") or ""),
+                )
+            except (KeyError, ValueError) as exc:
+                problem(self, 400, "Invalid action proposal", str(exc))
+                return
+            json_response(self, 201, {"proposal": state_item("action_proposals", proposal.id), "state": SYSTEM.snapshot()})
+            return
+        if path.startswith("/api/v1/action-proposals/"):
+            parts = path.split("/")
+            if len(parts) == 6 and parts[-1] in {"approve", "reject"}:
+                proposal_id = parts[-2]
+                payload = read_json_body(self)
+                try:
+                    if parts[-1] == "approve":
+                        command = SYSTEM.approve_action(
+                            proposal_id,
+                            str(payload.get("approver") or "现场负责人"),
+                            str(payload.get("reason") or ""),
+                        )
+                        json_response(self, 200, {"command": command.__dict__, "state": SYSTEM.snapshot()})
+                    else:
+                        approval = SYSTEM.reject_action(
+                            proposal_id,
+                            str(payload.get("approver") or "现场负责人"),
+                            str(payload.get("reason") or "未提供原因"),
+                        )
+                        json_response(self, 200, {"approval": approval.__dict__, "state": SYSTEM.snapshot()})
+                except (KeyError, ValueError) as exc:
+                    problem(self, 409, "Action decision rejected", str(exc))
+                return
+        if path.startswith("/api/v1/incidents/"):
+            parts = path.split("/")
+            if len(parts) == 6 and parts[-1] in {"approve", "reject", "verify"}:
+                payload = read_json_body(self)
+                try:
+                    if parts[-1] == "verify":
+                        incident = SYSTEM.verify_incident(parts[-2])
+                        json_response(self, 200, {"incident": state_item("incidents", incident.id), "state": SYSTEM.snapshot()})
+                    else:
+                        proposal_id = str(payload.get("proposal_id") or "")
+                        if parts[-1] == "approve":
+                            command = SYSTEM.approve_action(
+                                proposal_id,
+                                str(payload.get("approver") or "现场负责人"),
+                                str(payload.get("reason") or ""),
+                            )
+                            json_response(self, 200, {"command": command.__dict__, "state": SYSTEM.snapshot()})
+                        else:
+                            approval = SYSTEM.reject_action(
+                                proposal_id,
+                                str(payload.get("approver") or "现场负责人"),
+                                str(payload.get("reason") or "未提供原因"),
+                            )
+                            json_response(self, 200, {"approval": approval.__dict__, "state": SYSTEM.snapshot()})
+                except (KeyError, ValueError) as exc:
+                    problem(self, 409, "Incident action rejected", str(exc))
+                return
+        if path.startswith("/api/v1/manual-tasks/") and path.endswith("/complete"):
+            task_id = path.split("/")[-2]
+            try:
+                task = SYSTEM.complete_manual_task(task_id)
+            except KeyError as exc:
+                problem(self, 404, "Manual task not found", str(exc))
+                return
+            json_response(self, 200, {"task": task.__dict__, "state": SYSTEM.snapshot()})
+            return
+        if path == "/api/v1/manual-tasks":
+            payload = read_json_body(self)
+            task = SYSTEM.create_manual_task(
+                title=str(payload.get("title") or "现场处理任务"),
+                description=str(payload.get("description") or ""),
+                incident_id=payload.get("incident_id"),
+                assignee=str(payload.get("assignee") or "现场操作员"),
+                priority=str(payload.get("priority") or "HIGH"),
+            )
+            json_response(self, 201, {"task": task.__dict__, "state": SYSTEM.snapshot()})
+            return
+        if path == "/api/v1/schedules":
+            try:
+                schedule = SYSTEM.create_schedule(read_json_body(self))
+            except ValueError as exc:
+                problem(self, 400, "Invalid schedule", str(exc))
+                return
+            json_response(self, 201, {"schedule": schedule.__dict__, "state": SYSTEM.snapshot()})
+            return
+        if path.startswith("/api/v1/schedules/"):
+            parts = path.split("/")
+            if len(parts) == 6 and parts[-1] in {"pause", "resume", "run-now"}:
+                schedule_id = parts[-2]
+                try:
+                    if parts[-1] == "run-now":
+                        job = SYSTEM.run_schedule_now(schedule_id)
+                        json_response(self, 202, {"job": job.__dict__, "state": SYSTEM.snapshot()})
+                    else:
+                        status = ScheduleStatus.PAUSED if parts[-1] == "pause" else ScheduleStatus.ACTIVE
+                        schedule = SYSTEM.set_schedule_status(schedule_id, status)
+                        json_response(self, 200, {"schedule": schedule.__dict__, "state": SYSTEM.snapshot()})
+                except KeyError as exc:
+                    problem(self, 404, "Schedule not found", str(exc))
+                return
+        if path == "/api/v1/scheduled-jobs:dispatch":
+            jobs = SYSTEM.run_due_jobs()
+            json_response(self, 200, {"completed_job_ids": [job.id for job in jobs], "state": SYSTEM.snapshot()})
             return
         if path in {"/api/v1/farms", "/api/v1/ponds", "/api/v1/sensors", "/api/v1/devices", "/api/v1/cameras"}:
             collection = path.rsplit("/", 1)[-1]
@@ -415,18 +719,24 @@ class Handler(BaseHTTPRequestHandler):
             readings = payload.get("readings", [])
             accepted = 0
             incidents = []
-            for item in readings:
-                if item.get("metric") != "DO":
-                    continue
-                incident = SYSTEM.ingest_do(
-                    pond_id=str(item.get("pond_id", "")),
-                    value=float(item.get("value")),
-                    source_event_id=item.get("source_event_id"),
-                    seconds_old=int(item.get("seconds_old", 0)),
-                )
-                accepted += 1
-                if incident:
-                    incidents.append(incident.id)
+            try:
+                for item in readings:
+                    if item.get("metric") != "DO":
+                        continue
+                    incident = SYSTEM.ingest_do(
+                        pond_id=str(item.get("pond_id", "")),
+                        value=float(item.get("value")),
+                        source_event_id=item.get("source_event_id"),
+                        seconds_old=int(item.get("seconds_old", 0)),
+                        sensor_id=item.get("sensor_id"),
+                        quality=str(item.get("quality") or "GOOD"),
+                    )
+                    accepted += 1
+                    if incident:
+                        incidents.append(incident.id)
+            except (TypeError, ValueError) as exc:
+                problem(self, 400, "Invalid telemetry payload", str(exc))
+                return
             json_response(self, 202, {"accepted": accepted, "incident_ids": incidents, "state": SYSTEM.snapshot()})
             return
         problem(self, 404, "Not Found")
@@ -440,8 +750,24 @@ def main() -> None:
     CONFIG.host = args.host
     CONFIG.port = args.port
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    scheduler_stop = threading.Event()
+
+    def scheduler_loop() -> None:
+        while not scheduler_stop.wait(5):
+            try:
+                SYSTEM.run_due_jobs()
+            except Exception as exc:
+                SYSTEM.store.emit("scheduler.error", "调度循环异常：%s" % exc)
+
+    scheduler = threading.Thread(target=scheduler_loop, name="fishagent-scheduler", daemon=True)
+    scheduler.start()
     print("FishAgent web listening on http://%s:%s" % (args.host, args.port))
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        scheduler_stop.set()
+        scheduler.join(timeout=2)
+        server.server_close()
 
 
 if __name__ == "__main__":

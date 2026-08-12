@@ -48,6 +48,33 @@ class RiskLevel(str, Enum):
     L3 = "L3"
 
 
+class ApprovalStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+
+
+class TaskStatus(str, Enum):
+    OPEN = "OPEN"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class ScheduleStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+
+
+class JobStatus(str, Enum):
+    DUE = "DUE"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    RETRY_WAIT = "RETRY_WAIT"
+    DEAD_LETTER = "DEAD_LETTER"
+
+
 @dataclass
 class Farm:
     id: str
@@ -134,6 +161,93 @@ class DeviceCommand:
 
 
 @dataclass
+class ActionProposal:
+    id: str
+    incident_id: str
+    device_id: str
+    pond_id: str
+    target_state: str
+    risk: RiskLevel
+    rationale: str
+    evidence_refs: List[str] = field(default_factory=list)
+    status: str = "PROPOSED"
+    approval_id: Optional[str] = None
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class Approval:
+    id: str
+    proposal_id: str
+    incident_id: str
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    requested_by: str = "execution-agent"
+    decided_by: Optional[str] = None
+    reason: str = ""
+    created_at: datetime = field(default_factory=utcnow)
+    decided_at: Optional[datetime] = None
+
+
+@dataclass
+class VerificationPlan:
+    id: str
+    incident_id: str
+    metric: str = "DO"
+    threshold: float = 4.0
+    earliest_at: Optional[datetime] = None
+    latest_at: Optional[datetime] = None
+    status: str = "PENDING"
+
+
+@dataclass
+class VerificationResult:
+    id: str
+    incident_id: str
+    plan_id: str
+    outcome: str
+    observed_value: Optional[float] = None
+    evidence_refs: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class ManualTask:
+    id: str
+    incident_id: Optional[str]
+    title: str
+    description: str
+    assignee: str = "现场操作员"
+    priority: str = "HIGH"
+    status: TaskStatus = TaskStatus.OPEN
+    created_at: datetime = field(default_factory=utcnow)
+    completed_at: Optional[datetime] = None
+
+
+@dataclass
+class ScheduleDefinition:
+    id: str
+    name: str
+    job_type: str
+    interval_seconds: int
+    status: ScheduleStatus = ScheduleStatus.ACTIVE
+    next_run_at: Optional[datetime] = None
+    last_run_at: Optional[datetime] = None
+
+
+@dataclass
+class ScheduledJob:
+    id: str
+    job_type: str
+    idempotency_key: str
+    due_at: datetime
+    incident_id: Optional[str] = None
+    schedule_id: Optional[str] = None
+    status: JobStatus = JobStatus.DUE
+    attempts: int = 0
+    created_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
 class Incident:
     id: str
     pond_id: str
@@ -141,7 +255,11 @@ class Incident:
     status: IncidentStatus = IncidentStatus.DETECTED
     risk: RiskLevel = RiskLevel.L1
     evidence: List[Evidence] = field(default_factory=list)
+    action_proposal_ids: List[str] = field(default_factory=list)
     command_ids: List[str] = field(default_factory=list)
+    verification_plan_id: Optional[str] = None
+    verification_result_ids: List[str] = field(default_factory=list)
+    manual_task_ids: List[str] = field(default_factory=list)
     verification_due_at: Optional[datetime] = None
     assignee: Optional[str] = None
 

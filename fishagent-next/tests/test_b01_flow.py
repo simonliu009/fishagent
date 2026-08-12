@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.application.policy import evaluate_action
 from fishagent.core import LLMConfig, RuntimeConfigStore
-from fishagent.domain.models import RiskLevel, SensorReading, utcnow
+from fishagent.domain.models import IncidentStatus, JobStatus, RiskLevel, SensorReading, utcnow
 
 
 class B01FlowTest(unittest.TestCase):
@@ -69,6 +69,21 @@ class B01FlowTest(unittest.TestCase):
         )
         self.assertFalse(result.allowed)
         self.assertEqual(result.status, "REJECTED")
+
+    def test_policy_rejects_missing_evidence(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+        result = evaluate_action(
+            actor="execution-agent",
+            device=system.store.devices["aerator-b01-1"],
+            pond_id="B-01",
+            target_state="on",
+            risk=RiskLevel.L1,
+            latest_do=None,
+            idempotency_seen=False,
+        )
+        self.assertFalse(result.allowed)
+        self.assertIn("证据缺失", result.reason)
 
     def test_llm_config_public_dict_masks_secret(self) -> None:
         config = LLMConfig(api_key="sk-secret-value", enabled=True)
@@ -147,6 +162,61 @@ class B01FlowTest(unittest.TestCase):
             self.assertEqual(restored.model, "fish-ops-model")
             self.assertEqual(restored.api_key, "sk-persisted")
             self.assertTrue(restored.enabled)
+
+    def test_l2_action_waits_for_approval_and_executes_once_approved(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+        incident = system.ingest_do("B-01", 2.1, source_event_id="l2-low-do", auto_run=False)
+        self.assertIsNotNone(incident)
+        run = system.run_incident_flow(incident.id, risk_override=RiskLevel.L2)
+        state = system.snapshot()
+        self.assertEqual(run.stop_reason, "WAITING_APPROVAL")
+        self.assertEqual(state["incidents"][0]["status"], IncidentStatus.WAITING_APPROVAL.value)
+        self.assertEqual(state["approvals"][0]["status"], "PENDING")
+        self.assertEqual(state["commands"], [])
+
+        command = system.approve_action(state["action_proposals"][0]["id"], "manager", "确认现场低氧")
+        self.assertEqual(command.status.value, "CONFIRMED")
+        state = system.snapshot()
+        self.assertEqual(state["approvals"][0]["status"], "APPROVED")
+        self.assertEqual(state["incidents"][0]["status"], IncidentStatus.VERIFY_PENDING.value)
+        self.assertEqual(state["scheduled_jobs"][0]["status"], JobStatus.DUE.value)
+
+    def test_failed_verification_creates_manual_task_and_result(self) -> None:
+        system = FishAgentSystem()
+        state = system.run_demo("failure")
+        self.assertEqual(state["verification_results"][0]["outcome"], "FAILED")
+        self.assertTrue(state["manual_tasks"])
+        self.assertEqual(state["manual_tasks"][0]["status"], "OPEN")
+
+    def test_due_job_dispatch_runs_verification(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+        incident = system.ingest_do("B-01", 2.1, source_event_id="scheduled-low")
+        self.assertIsNotNone(incident)
+        system.store.force_verification_due(incident.id)
+        system.ingest_do("B-01", 5.0, source_event_id="scheduled-review", auto_run=False)
+        jobs = system.run_due_jobs()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(system.snapshot()["incidents"][0]["status"], IncidentStatus.RESOLVED.value)
+
+    def test_due_patrol_schedule_creates_job_and_agent_run(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+        schedule = system.create_schedule({"id": "patrol-1", "name": "每五秒巡查", "interval_seconds": 5})
+        schedule.next_run_at = utcnow()
+        jobs = system.run_due_jobs()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].status.value, "COMPLETED")
+        self.assertTrue(any(run["stop_reason"] == "PATROL_COMPLETED" for run in system.snapshot()["agent_runs"]))
+
+    def test_user_goal_can_start_patrol_without_demo_seed_side_effects(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+        run = system.run_goal("巡查全场")
+        self.assertEqual(run.status, "COMPLETED")
+        self.assertEqual(run.stop_reason, "PATROL_COMPLETED")
+        self.assertIn("sensor-monitor-agent", run.delegated_agents)
 
 
 if __name__ == "__main__":

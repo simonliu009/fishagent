@@ -14,6 +14,7 @@
 
 - `GET /api/v1/config/llm`
 - `POST /api/v1/config/llm`
+- `POST /api/v1/config/llm/test`：使用已保存的 API Key 请求 OpenAI-compatible `/models`，只返回连通性和 HTTP 状态。
 
 写入示例：
 

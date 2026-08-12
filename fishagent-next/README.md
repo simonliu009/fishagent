@@ -8,7 +8,7 @@
 - B-01 低溶氧事件闭环：感知、Agent 研判、策略门、模拟设备命令、复核、升级。
 - 成功、复核失败、防重复三条演示路径。
 - 只读/低风险自动/中高风险阻断的安全策略。
-- HTTP API 与浏览器控制台，前端端口 `3001`。
+- HTTP API 与浏览器控制台，当前前端端口 `3008`；`3001` 保留给 nginx。
 
 ## uv 环境
 
@@ -61,6 +61,17 @@ curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/telemetr
   -d '{"readings":[{"pond_id":"B-01","metric":"DO","value":2.1,"source_event_id":"manual-001"}]}'
 ```
 
+审批、人工任务和调度接口：
+
+```bash
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/demo/approval
+curl --noproxy localhost,127.0.0.1 http://localhost:3008/api/v1/approvals
+curl --noproxy localhost,127.0.0.1 http://localhost:3008/api/v1/manual-tasks
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/scheduled-jobs:dispatch
+```
+
+`POST /api/v1/action-proposals/{id}/approve` 只允许已创建的 L2 提案进入设备执行；L3 只会创建人工任务。服务进程每 5 秒运行一次轻量调度循环，复核和巡查作业也可以通过 `scheduled-jobs:dispatch` 显式触发。
+
 ## 测试
 
 ```bash
@@ -75,4 +86,4 @@ PYTHONPATH=src uv run python -m unittest discover -s tests
 
 ## 边界说明
 
-文档要求的 PostgreSQL、Redis、Celery、CrewAI、NiceGUI、MinIO 在本切片中以 Ports & Adapters 结构预留，但尚未接入真实服务。当前实现不在启动时隐式 seed；演示数据通过页面按钮、`/api/v1/demo/init` 或 demo 命令显式初始化。大模型配置保存到 `data/runtime_config.json`，API 响应不会回显完整密钥。
+文档要求的 PostgreSQL、Redis、Celery、CrewAI、NiceGUI、MinIO 在本切片中以边界和事件契约预留，但尚未接入真实服务；当前运行时使用内存领域存储和进程内调度器，重启后业务状态不会恢复。当前实现不在启动时隐式 seed；演示数据通过页面按钮、`/api/v1/demo/init` 或 demo 命令显式初始化。大模型配置保存到 `data/runtime_config.json`，API 响应不会回显完整密钥。

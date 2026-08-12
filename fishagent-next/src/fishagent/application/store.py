@@ -2,7 +2,10 @@ from datetime import timedelta
 from typing import Dict, List, Optional
 
 from fishagent.domain.models import (
+    ActionProposal,
     AgentRun,
+    Approval,
+    ApprovalStatus,
     CameraSource,
     Device,
     DeviceCommand,
@@ -10,9 +13,16 @@ from fishagent.domain.models import (
     Farm,
     Incident,
     IncidentStatus,
+    JobStatus,
+    ManualTask,
     Pond,
+    ScheduleDefinition,
+    ScheduleStatus,
+    ScheduledJob,
     Sensor,
     SensorReading,
+    VerificationPlan,
+    VerificationResult,
     new_id,
     utcnow,
 )
@@ -27,7 +37,14 @@ class InMemoryStore:
         self.cameras: Dict[str, CameraSource] = {}
         self.readings: List[SensorReading] = []
         self.incidents: Dict[str, Incident] = {}
+        self.action_proposals: Dict[str, ActionProposal] = {}
+        self.approvals: Dict[str, Approval] = {}
         self.commands: Dict[str, DeviceCommand] = {}
+        self.verification_plans: Dict[str, VerificationPlan] = {}
+        self.verification_results: Dict[str, VerificationResult] = {}
+        self.manual_tasks: Dict[str, ManualTask] = {}
+        self.schedules: Dict[str, ScheduleDefinition] = {}
+        self.scheduled_jobs: Dict[str, ScheduledJob] = {}
         self.agent_runs: Dict[str, AgentRun] = {}
         self.events: List[dict] = []
         self.executed_idempotency_keys: Dict[str, str] = {}
@@ -41,7 +58,14 @@ class InMemoryStore:
         self.cameras.clear()
         self.readings.clear()
         self.incidents.clear()
+        self.action_proposals.clear()
+        self.approvals.clear()
         self.commands.clear()
+        self.verification_plans.clear()
+        self.verification_results.clear()
+        self.manual_tasks.clear()
+        self.schedules.clear()
+        self.scheduled_jobs.clear()
         self.agent_runs.clear()
         self.events.clear()
         self.executed_idempotency_keys.clear()
@@ -149,5 +173,16 @@ class InMemoryStore:
             and incident.verification_due_at <= now
         ]
 
+    def due_jobs(self) -> List[ScheduledJob]:
+        now = utcnow()
+        return [
+            job
+            for job in self.scheduled_jobs.values()
+            if job.status == JobStatus.DUE and job.due_at <= now
+        ]
+
     def force_verification_due(self, incident_id: str) -> None:
         self.incidents[incident_id].verification_due_at = utcnow() - timedelta(seconds=1)
+        for job in self.scheduled_jobs.values():
+            if job.incident_id == incident_id and job.job_type == "verification":
+                job.due_at = utcnow() - timedelta(seconds=1)
