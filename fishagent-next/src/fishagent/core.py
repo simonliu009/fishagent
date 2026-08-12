@@ -61,9 +61,20 @@ class LLMConfig:
 class AppConfig:
     host: str = "0.0.0.0"
     port: int = 3008
+    public_port: int = 3001
     database_url: str = ""
     redis_url: str = ""
     minio_endpoint: str = ""
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_bucket: str = "fishagent-evidence"
+    celery_enabled: bool = False
+    celery_broker_url: str = ""
+    celery_result_backend: str = ""
+    mqtt_enabled: bool = False
+    mqtt_host: str = "127.0.0.1"
+    mqtt_port: int = 1883
+    mqtt_topic: str = "farms/+/ponds/+/sensors/+"
     auth_enabled: bool = False
     auth_username: str = "admin"
     auth_password: str = ""
@@ -74,9 +85,20 @@ class AppConfig:
         return cls(
             host=os.environ.get("FISHAGENT_HOST", "0.0.0.0"),
             port=int(os.environ.get("FISHAGENT_PORT", "3008")),
+            public_port=int(os.environ.get("FISHAGENT_PUBLIC_PORT", "3001")),
             database_url=os.environ.get("FISHAGENT_DATABASE_URL", ""),
             redis_url=os.environ.get("FISHAGENT_REDIS_URL", ""),
             minio_endpoint=os.environ.get("FISHAGENT_MINIO_ENDPOINT", ""),
+            minio_access_key=os.environ.get("FISHAGENT_MINIO_ACCESS_KEY", ""),
+            minio_secret_key=os.environ.get("FISHAGENT_MINIO_SECRET_KEY", ""),
+            minio_bucket=os.environ.get("FISHAGENT_MINIO_BUCKET", "fishagent-evidence"),
+            celery_enabled=_bool_env("FISHAGENT_CELERY_ENABLED", False),
+            celery_broker_url=os.environ.get("FISHAGENT_CELERY_BROKER_URL", ""),
+            celery_result_backend=os.environ.get("FISHAGENT_CELERY_RESULT_BACKEND", ""),
+            mqtt_enabled=_bool_env("FISHAGENT_MQTT_ENABLED", False),
+            mqtt_host=os.environ.get("FISHAGENT_MQTT_HOST", "127.0.0.1"),
+            mqtt_port=int(os.environ.get("FISHAGENT_MQTT_PORT", "1883")),
+            mqtt_topic=os.environ.get("FISHAGENT_MQTT_TOPIC", cls.mqtt_topic),
             auth_enabled=_bool_env("FISHAGENT_AUTH_ENABLED", False),
             auth_username=os.environ.get("FISHAGENT_ADMIN_USERNAME", "admin"),
             auth_password=os.environ.get("FISHAGENT_ADMIN_PASSWORD", ""),

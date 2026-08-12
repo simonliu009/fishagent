@@ -2,6 +2,10 @@ import argparse
 import json
 
 from fishagent.application.agent_service import FishAgentSystem
+from fishagent.core import AppConfig
+from fishagent.infrastructure.object_store import object_store_from_config
+from fishagent.infrastructure.persistence import PersistenceError, repository_from_config
+from fishagent.infrastructure.realtime import publisher_from_config
 
 
 def main() -> None:
@@ -13,9 +17,22 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "doctor":
-        print("fishagent doctor: ok")
-        return
+        config = AppConfig.from_env()
+        checks = {}
+        try:
+            checks["postgres"] = (repository_from_config(config.database_url).health() if config.database_url else {"status": "disabled", "backend": "memory"})
+        except PersistenceError as exc:
+            checks["postgres"] = {"status": "not_ready", "detail": str(exc)}
+        checks["redis"] = publisher_from_config(config.redis_url).health() if config.redis_url else {"status": "disabled"}
+        checks["minio"] = object_store_from_config(config.minio_endpoint, config.minio_access_key, config.minio_secret_key, config.minio_bucket).health() if config.minio_endpoint else {"status": "disabled"}
+        checks["llm"] = {"status": "configured" if config.llm.api_key else "not_configured", "model": config.llm.model}
+        print(json.dumps(checks, ensure_ascii=False, indent=2))
+        raise SystemExit(0 if checks["postgres"]["status"] in {"ok", "disabled"} else 1)
     if args.command == "demo":
-        system = FishAgentSystem()
+        config = AppConfig.from_env()
+        system = FishAgentSystem(
+            repository=repository_from_config(config.database_url),
+            event_publisher=publisher_from_config(config.redis_url),
+        )
         state = system.initialize_demo() if args.mode == "init" else system.run_demo(args.mode)
         print(json.dumps(state, ensure_ascii=False, indent=2, default=str))

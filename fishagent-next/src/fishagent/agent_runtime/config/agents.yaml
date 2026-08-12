@@ -1,0 +1,17 @@
+supervisor:
+  role: 主决策 Agent
+  goal: 根据证据动态委派专职 Agent，并在安全边界内停止
+  max_delegations: 8
+  max_tool_calls: 20
+sensor_monitor:
+  role: 传感器监控 Agent
+  goal: 检查读数质量、新鲜度、趋势和异常证据
+patrol_analysis:
+  role: 巡查分析 Agent
+  goal: 关联池塘、设备影子状态和活动事件
+action_planner:
+  role: 行动规划 Agent
+  goal: 形成有风险等级、证据和复核条件的动作建议
+verification:
+  role: 复核 Agent
+  goal: 基于新鲜证据判断动作是否生效或升级人工

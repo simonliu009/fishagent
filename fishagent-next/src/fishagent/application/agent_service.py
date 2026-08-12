@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from threading import RLock
-from typing import Optional
+from typing import Any, Optional
 
 from fishagent.application.policy import evaluate_action
 from fishagent.application.store import InMemoryStore
@@ -33,6 +33,7 @@ from fishagent.domain.models import (
 )
 from fishagent.infrastructure.persistence import PostgresStateRepository
 from fishagent.infrastructure.realtime import RedisEventPublisher
+from fishagent.infrastructure.gateways import DeviceGateway, SimulatorDeviceGateway
 
 
 class FishAgentSystem:
@@ -41,10 +42,14 @@ class FishAgentSystem:
         store: Optional[InMemoryStore] = None,
         repository: Optional[PostgresStateRepository] = None,
         event_publisher: Optional[RedisEventPublisher] = None,
+        device_gateway: Optional[DeviceGateway] = None,
+        agent_orchestrator: Optional[Any] = None,
     ) -> None:
         self.store = store or InMemoryStore()
         self.repository = repository
         self.event_publisher = event_publisher
+        self.device_gateway = device_gateway or SimulatorDeviceGateway()
+        self.agent_orchestrator = agent_orchestrator
         self._job_lock = RLock()
         if self.repository:
             persisted = self.repository.load()
@@ -219,6 +224,22 @@ class FishAgentSystem:
         active = self.store.active_incident_for_pond(pond_id) if pond_id else None
         if active and active.status == IncidentStatus.DETECTED:
             return self.run_incident_flow(active.id)
+        if self.agent_orchestrator and self.agent_orchestrator.available:
+            run = AgentRun(id=new_id("run"), goal=normalized, status="RUNNING")
+            self.store.agent_runs[run.id] = run
+            result = self.agent_orchestrator.run(normalized, pond_id)
+            for agent, action, summary in result.steps:
+                run.step(agent, action, summary)
+            run.delegated_agents = sorted(set(run.delegated_agents + result.delegated_agents))
+            run.status = "COMPLETED" if result.stop_reason == "CREW_COMPLETED" else "FAILED"
+            run.stop_reason = result.stop_reason
+            self.store.emit(
+                "agent.run.completed" if run.status == "COMPLETED" else "agent.run.failed",
+                result.summary,
+                {"run_id": run.id, "stop_reason": result.stop_reason, "delegated_agents": run.delegated_agents},
+                correlation_id=run.id,
+            )
+            return run
         run = AgentRun(id=new_id("run"), goal=normalized, status="RUNNING")
         self.store.agent_runs[run.id] = run
         run.step("supervisor-agent", "interpret_goal", "解析用户目标并检查可用证据")
@@ -594,12 +615,24 @@ class FishAgentSystem:
 
         command.status = CommandStatus.AUTHORIZED
         command.status = CommandStatus.QUEUED
-        command.status = CommandStatus.SENT
-        command.status = CommandStatus.ACKNOWLEDGED
-        device.shadow_state = target_state
-        command.status = CommandStatus.CONFIRMED
-        self.store.executed_idempotency_keys[idempotency_key] = command.id
-        self.store.emit("device.command.confirmed", "%s 已切换为 %s" % (device.name, target_state), {"command_id": command.id}, correlation_id=run.id)
+        try:
+            result = self.device_gateway.send_command(device, target_state, idempotency_key)
+        except Exception as exc:
+            result = None
+            command.status = CommandStatus.FAILED
+            self.store.emit("device.command.failed", "设备网关调用失败：%s" % exc, {"command_id": command.id}, correlation_id=run.id)
+        if result:
+            command.status = CommandStatus.SENT
+            if result.acknowledged:
+                command.status = CommandStatus.ACKNOWLEDGED
+            if result.confirmed:
+                device.shadow_state = target_state
+                command.status = CommandStatus.CONFIRMED
+                self.store.executed_idempotency_keys[idempotency_key] = command.id
+                self.store.emit("device.command.confirmed", "%s 已切换为 %s" % (device.name, target_state), {"command_id": command.id}, correlation_id=run.id)
+            else:
+                command.status = CommandStatus.TIMED_OUT if result.acknowledged else CommandStatus.FAILED
+                self.store.emit("device.command.unconfirmed", result.detail or "设备命令未确认", {"command_id": command.id}, correlation_id=run.id)
         return command
 
     def verify_incident(self, incident_id: str) -> Incident:
@@ -654,19 +687,57 @@ class FishAgentSystem:
 
     def run_due_jobs(self, limit: int = 50) -> list[ScheduledJob]:
         with self._job_lock:
+            jobs = self.claim_due_jobs(limit)
+            completed = []
+            for job in jobs:
+                try:
+                    self.execute_scheduled_job(job.id)
+                    completed.append(job)
+                except Exception:
+                    # execute_scheduled_job records retry/dead-letter state.
+                    continue
+            return completed
+
+    def claim_due_jobs(self, limit: int = 50) -> list[ScheduledJob]:
+        """Atomically move due work out of DUE before a worker executes it."""
+        with self._job_lock:
             self._enqueue_due_schedules()
-            completed: list[ScheduledJob] = []
-            for job in self.store.due_jobs()[:limit]:
+            jobs = self.store.due_jobs()[:limit]
+            for job in jobs:
                 job.status = JobStatus.RUNNING
                 job.attempts += 1
+                self.store.emit("schedule.job.claimed", "后台作业已领取", {"job_id": job.id})
+            if jobs:
+                self.snapshot()
+            return jobs
+
+    def execute_scheduled_job(self, job_id: str) -> ScheduledJob:
+        """Execute one claimed job with retry and dead-letter semantics."""
+        with self._job_lock:
+            job = self.store.scheduled_jobs[job_id]
+            if job.status == JobStatus.COMPLETED:
+                return job
+            if job.status != JobStatus.RUNNING:
+                job.status = JobStatus.RUNNING
+                job.attempts += 1
+            try:
                 if job.job_type == "verification" and job.incident_id:
                     self.verify_incident(job.incident_id)
                 elif job.job_type == "patrol":
                     self.run_patrol()
                 job.status = JobStatus.COMPLETED
-                completed.append(job)
                 self.store.emit("schedule.job.completed", "后台作业已完成", {"job_id": job.id})
-            return completed
+            except Exception as exc:
+                job.status = JobStatus.RETRY_WAIT if job.attempts < 3 else JobStatus.DEAD_LETTER
+                self.store.emit(
+                    "schedule.job.failed",
+                    "后台作业执行失败：%s" % exc,
+                    {"job_id": job.id, "status": job.status.value, "attempts": job.attempts},
+                )
+                self.snapshot()
+                raise
+            self.snapshot()
+            return job
 
     def run_demo(self, mode: str) -> dict:
         self.store.reset_demo()
@@ -695,6 +766,17 @@ class FishAgentSystem:
         return self.snapshot()
 
     def snapshot(self) -> dict:
+        return self._snapshot(persist=True)
+
+    def read_snapshot(self) -> dict:
+        """Refresh a read-only process view without overwriting newer writes."""
+        if self.repository:
+            persisted = self.repository.load()
+            if persisted:
+                self.store.restore_snapshot(persisted)
+        return self._snapshot(persist=False)
+
+    def _snapshot(self, persist: bool = True) -> dict:
         data = {
             "farms": [farm.__dict__ for farm in self.store.farms.values()],
             "ponds": [pond.__dict__ for pond in self.store.ponds.values()],
@@ -885,9 +967,12 @@ class FishAgentSystem:
             "event_sequence": self.store._event_sequence,
             "executed_idempotency_keys": self.store.executed_idempotency_keys,
         }
-        if self.repository:
-            self.repository.save(data)
-        if self.event_publisher:
+        if persist and self.repository:
+            persisted_sequence = self.repository.save(data)
+            if persisted_sequence is not None:
+                data["event_sequence"] = persisted_sequence
+                self.store._event_sequence = max(self.store._event_sequence, persisted_sequence)
+        if persist and self.event_publisher:
             try:
                 self.event_publisher.publish(data["events"])
             except Exception as exc:  # Redis is live acceleration, not the source of truth.

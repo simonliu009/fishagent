@@ -2,7 +2,7 @@
 
 根据上级目录 `智渔Agent-CrewAI-Python绿地开发计划.md` 落地的绿地垂直切片。
 
-当前版本使用 `uv` 管理 Python 版本和项目元数据，重点覆盖：
+当前版本使用 `uv` 管理 Python 版本和项目元数据，采用 FastAPI + NiceGUI Web、Celery Worker/Beat 和模块化领域服务，重点覆盖：
 
 - 养殖资产、传感器读数、设备影子状态。
 - B-01 低溶氧事件闭环：感知、Agent 研判、策略门、模拟设备命令、复核、升级。
@@ -10,6 +10,9 @@
 - 只读/低风险自动/中高风险阻断的安全策略。
 - HTTP API 与浏览器控制台，当前前端端口 `3008`；`3001` 保留给 nginx。
 - PostgreSQL 持久化快照与 Outbox，Redis 实时事件发布，MinIO 健康探针。
+- Celery Beat 到期任务分发、默认 Worker 执行和 MQTT 遥测适配器。
+- CrewAI 可选自主调查运行时，设备写操作仍只能经过确定性策略门。
+- FastAPI OpenAPI、WebSocket 事件回放、S3/MinIO 证据上传和签名下载地址。
 - 大模型 API 配置入口、API Key 脱敏展示，以及可选的管理员登录和 CSRF 防护。
 
 ## uv 环境
@@ -27,26 +30,29 @@ PYTHONPATH=src uv run python -m fishagent.cli doctor
 
 ```bash
 cd fishagent-next
-./scripts/bootstrap.sh
 cp .env.example .env
-./start.sh
+./scripts/bootstrap.sh
 ```
 
-`.env` 默认连接本机 Docker Compose 提供的 PostgreSQL `5432`、Redis `6379` 和 MinIO `9000`。不要把真实密码或 API Key 提交到 Git。
+`.env` 默认连接本机 Docker Compose 提供的 PostgreSQL `5432`、Redis `6379`、MinIO `9000` 和 MQTT `1883`。不要把真实密码或 API Key 提交到 Git。
+
+完整 Compose 会启动 `web`、`worker-default`、`worker-vision`、`beat`、`postgres`、`redis`、`minio` 和 `mqtt`。仅运行 Python Web 进程时可使用 `./start.sh`，它会通过 Uvicorn 监听 `3008`。
 
 访问：
 
 - 控制台：http://localhost:3008
+- nginx 公共入口：http://localhost:3001
 - 健康检查：http://localhost:3008/health/ready
 - API 状态：http://localhost:3008/api/v1/state
+- OpenAPI：http://localhost:3008/api/docs
 
-当前应用直接监听 `3008`。已有 nginx 的 `3001` 端口不由本项目接管；若需要通过 nginx 访问，应将 nginx upstream 指向 `127.0.0.1:3008`。
+应用进程监听 `3008`，nginx 公共入口监听 `3001` 并反代到 `127.0.0.1:3008`。配置模板位于 `deploy/nginx/fishagent-3001.conf`。
 
 ## 运行时基础设施
 
-- **PostgreSQL**：业务状态的最终来源，保存养殖资产、读数、事件闭环、审批、命令和调度状态；同时记录 Outbox 事件，重启后可恢复。
+- **PostgreSQL**：业务状态的最终来源，保存养殖资产、读数、事件闭环、审批、命令和调度状态；同时记录 Outbox 事件，重启后可恢复。当前兼容快照和关系投影在同一事务内写入，领域表由 Alembic 管理。
 - **Redis**：实时事件加速通道，用于发布 `fishagent.events`；Redis 不承担业务数据最终持久化，短暂不可用时健康检查会标记 degraded。
-- **MinIO**：S3 兼容的对象存储边界，供照片、视频和证据文件使用；当前切片接入健康探针，媒体上传适配器会在后续相机/视觉模块中扩展。
+- **MinIO**：S3 兼容对象存储，已支持证据文件上传和短期签名下载；视觉帧生命周期与 RTSP 抽帧 Worker 仍是后续增强。
 
 SQLite 适合单进程、本地演示或单元测试，所以测试仍可以通过清空 `FISHAGENT_DATABASE_URL` 使用内存存储。但生产运行需要并发写入、事务、Outbox、重启恢复和多进程部署，SQLite 的文件锁和单机边界不适合作为此系统的共享业务源；因此默认采用 PostgreSQL，而不是把 SQLite 伪装成生产持久层。
 
@@ -68,6 +74,20 @@ FISHAGENT_ADMIN_PASSWORD=change-me
 ```
 
 登录入口为 `/api/v1/auth/login`，浏览器控制台会自动显示登录面板；写请求必须携带登录响应中的 CSRF Token。认证开启但未设置管理员密码时，`/health/ready` 返回 `503`。
+
+## Agent、队列与接入
+
+设置 `FISHAGENT_LLM_ENABLED=true` 和 API Key 后，用户目标会进入 CrewAI 主决策、传感器监控、巡查分析和行动规划 Agent；CrewAI 只产生结构化调查结果和动作建议，不能直接调用设备写接口。未配置模型时，确定性 B-01 流程仍然可运行。
+
+Celery Beat 每 5 秒调用 `dispatch_due_jobs`，通过 PostgreSQL 状态和业务幂等键领取到期复核/巡查作业，再交给 Worker 执行。Redis 只负责队列和实时加速，Outbox 事件号由 PostgreSQL 全局序列分配，支持多进程并发写入；Web 读请求会刷新最新快照但不回写，避免轮询覆盖 Worker 状态。
+
+MQTT 主题格式为 `farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`，消息示例：
+
+```json
+{"metric":"DO","value":2.1,"source_event_id":"mqtt-001"}
+```
+
+实时事件可通过 `WS /events?after={sequence}` 断线续传；HTTP 事件补齐接口为 `GET /api/v1/events?after={sequence}`。
 
 ## 演示接口
 
@@ -123,6 +143,6 @@ PYTHONPATH=src uv run python -m unittest discover -s tests
 
 ## 边界说明
 
-当前是可运行的模块化单体垂直切片：PostgreSQL、Redis 和 MinIO 已接入运行时；调度仍是进程内轻量循环，尚未替换为 Celery Worker/Beat；Agent 编排仍由本地应用服务实现，尚未替换为 CrewAI；页面使用现有 HTTP 控制台，尚未替换为 NiceGUI。真实设备/MQTT、相机视觉和媒体上传仍是后续适配边界。
+当前是可运行的模块化单体：PostgreSQL、Redis、MinIO、FastAPI、NiceGUI、Celery Worker/Beat、MQTT 和可选 CrewAI 已接入运行时；真实厂商设备协议、RTSP/OpenCV 视觉 Worker、疾病/投喂分析和多用户持久化目录仍是后续扩展。
 
 当前实现不在启动时隐式 seed；演示数据通过页面按钮、`/api/v1/demo/init` 或 demo 命令显式初始化。大模型配置保存到 `data/runtime_config.json`，API 响应不会回显完整密钥。

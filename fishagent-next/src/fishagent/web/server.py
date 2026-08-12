@@ -9,7 +9,8 @@ from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from fishagent.application.agent_service import FishAgentSystem
-from fishagent.core import AppConfig, RuntimeConfigStore
+from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
+from fishagent.core import AppConfig, LLMConfig, RuntimeConfigStore
 from fishagent.domain.models import RiskLevel, ScheduleStatus
 from fishagent.infrastructure.persistence import PersistenceError, repository_from_config
 from fishagent.infrastructure.realtime import publisher_from_config
@@ -20,11 +21,17 @@ from fishagent.infrastructure.auth import auth_from_config
 CONFIG = AppConfig.from_env()
 REPOSITORY = repository_from_config(CONFIG.database_url)
 EVENT_PUBLISHER = publisher_from_config(CONFIG.redis_url)
-OBJECT_STORE = object_store_from_config(CONFIG.minio_endpoint)
+OBJECT_STORE = object_store_from_config(
+    CONFIG.minio_endpoint,
+    CONFIG.minio_access_key,
+    CONFIG.minio_secret_key,
+    CONFIG.minio_bucket,
+)
 SYSTEM = FishAgentSystem(repository=REPOSITORY, event_publisher=EVENT_PUBLISHER)
 AUTH = auth_from_config(CONFIG.auth_enabled, CONFIG.auth_username, CONFIG.auth_password)
 CONFIG_STORE = RuntimeConfigStore()
 CONFIG.llm = CONFIG_STORE.load_llm(CONFIG.llm)
+SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -127,13 +134,14 @@ def authorize(handler: BaseHTTPRequestHandler, path: str, write: bool = False) -
     return True
 
 
-def test_llm_connection() -> dict:
-    if not CONFIG.llm.api_key:
+def test_llm_connection(config: Optional[LLMConfig] = None) -> dict:
+    llm = config or CONFIG.llm
+    if not llm.api_key:
         raise ValueError("API Key 未配置")
-    url = CONFIG.llm.base_url.rstrip("/") + "/models"
+    url = llm.base_url.rstrip("/") + "/models"
     request = Request(
         url,
-        headers={"Authorization": "Bearer %s" % CONFIG.llm.api_key, "Accept": "application/json"},
+        headers={"Authorization": "Bearer %s" % llm.api_key, "Accept": "application/json"},
         method="GET",
     )
     try:
@@ -227,7 +235,7 @@ def page() -> str:
       <img src="/static/fish.svg" alt="FishAgent">
       <div>
         <h1>智渔 Agent 控制台</h1>
-        <div class="topline">模拟器模式 · 前端端口 3008 · 安全策略门开启</div>
+        <div class="topline">实时运营控制台 · Nginx 入口 3001 · 应用服务 3008 · 安全策略门开启</div>
       </div>
     </div>
     <div class="header-metrics" id="top_metrics"></div>

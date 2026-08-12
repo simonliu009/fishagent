@@ -1,9 +1,12 @@
-import hashlib
-import hmac
+import json
+import os
 import secrets
 import time
 from dataclasses import dataclass
 from typing import Dict, Optional
+
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 
 @dataclass
@@ -16,33 +19,45 @@ class AuthSession:
 
 
 class AuthManager:
-    def __init__(self, enabled: bool = False, username: str = "admin", password: str = "") -> None:
+    def __init__(
+        self,
+        enabled: bool = False,
+        username: str = "admin",
+        password: str = "",
+        users: Optional[dict[str, dict[str, str]]] = None,
+        cookie_secure: bool = False,
+    ) -> None:
         self.enabled = enabled
         self.username = username
-        self._password_hash = self._hash_password(password) if password else ""
+        self.cookie_secure = cookie_secure
+        self._password_hasher = PasswordHasher()
+        self._users: dict[str, tuple[str, str]] = {}
+        if password:
+            self._users[username] = (self._password_hasher.hash(password), "admin")
+        for name, user in (users or {}).items():
+            user_password = str(user.get("password") or "")
+            if user_password:
+                self._users[name] = (
+                    self._password_hasher.hash(user_password),
+                    str(user.get("role") or "viewer").lower(),
+                )
         self.sessions: Dict[str, AuthSession] = {}
 
-    @staticmethod
-    def _hash_password(password: str, salt: Optional[bytes] = None) -> str:
-        salt = salt or secrets.token_bytes(16)
-        digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260_000)
-        return "%s$%s" % (salt.hex(), digest.hex())
-
-    def _verify_password(self, password: str) -> bool:
-        if not self._password_hash:
+    def _verify_password(self, password: str, password_hash: str) -> bool:
+        try:
+            return self._password_hasher.verify(password_hash, password)
+        except (InvalidHashError, VerificationError, VerifyMismatchError):
             return False
-        salt_hex, digest_hex = self._password_hash.split("$", 1)
-        calculated = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), 260_000)
-        return hmac.compare_digest(calculated.hex(), digest_hex)
 
     def login(self, username: str, password: str, ttl_seconds: int = 28_800) -> Optional[AuthSession]:
-        if not self.enabled or username != self.username or not self._verify_password(password):
+        user = self._users.get(username)
+        if not self.enabled or user is None or not self._verify_password(password, user[0]):
             return None
         session = AuthSession(
             token=secrets.token_urlsafe(32),
             csrf_token=secrets.token_urlsafe(24),
             username=username,
-            role="admin",
+            role=user[1],
             expires_at=time.time() + ttl_seconds,
         )
         self.sessions[session.token] = session
@@ -71,4 +86,23 @@ class AuthManager:
 
 
 def auth_from_config(enabled: bool, username: str, password: str) -> AuthManager:
-    return AuthManager(enabled=enabled, username=username, password=password)
+    users: dict[str, dict[str, str]] = {}
+    raw_users = os.environ.get("FISHAGENT_USERS_JSON", "")
+    if raw_users:
+        try:
+            decoded = json.loads(raw_users)
+            if isinstance(decoded, dict):
+                users = {
+                    str(name): value
+                    for name, value in decoded.items()
+                    if isinstance(value, dict)
+                }
+        except json.JSONDecodeError:
+            pass
+    return AuthManager(
+        enabled=enabled,
+        username=username,
+        password=password,
+        users=users,
+        cookie_secure=os.environ.get("FISHAGENT_AUTH_COOKIE_SECURE", "false").lower() in {"1", "true", "yes", "on"},
+    )

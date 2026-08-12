@@ -1,0 +1,8 @@
+investigate_goal:
+  description: >-
+    调查用户目标 {goal}，池塘范围为 {pond_id}。只使用工具返回的结构化事实。
+    可按证据缺口自主委派传感器、巡查和行动规划 Agent；任何设备写操作都必须
+    输出 proposal 并交给确定性策略门，不得直接调用设备。
+  expected_output: >-
+    JSON，包含 delegated_agents、evidence_summary、action_proposal 和 stop_reason；
+    不包含隐藏思维链。
