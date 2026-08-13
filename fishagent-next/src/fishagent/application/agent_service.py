@@ -4,6 +4,7 @@ from threading import RLock
 from typing import Any, Optional, cast
 
 from fishagent.agent_runtime.contracts import IncidentDecision
+from fishagent.application.demo_data import DEMO_SENSOR_BY_METRIC, DEMO_WATER_SERIES
 from fishagent.application.policy import evaluate_action
 from fishagent.application.store import InMemoryStore
 from fishagent.domain.models import (
@@ -44,13 +45,6 @@ from fishagent.infrastructure.realtime import RedisEventPublisher
 
 
 class FishAgentSystem:
-    DEMO_DO_SERIES = {
-        "B-01": (5.7, 5.6, 5.5, 5.3, 5.2, 5.4, 5.6, 5.5, 5.7),
-        "B-02": (5.0, 4.9, 4.7, 4.6, 4.5, 4.4, 4.5, 4.3, 4.2),
-        "B-03": (6.0, 6.1, 6.3, 6.4, 6.2, 6.5, 6.4, 6.6, 6.5),
-        "B-04": (5.3, 5.2, 5.0, 4.8, 4.9, 5.1, 4.9, 4.8, 4.9),
-    }
-
     def __init__(
         self,
         store: Optional[InMemoryStore] = None,
@@ -78,18 +72,45 @@ class FishAgentSystem:
 
     def _reset_demo_with_telemetry(self) -> None:
         self.store.reset_demo()
-        for pond_id, values in self.DEMO_DO_SERIES.items():
-            for index, value in enumerate(values):
-                is_latest = index == len(values) - 1
-                self._demo_reading(
-                    pond_id,
-                    value,
-                    source_event_id="demo-seed-%s-%02d" % (pond_id.lower(), index + 1),
-                    seconds_old=(len(values) - index - 1) * 3 * 60 * 60,
-                    quality="SUSPECT" if pond_id == "B-04" and is_latest else "GOOD",
-                    auto_run=False,
-                    defer_persist=True,
-                )
+        payloads = []
+        for pond_id, series_by_metric in DEMO_WATER_SERIES.items():
+            for metric, values in series_by_metric.items():
+                spec = DEMO_SENSOR_BY_METRIC[metric]
+                for index, value in enumerate(values):
+                    is_latest_do = metric == "DO" and index == len(values) - 1
+                    payloads.append(
+                        {
+                            "pond_id": pond_id,
+                            "sensor_id": "%s-%s" % (spec["slug"], pond_id.lower()),
+                            "metric": metric,
+                            "unit": spec["unit"],
+                            "value": value,
+                            "source_event_id": "demo-seed-%s-%s-%02d"
+                            % (pond_id.lower(), spec["slug"], index + 1),
+                            "seconds_old": (len(values) - index - 1) * 3 * 60 * 60,
+                            "quality": "SUSPECT" if pond_id == "B-04" and is_latest_do else "GOOD",
+                            "auto_run": False,
+                        }
+                    )
+        self._publish_demo_dataset(payloads)
+
+    def _publish_demo_dataset(self, payloads: list[dict]) -> None:
+        if self.telemetry_publisher is None:
+            for payload in payloads:
+                self.ingest_reading(**payload)
+            return
+        expected_ids = {str(payload["source_event_id"]) for payload in payloads}
+        for payload in payloads:
+            if not self.telemetry_publisher.publish_reading(**payload, defer_persist=True):
+                raise RuntimeError("MQTT mock telemetry publish failed")
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            consumed_ids = {item.source_event_id for item in self.store.readings}
+            if expected_ids.issubset(consumed_ids):
+                return
+            time.sleep(0.02)
+        missing = len(expected_ids - {item.source_event_id for item in self.store.readings})
+        raise RuntimeError("%d MQTT mock telemetry readings were not consumed before timeout" % missing)
 
     def _demo_reading(
         self,
@@ -102,9 +123,11 @@ class FishAgentSystem:
         defer_persist: bool = False,
     ) -> Optional[Incident]:
         if self.telemetry_publisher is None:
-            return self.ingest_do(
+            return self.ingest_reading(
                 pond_id,
                 value,
+                metric="DO",
+                unit="mg/L",
                 source_event_id=source_event_id,
                 seconds_old=seconds_old,
                 quality=quality,
@@ -114,6 +137,8 @@ class FishAgentSystem:
         if not self.telemetry_publisher.publish_reading(
             pond_id=pond_id,
             sensor_id=sensor_id,
+            metric="DO",
+            unit="mg/L",
             value=value,
             source_event_id=source_event_id,
             quality=quality,
@@ -435,10 +460,12 @@ class FishAgentSystem:
         self.store.emit("manual_task.completed", task.title, {"task_id": task.id})
         return task
 
-    def ingest_do(
+    def ingest_reading(
         self,
         pond_id: str,
         value: float,
+        metric: str = "DO",
+        unit: Optional[str] = None,
         source_event_id: Optional[str] = None,
         seconds_old: int = 0,
         sensor_id: Optional[str] = None,
@@ -449,17 +476,26 @@ class FishAgentSystem:
             raise ValueError("pond_id does not exist")
         if quality not in {"GOOD", "SUSPECT", "STALE", "INVALID"}:
             raise ValueError("unsupported reading quality")
+        metric = metric.upper()
+        spec = DEMO_SENSOR_BY_METRIC.get(metric)
+        resolved_sensor_id = sensor_id or "%s-%s" % ((spec or {"slug": metric.lower()})["slug"], pond_id.lower())
+        sensor = self.store.sensors.get(resolved_sensor_id)
+        if sensor and (sensor.pond_id != pond_id or sensor.metric.upper() != metric):
+            raise ValueError("sensor_id does not match pond_id and metric")
+        resolved_unit = unit or (sensor.unit if sensor else None) or (spec["unit"] if spec else "")
+        if not resolved_unit:
+            raise ValueError("unit is required for unsupported metrics")
         reading = SensorReading(
             pond_id=pond_id,
-            sensor_id=sensor_id or "do-%s" % pond_id.lower(),
-            metric="DO",
+            sensor_id=resolved_sensor_id,
+            metric=metric,
             value=value,
-            unit="mg/L",
+            unit=resolved_unit,
             sampled_at=utcnow() - timedelta(seconds=seconds_old),
             quality=quality,
             source_event_id=source_event_id or new_id("reading"),
         )
-        health = self.store.sensor_health.setdefault(sensor_id or "do-%s" % pond_id.lower(), SensorHealth(sensor_id=sensor_id or "do-%s" % pond_id.lower()))
+        health = self.store.sensor_health.setdefault(resolved_sensor_id, SensorHealth(sensor_id=resolved_sensor_id))
         health.last_heartbeat_at = utcnow()
         health.last_reading_at = reading.sampled_at
         health.status = HealthStatus.ONLINE if quality == "GOOD" else HealthStatus.ERROR
@@ -468,6 +504,28 @@ class FishAgentSystem:
         if incident and incident.status == IncidentStatus.DETECTED and auto_run:
             self.run_incident_flow(incident.id)
         return incident
+
+    def ingest_do(
+        self,
+        pond_id: str,
+        value: float,
+        source_event_id: Optional[str] = None,
+        seconds_old: int = 0,
+        sensor_id: Optional[str] = None,
+        quality: str = "GOOD",
+        auto_run: bool = True,
+    ) -> Optional[Incident]:
+        return self.ingest_reading(
+            pond_id=pond_id,
+            value=value,
+            metric="DO",
+            unit="mg/L",
+            source_event_id=source_event_id,
+            seconds_old=seconds_old,
+            sensor_id=sensor_id,
+            quality=quality,
+            auto_run=auto_run,
+        )
 
     def run_incident_flow(self, incident_id: str, risk_override: Optional[RiskLevel] = None) -> AgentRun:
         if self.agent_orchestrator is not None:
@@ -1043,9 +1101,9 @@ class FishAgentSystem:
         is_demo_dataset = any(reading.source_event_id.startswith("demo-seed-") for reading in self.store.readings)
         data = {
             "dataset": {
-                "dataset_id": "four_pond_demo_v1",
+                "dataset_id": "four_pond_water_quality_demo_v2",
                 "source_classification": "simulated_persistent",
-                "description": "四池塘轻量演示数据",
+                "description": "四池塘七指标水质演示数据",
             }
             if is_demo_dataset
             else None,
@@ -1078,7 +1136,7 @@ class FishAgentSystem:
                     "quality": reading.quality,
                     "source_event_id": reading.source_event_id,
                 }
-                for reading in self.store.readings[-200:]
+                for reading in self.store.readings[-500:]
             ],
             "cameras": [
                 {
@@ -1304,9 +1362,9 @@ class FishAgentSystem:
                     "payload": event.payload,
                     "created_at": event.created_at.isoformat(),
                 }
-                for event in self.store.audit_events[-200:]
+                for event in self.store.audit_events[-500:]
             ],
-            "events": self.store.events[-80:],
+            "events": self.store.events[-500:],
             "event_sequence": self.store._event_sequence,
             "executed_idempotency_keys": self.store.executed_idempotency_keys,
         }

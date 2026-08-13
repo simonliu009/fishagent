@@ -78,12 +78,16 @@ class RuntimeBoundaryTests(unittest.TestCase):
 
         class Message:
             topic = "farms/f-1/ponds/B-01/sensors/s-1"
-            payload = json.dumps({"metric": "DO", "value": 2.1, "source_event_id": "mqtt-1"}).encode()
+            payload = json.dumps(
+                {"metric": "AMMONIA", "unit": "mg/L", "value": 0.18, "source_event_id": "mqtt-1"}
+            ).encode()
 
         adapter._on_message(None, None, Message())
         self.assertEqual(received[0]["pond_id"], "B-01")
         self.assertEqual(received[0]["sensor_id"], "s-1")
-        self.assertEqual(received[0]["value"], 2.1)
+        self.assertEqual(received[0]["metric"], "AMMONIA")
+        self.assertEqual(received[0]["unit"], "mg/L")
+        self.assertEqual(received[0]["value"], 0.18)
 
     def test_celery_has_default_queue_and_beat_tick(self) -> None:
         self.assertEqual(celery_app.conf.task_default_queue, "default")

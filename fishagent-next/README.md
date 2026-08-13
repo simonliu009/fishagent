@@ -5,7 +5,7 @@
 当前版本使用 `uv` 管理 Python 版本和项目元数据，采用 FastAPI + NiceGUI Web、Celery Worker/Beat 和模块化领域服务，重点覆盖：
 
 - 养殖资产、传感器读数、设备影子状态。
-- 四池塘演示场景：B-01 至 B-04 各配套溶氧传感器、增氧机、摄像头和 24 小时趋势 mock 数据；B-01 支持低溶氧闭环演示。
+- 四池塘演示场景：B-01 至 B-04 各配套氨氮、亚硝酸根离子、浊度、叶绿素、溶解氧、pH、水温传感器，以及增氧机、摄像头和 24 小时趋势 mock 数据；B-01 支持低溶氧闭环演示。
 - 成功、复核失败、防重复三条演示路径。
 - 只读/低风险自动/中高风险阻断的安全策略。
 - HTTP API 与浏览器控制台，当前前端端口 `3000`；`3001` 保留给 nginx。
@@ -91,7 +91,7 @@ Celery Beat 每 5 秒调用 `dispatch_due_jobs`，通过 PostgreSQL 状态和业
 MQTT 主题格式为 `farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`，消息示例：
 
 ```json
-{"metric":"DO","value":2.1,"source_event_id":"mqtt-001"}
+{"metric":"AMMONIA","unit":"mg/L","value":0.18,"source_event_id":"mqtt-001"}
 ```
 
 实时事件可通过 `WS /events?after={sequence}` 断线续传；HTTP 事件补齐接口为 `GET /api/v1/events?after={sequence}`。
@@ -122,7 +122,7 @@ curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/ponds \
 ```bash
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/telemetry/readings:batch \
   -H 'Content-Type: application/json' \
-  -d '{"readings":[{"pond_id":"B-01","metric":"DO","value":2.1,"source_event_id":"manual-001"}]}'
+  -d '{"readings":[{"pond_id":"B-01","sensor_id":"ammonia-b-01","metric":"AMMONIA","unit":"mg/L","value":0.18,"source_event_id":"manual-001"}]}'
 ```
 
 审批、人工任务和调度接口：

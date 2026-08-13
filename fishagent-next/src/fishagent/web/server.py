@@ -53,7 +53,7 @@ def ingest_mqtt_and_persist(**payload):
     defer_persist = bool(payload.pop("defer_persist", False)) and str(payload.get("source_event_id", "")).startswith(
         "demo-seed-"
     )
-    result = SYSTEM.ingest_do(**payload)
+    result = SYSTEM.ingest_reading(**payload)
     if not defer_persist:
         SYSTEM.snapshot()
     return result
@@ -904,11 +904,11 @@ class Handler(BaseHTTPRequestHandler):
             incidents = []
             try:
                 for item in readings:
-                    if item.get("metric") != "DO":
-                        continue
-                    new_incident = SYSTEM.ingest_do(
+                    new_incident = SYSTEM.ingest_reading(
                         pond_id=str(item.get("pond_id", "")),
                         value=float(item.get("value")),
+                        metric=str(item.get("metric") or "DO"),
+                        unit=str(item["unit"]) if item.get("unit") else None,
                         source_event_id=item.get("source_event_id"),
                         seconds_old=int(item.get("seconds_old", 0)),
                         sensor_id=item.get("sensor_id"),

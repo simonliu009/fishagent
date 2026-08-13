@@ -66,7 +66,7 @@ def ingest_mqtt_and_persist(**payload: Any) -> Any:
     defer_persist = bool(payload.pop("defer_persist", False)) and str(payload.get("source_event_id", "")).startswith(
         "demo-seed-"
     )
-    result = SYSTEM.ingest_do(**payload)
+    result = SYSTEM.ingest_reading(**payload)
     if not defer_persist:
         SYSTEM.snapshot()
     return result
@@ -180,6 +180,7 @@ class TelemetryReadingPayload(BaseModel):
 
     pond_id: str
     metric: str = "DO"
+    unit: Optional[str] = None
     value: float
     source_event_id: Optional[str] = None
     sensor_id: Optional[str] = None
@@ -883,11 +884,11 @@ async def telemetry_batch(request: Request, payload: TelemetryBatchPayload, idem
     incident_ids = []
     try:
         for index, item in enumerate(payload.readings):
-            if item.metric != "DO":
-                continue
-            incident = SYSTEM.ingest_do(
+            incident = SYSTEM.ingest_reading(
                 pond_id=item.pond_id,
                 value=item.value,
+                metric=item.metric,
+                unit=item.unit,
                 source_event_id=item.source_event_id or (f"{idempotency_key}:{index}" if idempotency_key else None),
                 seconds_old=item.seconds_old,
                 sensor_id=item.sensor_id,

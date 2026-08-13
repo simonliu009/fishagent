@@ -299,14 +299,16 @@
     .work-item-actions { display: flex; gap: 5px; margin-top: 7px; }
     .empty { min-height: 70px; display: grid; place-items: center; color: var(--muted); font-size: 11px; text-align: center; }
     .pond-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    .pond-card { min-height: 112px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+    .pond-card { min-height: 196px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
     .pond-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .pond-name { min-width: 0; font-size: 11px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pond-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 9px; }
-    .pond-metric { min-height: 27px; padding: 6px; border-radius: 4px; color: var(--muted); background: var(--surface-alt); font-size: 9px; }
-    .pond-metric b { float: right; color: var(--ink); font-size: 10px; }
+    .pond-metric { min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 6px; border-radius: 4px; color: var(--muted); background: var(--surface-alt); font-size: 9px; }
+    .pond-metric b { flex: 0 0 auto; color: var(--ink); font-size: 10px; }
+    .pond-metric small { margin-left: 2px; color: var(--muted); font-size: 8px; font-weight: 500; }
     .pond-metric b.warning { color: var(--amber); }
     .pond-metric b.danger { color: var(--red); }
+    .pond-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; color: var(--muted); font-size: 9px; }
     .alert-list { display: grid; gap: 8px; max-height: 480px; overflow: auto; padding-right: 2px; }
     .alert-item { padding: 11px; border: 1px solid #efb5b5; border-radius: 7px; background: var(--surface); }
     .alert-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -882,8 +884,20 @@
       if (name === 'analytics' || name === 'monitor') requestAnimationFrame(drawCharts);
       iconRefresh();
     }
+    const waterMetrics = [
+      {metric:'AMMONIA', label:'氨氮', digits:2},
+      {metric:'NITRITE', label:'亚硝酸根离子', digits:2},
+      {metric:'TURBIDITY', label:'浊度', digits:1},
+      {metric:'CHLOROPHYLL', label:'叶绿素', digits:1},
+      {metric:'DO', label:'溶解氧', digits:1},
+      {metric:'PH', label:'pH', digits:2, hideUnit:true},
+      {metric:'TEMPERATURE', label:'水温', digits:1}
+    ];
+    function latestMetricReading(pondId, metric) {
+      return (currentState.readings || []).filter(item => item.pond_id === pondId && item.metric === metric).sort((a,b) => new Date(b.sampled_at) - new Date(a.sampled_at))[0];
+    }
     function latestReading(pondId) {
-      return [...(currentState.readings || [])].reverse().find(item => item.pond_id === pondId && item.metric === 'DO');
+      return latestMetricReading(pondId, 'DO');
     }
     function activeIncident(pondId) {
       return [...(currentState.incidents || [])].reverse().find(item => item.pond_id === pondId && !closedIncidents.has(item.status));
@@ -891,11 +905,11 @@
     function pondCondition(pond) {
       const reading = latestReading(pond.id);
       const incident = activeIncident(pond.id);
-      const sensor = (currentState.sensors || []).find(item => item.pond_id === pond.id && item.metric === 'DO');
-      const health = (currentState.sensor_health || []).find(item => item.sensor_id === sensor?.id);
+      const sensorIds = new Set((currentState.sensors || []).filter(item => item.pond_id === pond.id).map(item => item.id));
+      const health = (currentState.sensor_health || []).filter(item => sensorIds.has(item.sensor_id));
       if (incident && ['ESCALATED','ACTION_FAILED','MANUAL_REQUIRED'].includes(incident.status)) return {tone:'danger', label:'严重'};
       if (incident || (reading && Number(reading.value) < Number(pond.dissolved_oxygen_min))) return {tone:'warning', label:'警告'};
-      if (health && health.status !== 'ONLINE') return {tone:'warning', label:'关注'};
+      if (health.some(item => item.status !== 'ONLINE')) return {tone:'warning', label:'关注'};
       return {tone:'', label:reading ? '正常' : '待接入'};
     }
     function renderPatrol() {
@@ -974,11 +988,18 @@
       document.getElementById('pond_grid').innerHTML = ponds.length ? ponds.map(pond => {
         const reading = latestReading(pond.id);
         const condition = pondCondition(pond);
-        const sensor = (currentState.sensors || []).find(item => item.pond_id === pond.id && item.metric === 'DO');
-        const health = (currentState.sensor_health || []).find(item => item.sensor_id === sensor?.id);
+        const sensors = (currentState.sensors || []).filter(item => item.pond_id === pond.id);
+        const sensorIds = new Set(sensors.map(item => item.id));
+        const health = (currentState.sensor_health || []).filter(item => sensorIds.has(item.sensor_id));
+        const online = health.filter(item => item.status === 'ONLINE').length;
         const device = (currentState.devices || []).find(item => item.pond_id === pond.id);
-        const doTone = reading && Number(reading.value) < Number(pond.dissolved_oxygen_min) ? 'danger' : '';
-        return `<article class="pond-card"><div class="pond-head"><span class="pond-name"><span class="dot ${condition.tone}"></span>　${escapeHtml(pond.id)}　<span style="font-weight:500;color:var(--muted)">${escapeHtml(pond.species || '')}</span></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div><div class="pond-metrics"><span class="pond-metric">DO <b class="${doTone}">${reading ? fmtNumber(reading.value) : '--'}</b></span><span class="pond-metric">安全线 <b>${fmtNumber(pond.dissolved_oxygen_min)}</b></span><span class="pond-metric">传感器 <b>${escapeHtml(health?.status || sensor?.status || '--')}</b></span><span class="pond-metric">设备 <b>${escapeHtml(device?.shadow_state || '--')}</b></span></div></article>`;
+        const metrics = waterMetrics.map(item => {
+          const value = latestMetricReading(pond.id, item.metric);
+          const doTone = item.metric === 'DO' && value && Number(value.value) < Number(pond.dissolved_oxygen_min) ? 'danger' : '';
+          const unit = value && !item.hideUnit ? `<small>${escapeHtml(value.unit || '')}</small>` : '';
+          return `<span class="pond-metric">${item.label}<b class="${doTone}">${value ? fmtNumber(value.value, item.digits) : '--'}${unit}</b></span>`;
+        }).join('');
+        return `<article class="pond-card"><div class="pond-head"><span class="pond-name"><span class="dot ${condition.tone}"></span>　${escapeHtml(pond.id)}　<span style="font-weight:500;color:var(--muted)">${escapeHtml(pond.species || '')}</span></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div><div class="pond-metrics">${metrics}</div><div class="pond-foot"><span>传感器 ${online}/${sensors.length} 在线</span><span>增氧机 ${escapeHtml(device?.shadow_state || '--')}</span></div></article>`;
       }).join('') : '<div class="empty">暂无水质监控对象</div>';
     }
     function renderAlerts() {

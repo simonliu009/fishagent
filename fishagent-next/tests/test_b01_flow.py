@@ -218,14 +218,19 @@ class B01FlowTest(unittest.TestCase):
         state = system.initialize_demo()
         self.assertEqual(state["farms"][0]["id"], "farm-demo")
         self.assertEqual({item["id"] for item in state["ponds"]}, {"B-01", "B-02", "B-03", "B-04"})
-        self.assertEqual(len(state["sensors"]), 4)
+        self.assertEqual(len(state["sensors"]), 28)
         self.assertEqual(len(state["devices"]), 4)
         self.assertEqual(len(state["cameras"]), 4)
-        self.assertEqual(len(state["readings"]), 36)
+        self.assertEqual(len(state["readings"]), 252)
         self.assertEqual(len(state["schedules"]), 1)
         self.assertEqual(state["incidents"], [])
-        self.assertEqual(state["dataset"]["dataset_id"], "four_pond_demo_v1")
+        self.assertEqual(state["dataset"]["dataset_id"], "four_pond_water_quality_demo_v2")
         self.assertEqual(state["dataset"]["source_classification"], "simulated_persistent")
+        self.assertEqual(
+            {item["metric"] for item in state["sensors"]},
+            {"AMMONIA", "NITRITE", "TURBIDITY", "CHLOROPHYLL", "DO", "PH", "TEMPERATURE"},
+        )
+        self.assertEqual({item["metric"] for item in state["readings"]}, {item["metric"] for item in state["sensors"]})
         health = {item["sensor_id"]: item["status"] for item in state["sensor_health"]}
         self.assertEqual(health["do-b-01"], "ONLINE")
         self.assertEqual(health["do-b-04"], "ERROR")
@@ -241,7 +246,7 @@ class B01FlowTest(unittest.TestCase):
             def publish_reading(self, **payload):
                 published.append(payload.copy())
                 payload.pop("defer_persist", None)
-                self.system.ingest_do(**payload)
+                self.system.ingest_reading(**payload)
                 return True
 
         publisher = LoopbackPublisher()
@@ -249,11 +254,11 @@ class B01FlowTest(unittest.TestCase):
         publisher.system = system
         state = system.initialize_demo()
 
-        self.assertEqual(len(published), 36)
+        self.assertEqual(len(published), 252)
         self.assertEqual({item["pond_id"] for item in published}, {"B-01", "B-02", "B-03", "B-04"})
         self.assertTrue(all(item["auto_run"] is False for item in published))
         self.assertTrue(all(item["defer_persist"] is True for item in published))
-        self.assertEqual(len(state["readings"]), 36)
+        self.assertEqual(len(state["readings"]), 252)
 
     def test_asset_creation_validates_relationships(self) -> None:
         system = FishAgentSystem()
@@ -391,7 +396,7 @@ class B01FlowTest(unittest.TestCase):
         second = system.initialize_demo()
         self.assertGreater(second["event_sequence"], first["event_sequence"])
         self.assertEqual(len(second["ponds"]), 4)
-        self.assertEqual(len(second["readings"]), 36)
+        self.assertEqual(len(second["readings"]), 252)
 
     def test_auth_session_requires_password_and_expires(self) -> None:
         auth = AuthManager(enabled=True, username="admin", password="secret")

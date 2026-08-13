@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+from fishagent.application.demo_data import DEMO_SENSOR_SPECS
 from fishagent.domain.models import (
     ActionProposal,
     AgentRun,
@@ -104,7 +105,6 @@ class InMemoryStore:
         )
         for pond_id, name, species, do_min, device_state in pond_specs:
             pond_slug = pond_id.lower().replace("-", "")
-            sensor_id = "do-%s" % pond_id.lower()
             self.ponds[pond_id] = Pond(
                 id=pond_id,
                 name=name,
@@ -112,14 +112,16 @@ class InMemoryStore:
                 farm_id="farm-demo",
                 dissolved_oxygen_min=do_min,
             )
-            self.sensors[sensor_id] = Sensor(
-                id=sensor_id,
-                pond_id=pond_id,
-                name="%s 溶氧传感器" % pond_id,
-                metric="DO",
-                unit="mg/L",
-            )
-            self.sensor_health[sensor_id] = SensorHealth(sensor_id=sensor_id, last_heartbeat_at=utcnow())
+            for spec in DEMO_SENSOR_SPECS:
+                sensor_id = "%s-%s" % (spec["slug"], pond_id.lower())
+                self.sensors[sensor_id] = Sensor(
+                    id=sensor_id,
+                    pond_id=pond_id,
+                    name="%s %s传感器" % (pond_id, spec["name"]),
+                    metric=spec["metric"],
+                    unit=spec["unit"],
+                )
+                self.sensor_health[sensor_id] = SensorHealth(sensor_id=sensor_id, last_heartbeat_at=utcnow())
             self.devices["aerator-%s-1" % pond_slug] = Device(
                 id="aerator-%s-1" % pond_slug,
                 pond_id=pond_id,
@@ -143,8 +145,8 @@ class InMemoryStore:
         )
         self.emit(
             "system.demo.initialized",
-            "演示数据已初始化：4 个池塘及传感器、增氧机、摄像头",
-            {"pond_ids": [item[0] for item in pond_specs]},
+            "演示数据已初始化：4 个池塘、28 个水质传感器及配套设备",
+            {"pond_ids": [item[0] for item in pond_specs], "sensor_metrics": [item["metric"] for item in DEMO_SENSOR_SPECS]},
         )
 
     def emit(

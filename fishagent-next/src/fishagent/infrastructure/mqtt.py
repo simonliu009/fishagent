@@ -1,7 +1,7 @@
 """MQTT telemetry adapter.
 
 Topic: farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}
-Payload: {"metric":"DO", "value":2.1, "source_event_id":"..."}
+Payload: {"metric":"DO", "unit":"mg/L", "value":2.1, "source_event_id":"..."}
 """
 
 import json
@@ -53,12 +53,14 @@ class MqttTelemetryAdapter:
             return
         try:
             payload = json.loads(message.payload.decode("utf-8"))
-            metric = str(payload.get("metric") or "")
-            if metric != "DO":
-                return
+            metric = str(payload.get("metric") or "").upper()
+            if not metric:
+                raise ValueError("metric is required")
             self.ingest(
                 pond_id=match.group("pond_id"),
                 value=float(payload["value"]),
+                metric=metric,
+                unit=str(payload["unit"]) if payload.get("unit") else None,
                 source_event_id=payload.get("source_event_id"),
                 sensor_id=match.group("sensor_id"),
                 quality=str(payload.get("quality") or "GOOD"),
@@ -99,6 +101,8 @@ class MqttTelemetryPublisher:
         self,
         pond_id: str,
         sensor_id: str,
+        metric: str,
+        unit: str,
         value: float,
         source_event_id: str,
         quality: str = "GOOD",
@@ -109,7 +113,8 @@ class MqttTelemetryPublisher:
         topic = "farms/%s/ponds/%s/sensors/%s" % (self.farm_id, pond_id, sensor_id)
         payload = json.dumps(
             {
-                "metric": "DO",
+                "metric": metric,
+                "unit": unit,
                 "value": value,
                 "source_event_id": source_event_id,
                 "quality": quality,
