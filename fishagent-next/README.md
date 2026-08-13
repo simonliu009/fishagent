@@ -46,12 +46,13 @@ cp .env.example .env
 访问：
 
 - 控制台：http://localhost:3000
+- 公网控制台：`http://<服务器公网 IP>:3000`
 - nginx 公共入口：http://localhost:3001
 - 健康检查：http://localhost:3000/health/ready
 - API 状态：http://localhost:3000/api/v1/state
 - OpenAPI：http://localhost:3000/api/docs
 
-应用进程监听 `3000`，nginx 公共入口监听 `3001` 并反代到 `127.0.0.1:3000`。配置模板位于 `deploy/nginx/fishagent-3001.conf`。
+应用进程通过 Docker 发布到 `0.0.0.0:3000`，可由公网和 Tailscale 直接访问；nginx 入口监听 `3001` 并反代到 `127.0.0.1:3000`。配置模板位于 `deploy/nginx/fishagent-3001.conf`。公网部署应启用认证并在云安全列表中只放行必要来源。
 
 ## 运行时基础设施
 

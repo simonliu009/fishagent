@@ -9,7 +9,7 @@ cp .env.example .env
 ./stop.sh
 ```
 
-外部入口是 `http://localhost:3001`，应用直连检查是 `http://localhost:3000/health/ready`。`health/live` 只表示进程存活，`health/ready` 会检查 PostgreSQL、Redis 和 MinIO 能力。
+公网和 Tailscale 可直接访问应用的 `3000` 端口，Nginx 入口为 `3001`；本机健康检查是 `http://localhost:3000/health/ready`。`health/live` 只表示进程存活，`health/ready` 会检查 PostgreSQL、Redis 和 MinIO 能力。公网部署必须启用认证，并在云防火墙中限制来源范围。
 
 ## 故障处理
 
