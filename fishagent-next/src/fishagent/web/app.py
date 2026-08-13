@@ -11,7 +11,7 @@ import time
 from collections import Counter
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
@@ -200,6 +200,17 @@ class LoginPayload(BaseModel):
 
 class JsonPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
+
+
+class ChatTurnPayload(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class AgentChatPayload(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    pond_id: Optional[str] = None
+    history: list[ChatTurnPayload] = Field(default_factory=list, max_length=12)
 
 
 def problem(status: int, title: str, detail: str = "") -> JSONResponse:
@@ -433,7 +444,7 @@ async def demo(request: Request, mode: str) -> Any:
     authenticate(request, "/api/v1/demo/%s" % mode, write=True)
     if mode == "init":
         return SYSTEM.initialize_demo()
-    if mode not in {"success", "failure", "dedup", "approval"}:
+    if mode not in {"success", "failure", "dedup", "approval", "alerts"}:
         return problem(400, "Unknown demo mode")
     return SYSTEM.run_demo(mode)
 
@@ -527,7 +538,8 @@ async def patrol_runs(request: Request) -> dict:
 async def create_patrol_run(request: Request) -> Any:
     authenticate(request, request.url.path, write=True)
     run = SYSTEM.run_patrol()
-    return encoded_response(202, {"run": state_item("agent_runs", run.id), "state": SYSTEM.snapshot()})
+    state = SYSTEM.snapshot()
+    return encoded_response(202, {"run": next(item for item in state["agent_runs"] if item["id"] == run.id), "state": state})
 
 
 @app.get("/api/v1/patrol-runs/{run_id}")
@@ -796,6 +808,40 @@ async def evidence_url(request: Request, object_name: str) -> Any:
         return problem(404, "Evidence not found", str(exc))
 
 
+@app.post("/api/v1/agent-runs")
+async def create_agent_run(request: Request, payload: JsonPayload) -> Any:
+    authenticate(request, request.url.path, write=True)
+    try:
+        run = SYSTEM.run_goal(str(payload.model_dump().get("goal") or ""), payload.model_dump().get("pond_id"))
+    except ValueError as exc:
+        return problem(400, "Invalid agent goal", str(exc))
+    state = SYSTEM.snapshot()
+    return encoded_response(202, {"run": next(item for item in state["agent_runs"] if item["id"] == run.id), "state": state})
+
+
+@app.post("/api/v1/agent-chat")
+async def agent_chat(request: Request, payload: AgentChatPayload) -> Any:
+    authenticate(request, request.url.path, write=True)
+
+    def execute_turn() -> tuple[Any, str, dict]:
+        run, reply = SYSTEM.run_chat(
+            payload.message,
+            [turn.model_dump() for turn in payload.history],
+            payload.pond_id,
+        )
+        return run, reply, SYSTEM.snapshot()
+
+    try:
+        run, reply, state = await asyncio.to_thread(execute_turn)
+    except ValueError as exc:
+        return problem(400, "Invalid chat message", str(exc))
+    run_data = next(item for item in state["agent_runs"] if item["id"] == run.id)
+    response = {"reply": reply, "run": run_data}
+    if run.status != "COMPLETED":
+        return encoded_response(503, {**response, "detail": reply})
+    return response
+
+
 @app.get("/api/v1/{collection}")
 async def list_assets(request: Request, collection: str) -> Any:
     authenticate(request, request.url.path)
@@ -917,16 +963,6 @@ async def telemetry_series(request: Request, pond_id: str = "", metric: str = "D
     limit = min(max(limit, 1), 1000)
     readings = [r for r in SYSTEM.read_snapshot()["readings"] if r["pond_id"] == pond_id and r["metric"] == metric]
     return {"readings": readings[-limit:]}
-
-
-@app.post("/api/v1/agent-runs")
-async def create_agent_run(request: Request, payload: JsonPayload) -> Any:
-    authenticate(request, request.url.path, write=True)
-    try:
-        run = SYSTEM.run_goal(str(payload.model_dump().get("goal") or ""), payload.model_dump().get("pond_id"))
-    except ValueError as exc:
-        return problem(400, "Invalid agent goal", str(exc))
-    return encoded_response(202, {"run": state_item("agent_runs", run.id), "state": SYSTEM.snapshot()})
 
 
 @app.post("/api/v1/action-proposals/{proposal_id}/{decision}")

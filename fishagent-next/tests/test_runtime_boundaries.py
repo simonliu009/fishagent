@@ -1,19 +1,78 @@
 import json
+import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
 from fishagent.core import LLMConfig
-from fishagent.domain.models import Device
+from fishagent.domain.models import AgentRun, Device
 from fishagent.infrastructure.gateways import SimulatorDeviceGateway
 from fishagent.infrastructure.mqtt import MqttTelemetryAdapter
 from fishagent.infrastructure.queue.celery_app import celery_app
-from fishagent.web.app import app
+from fishagent.web.app import SYSTEM, app
 from fishagent.web.server import test_llm_connection as check_llm_connection
 
 
 class RuntimeBoundaryTests(unittest.TestCase):
+    def test_crewai_uses_litellm_openrouter_model_prefix(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.available = True
+        orchestrator.llm_config = LLMConfig(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            model="openrouter/free",
+            api_key="test-key",
+            enabled=True,
+        )
+        orchestrator._LLM = lambda **kwargs: kwargs
+
+        llm = orchestrator._llm()
+
+        self.assertEqual(llm["model"], "openrouter/openrouter/free")
+        self.assertEqual(llm["base_url"], "https://openrouter.ai/api/v1")
+
+    def test_crewai_hierarchical_manager_is_not_duplicated_in_member_agents(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.system = SimpleNamespace(
+            snapshot=lambda: {"ponds": [], "readings": [], "devices": [], "incidents": []}
+        )
+        orchestrator._llm = lambda: "llm"
+        orchestrator._tool = lambda _name: lambda function: function
+        orchestrator._Agent = lambda **kwargs: SimpleNamespace(**kwargs)
+        orchestrator._Task = lambda **kwargs: SimpleNamespace(**kwargs)
+        orchestrator._Process = SimpleNamespace(hierarchical="hierarchical")
+        captured = {}
+
+        def crew_factory(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(kickoff=lambda inputs: inputs)
+
+        orchestrator._Crew = crew_factory
+        orchestrator._kickoff_crew("检查全场", None, [])
+
+        self.assertEqual(captured["manager_agent"].role, "主决策 Agent")
+        self.assertEqual(captured["manager_agent"].tools, [])
+        self.assertNotIn(captured["manager_agent"], captured["agents"])
+        self.assertIsNone(captured["tasks"][0].agent)
+        self.assertEqual(
+            [agent.role for agent in captured["agents"]],
+            ["传感器监控 Agent", "巡查分析 Agent", "行动规划 Agent"],
+        )
+
+    def test_crewai_chat_only_exposes_final_answer(self) -> None:
+        raw = "Here's a thinking process:\ninternal details\n结论：B-02 水质稳定。"
+
+        answer = CrewAIOrchestrator._extract_public_answer(raw)
+
+        self.assertEqual(answer, "结论：B-02 水质稳定。")
+
+    def test_crewai_chat_rejects_reasoning_without_final_answer(self) -> None:
+        with self.assertRaisesRegex(ValueError, "safe final chat answer"):
+            CrewAIOrchestrator._extract_public_answer("Here's a thinking process: internal details")
+
     def test_console_keeps_core_views_and_adds_operational_views(self) -> None:
         with TestClient(app) as client:
             response = client.get("/")
@@ -29,9 +88,74 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('id="alert_capsule"', response.text)
         self.assertIn('id="alert_capsule_toggle"', response.text)
         self.assertIn('id="alert_capsule_list"', response.text)
+        self.assertIn('class="alert-capsule-track"', response.text)
         self.assertIn('id="alert_panel"', response.text)
         self.assertIn('onclick="toggleAlertCapsule(event)"', response.text)
         self.assertIn('onclick="openAlertView(event)"', response.text)
+        self.assertIn("function advanceCountdownTarget", response.text)
+        self.assertIn("采样 ${fmtDate(sampledAt)}", response.text)
+        self.assertIn('id="assistant_chat"', response.text)
+        self.assertIn('id="assistant_chat_input"', response.text)
+        self.assertIn("api('/api/v1/agent-chat'", response.text)
+        self.assertIn("全场设备 · 在线率", response.text)
+        self.assertIn("<b>处理结果：</b>", response.text)
+        self.assertIn("waterMetrics.map", response.text)
+
+    def test_agent_chat_endpoint_returns_audited_crewai_reply(self) -> None:
+        run = AgentRun(id="run-chat-test", goal="对话：检查 B-02", status="COMPLETED", stop_reason="CREW_CHAT_COMPLETED")
+        run_data = {
+            "id": run.id,
+            "goal": run.goal,
+            "status": run.status,
+            "stop_reason": run.stop_reason,
+            "steps": [],
+            "delegated_agents": [],
+            "budget": run.budget,
+        }
+        with (
+            patch.object(SYSTEM, "run_chat", return_value=(run, "B-02 水质总体稳定。")) as mocked_chat,
+            patch.object(SYSTEM, "snapshot", return_value={"agent_runs": [run_data]}),
+            TestClient(app) as client,
+        ):
+            response = client.post(
+                "/api/v1/agent-chat",
+                json={
+                    "message": "检查 B-02",
+                    "pond_id": "B-02",
+                    "history": [{"role": "user", "content": "先看传感器"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reply"], "B-02 水质总体稳定。")
+        mocked_chat.assert_called_once_with(
+            "检查 B-02",
+            [{"role": "user", "content": "先看传感器"}],
+            "B-02",
+        )
+
+    def test_patrol_endpoint_persists_run_before_building_response(self) -> None:
+        run = AgentRun(id="run-patrol-test", goal="执行全场巡查", status="COMPLETED", stop_reason="PATROL_COMPLETED")
+        run_data = {
+            "id": run.id,
+            "goal": run.goal,
+            "status": run.status,
+            "stop_reason": run.stop_reason,
+            "steps": [],
+            "delegated_agents": [],
+            "budget": run.budget,
+        }
+        state = {"agent_runs": [run_data]}
+        with (
+            patch.object(SYSTEM, "run_patrol", return_value=run),
+            patch.object(SYSTEM, "snapshot", return_value=state) as snapshot,
+            TestClient(app) as client,
+        ):
+            response = client.post("/api/v1/patrol-runs", json={})
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["run"]["id"], run.id)
+        snapshot.assert_called_once_with()
 
     def test_llm_connection_posts_selected_model_to_chat_completions(self) -> None:
         class Response:
@@ -121,6 +245,31 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(received[0]["metric"], "AMMONIA")
         self.assertEqual(received[0]["unit"], "mg/L")
         self.assertEqual(received[0]["value"], 0.18)
+
+    def test_mqtt_network_callback_queues_slow_ingest(self) -> None:
+        ingest_started = threading.Event()
+        allow_ingest = threading.Event()
+
+        def slow_ingest(**data) -> None:
+            del data
+            ingest_started.set()
+            allow_ingest.wait(timeout=1)
+
+        adapter = MqttTelemetryAdapter("127.0.0.1", 1883, "farms/+/ponds/+/sensors/+", slow_ingest)
+        adapter._ingest_worker = threading.Thread(target=adapter._run_ingest_worker, daemon=True)
+        adapter._ingest_worker.start()
+
+        class Message:
+            topic = "farms/f-1/ponds/B-01/sensors/s-1"
+            payload = b'{"metric":"DO","unit":"mg/L","value":2.8,"source_event_id":"slow-1"}'
+
+        adapter._on_message(None, None, Message())
+        self.assertTrue(ingest_started.wait(timeout=1))
+        self.assertTrue(adapter._ingest_worker.is_alive())
+        allow_ingest.set()
+        adapter._ingest_queue.join()
+        adapter._ingest_queue.put(None)
+        adapter._ingest_worker.join(timeout=1)
 
     def test_celery_has_default_queue_and_beat_tick(self) -> None:
         self.assertEqual(celery_app.conf.task_default_queue, "default")

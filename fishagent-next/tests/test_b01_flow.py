@@ -2,8 +2,10 @@ import json
 import unittest
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fishagent.agent_runtime.contracts import IncidentDecision
+from fishagent.agent_runtime.crewai_runtime import CrewRunResult
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.application.policy import evaluate_action
 from fishagent.core import LLMConfig, RuntimeConfigStore
@@ -54,6 +56,25 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(state["commands"], [])
         self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
         self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_UNAVAILABLE")
+
+    def test_llm_runtime_budget_timeout_creates_manual_task(self) -> None:
+        class SlowOrchestrator:
+            available = True
+
+        system = FishAgentSystem(agent_orchestrator=SlowOrchestrator())
+        system.initialize_demo()
+        with patch.object(
+            system,
+            "_decide_incident_with_timeout",
+            side_effect=TimeoutError("budget exceeded"),
+        ):
+            incident = system.ingest_do("B-01", 2.0, source_event_id="llm-timeout")
+
+        self.assertIsNotNone(incident)
+        state = system.snapshot()
+        self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_TIMEOUT")
+        self.assertEqual(len(state["manual_tasks"]), 1)
 
     def test_llm_policy_rejection_stops_without_waiting_for_missing_approval(self) -> None:
         class FakeOrchestrator:
@@ -237,7 +258,12 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(state["farms"][0]["id"], "farm-demo")
         self.assertEqual({item["id"] for item in state["ponds"]}, {"B-01", "B-02", "B-03", "B-04"})
         self.assertEqual(len(state["sensors"]), 28)
-        self.assertEqual(len(state["devices"]), 4)
+        self.assertEqual(len(state["devices"]), 28)
+        self.assertEqual(sum(1 for item in state["devices"] if item["healthy"]), 27)
+        self.assertEqual(sum(1 for item in state["devices"] if not item["healthy"]), 1)
+        offline = next(item for item in state["devices"] if not item["healthy"])
+        self.assertEqual(offline["id"], "aerator-b04-1")
+        self.assertEqual(offline["pond_id"], "B-04")
         self.assertEqual(len(state["cameras"]), 4)
         self.assertEqual(len(state["readings"]), 252)
         self.assertEqual(len(state["schedules"]), 1)
@@ -253,6 +279,161 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(health["do-b-01"], "ONLINE")
         self.assertEqual(health["do-b-04"], "ERROR")
         self.assertEqual(state["events"][0]["event_type"], "system.demo.initialized")
+
+    def test_non_do_anomaly_is_routed_to_agent_and_manual_task(self) -> None:
+        class ManualOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="氨氮异常需要现场复测并检查投喂。",
+                        evidence_refs=context["incident"]["evidence"][0]["refs"],
+                    ),
+                    summary="manual review",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["sensor-monitor-agent"],
+                    steps=[("supervisor-agent", "incident.decided", "氨氮异常转人工")],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=ManualOrchestrator())
+        system.initialize_demo()
+        incident = system.ingest_reading(
+            "B-02",
+            0.82,
+            metric="AMMONIA",
+            unit="mg/L",
+            source_event_id="ammonia-high",
+        )
+        self.assertIsNotNone(incident)
+        state = system.snapshot()
+        self.assertIn("氨氮超标", state["incidents"][0]["title"])
+        self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_MANUAL_REQUIRED")
+        self.assertEqual(state["manual_tasks"][0]["incident_id"], state["incidents"][0]["id"])
+
+    def test_bad_sensor_quality_is_routed_to_agent(self) -> None:
+        class ManualOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="传感器质量异常，要求现场校准。",
+                    ),
+                    summary="manual review",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=[],
+                    steps=[],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=ManualOrchestrator())
+        system.initialize_demo()
+        incident = system.ingest_reading(
+            "B-03",
+            7.2,
+            metric="PH",
+            unit="pH",
+            source_event_id="ph-suspect",
+            quality="SUSPECT",
+        )
+        self.assertIsNotNone(incident)
+        state = system.snapshot()
+        self.assertIn("pH传感器异常", state["incidents"][0]["title"])
+        self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(len(state["manual_tasks"]), 1)
+
+    def test_patrol_records_all_sensor_metrics_and_dispatches_anomaly(self) -> None:
+        class ManualOrchestrator:
+            available = True
+
+            def __init__(self) -> None:
+                self.contexts = []
+
+            def decide_incident(self, context):
+                self.contexts.append(context)
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="设备离线且传感器状态异常，需要现场处理。",
+                    ),
+                    summary="manual review",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["patrol-analysis-agent"],
+                    steps=[("supervisor-agent", "incident.decided", "巡查异常转人工")],
+                )
+
+        orchestrator = ManualOrchestrator()
+        system = FishAgentSystem(agent_orchestrator=orchestrator)
+        system.initialize_demo()
+        patrol = system.run_patrol()
+        state = system.snapshot()
+        b04 = next(item for item in state["patrol_findings"] if item["pond_id"] == "B-04")
+        for label in ("氨氮", "亚硝酸根离子", "浊度", "叶绿素", "溶解氧", "pH", "水温"):
+            self.assertIn(label, b04["summary"])
+        self.assertEqual(len(b04["evidence_refs"]), 7)
+        self.assertEqual(b04["status"], "NEEDS_ATTENTION")
+        self.assertEqual(len(orchestrator.contexts), 1)
+        self.assertTrue(any(step.action == "dispatch_incident" for step in patrol.steps))
+        self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(len(state["manual_tasks"]), 1)
+
+    def test_mixed_alert_demo_uses_do_and_ammonia_and_processes_both(self) -> None:
+        class ManualOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="异常已由 CrewAI 研判并提交人工任务。",
+                    ),
+                    summary="manual review",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=[],
+                    steps=[],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=ManualOrchestrator())
+        state = system.run_demo("alerts")
+        titles = [item["title"] for item in state["incidents"]]
+        self.assertTrue(any("低溶氧" in title for title in titles))
+        self.assertTrue(any("氨氮超标" in title for title in titles))
+        self.assertEqual(len(state["agent_runs"]), 2)
+        self.assertEqual(len(state["manual_tasks"]), 2)
+
+    def test_crewai_chat_turn_is_audited_as_agent_run(self) -> None:
+        class ChatOrchestrator:
+            available = True
+
+            def chat(self, message, history, pond_id):
+                self.input = (message, history, pond_id)
+                return CrewRunResult(
+                    summary="B-02 氨氮偏高，建议复测并检查投喂记录。",
+                    stop_reason="CREW_CHAT_COMPLETED",
+                    delegated_agents=["sensor-monitor-agent"],
+                    steps=[("supervisor-agent", "chat.completed", "已读取最新水质")],
+                )
+
+        orchestrator = ChatOrchestrator()
+        system = FishAgentSystem(agent_orchestrator=orchestrator)
+        system.initialize_demo()
+        run, reply = system.run_chat(
+            "B-02 水质怎么样？",
+            [{"role": "user", "content": "先看异常"}],
+            "B-02",
+        )
+        self.assertEqual(reply, "B-02 氨氮偏高，建议复测并检查投喂记录。")
+        self.assertEqual(run.status, "COMPLETED")
+        self.assertEqual(run.stop_reason, "CREW_CHAT_COMPLETED")
+        self.assertEqual(orchestrator.input[2], "B-02")
+        self.assertEqual(system.snapshot()["agent_runs"][0]["goal"], "对话：B-02 水质怎么样？")
 
     def test_demo_mock_telemetry_uses_publisher_boundary(self) -> None:
         published = []
@@ -277,6 +458,30 @@ class B01FlowTest(unittest.TestCase):
         self.assertTrue(all(item["auto_run"] is False for item in published))
         self.assertTrue(all(item["defer_persist"] is True for item in published))
         self.assertEqual(len(state["readings"]), 252)
+
+    def test_demo_telemetry_timeout_returns_consumed_incident(self) -> None:
+        class AcceptedPublisher:
+            def __init__(self, system):
+                self.system = system
+
+            def publish_reading(self, **payload):
+                payload.pop("defer_persist", None)
+                payload["auto_run"] = False
+                self.system.ingest_reading(**payload)
+                return True
+
+        system = FishAgentSystem()
+        system.initialize_demo()
+        system.telemetry_publisher = AcceptedPublisher(system)
+
+        with patch(
+            "fishagent.application.agent_service.time.monotonic",
+            side_effect=[0, 96],
+        ):
+            incident = system._demo_reading("B-02", 0.82, "accepted-ammonia", metric="AMMONIA")
+
+        self.assertIsNotNone(incident)
+        self.assertEqual(incident.status, IncidentStatus.DETECTED)
 
     def test_asset_creation_validates_relationships(self) -> None:
         system = FishAgentSystem()

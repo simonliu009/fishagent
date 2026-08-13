@@ -39,6 +39,16 @@ from fishagent.domain.models import (
     utcnow,
 )
 
+SENSOR_NAME_BY_METRIC = {item["metric"]: item["name"] for item in DEMO_SENSOR_SPECS}
+WATER_QUALITY_HIGH_LIMITS = {
+    "AMMONIA": 0.50,
+    "NITRITE": 0.20,
+    "TURBIDITY": 50.0,
+    "CHLOROPHYLL": 30.0,
+    "TEMPERATURE": 32.0,
+}
+WATER_QUALITY_RANGES = {"PH": (6.5, 8.5)}
+
 
 class InMemoryStore:
     def __init__(self) -> None:
@@ -103,6 +113,15 @@ class InMemoryStore:
             ("B-03", "B-03 黄颡鱼育成池", "黄颡鱼", 4.5, "off"),
             ("B-04", "B-04 对虾标粗池", "南美白对虾", 4.0, "off"),
         )
+        device_specs = (
+            ("aerator", "一号增氧机", "aeration"),
+            ("feeder", "自动投饵机", "feeding"),
+            ("circulation-pump", "循环水泵", "circulation"),
+            ("intake-pump", "进水泵", "water_intake"),
+            ("drainage-pump", "排水泵", "drainage"),
+            ("dosing-pump", "加药泵", "dosing"),
+            ("valve", "电动阀门", "valve_control"),
+        )
         for pond_id, name, species, do_min, device_state in pond_specs:
             pond_slug = pond_id.lower().replace("-", "")
             self.ponds[pond_id] = Pond(
@@ -122,13 +141,16 @@ class InMemoryStore:
                     unit=spec["unit"],
                 )
                 self.sensor_health[sensor_id] = SensorHealth(sensor_id=sensor_id, last_heartbeat_at=utcnow())
-            self.devices["aerator-%s-1" % pond_slug] = Device(
-                id="aerator-%s-1" % pond_slug,
-                pond_id=pond_id,
-                name="%s 一号增氧机" % pond_id,
-                capability="aeration",
-                shadow_state=device_state,
-            )
+            for device_slug, device_name, capability in device_specs:
+                device_id = "%s-%s-1" % (device_slug, pond_slug)
+                self.devices[device_id] = Device(
+                    id=device_id,
+                    pond_id=pond_id,
+                    name="%s %s" % (pond_id, device_name),
+                    capability=capability,
+                    shadow_state=device_state if capability == "aeration" else "off",
+                    healthy=not (pond_id == "B-04" and capability == "aeration"),
+                )
             self.cameras["camera-%s" % pond_slug] = CameraSource(
                 id="camera-%s" % pond_slug,
                 pond_id=pond_id,
@@ -145,8 +167,12 @@ class InMemoryStore:
         )
         self.emit(
             "system.demo.initialized",
-            "演示数据已初始化：4 个池塘、28 个水质传感器及配套设备",
-            {"pond_ids": [item[0] for item in pond_specs], "sensor_metrics": [item["metric"] for item in DEMO_SENSOR_SPECS]},
+            "演示数据已初始化：4 个池塘、28 个水质传感器及 28 台设备",
+            {
+                "pond_ids": [item[0] for item in pond_specs],
+                "sensor_metrics": [item["metric"] for item in DEMO_SENSOR_SPECS],
+                "device_count": len(self.devices),
+            },
         )
 
     def emit(
@@ -485,31 +511,58 @@ class InMemoryStore:
             {"pond_id": reading.pond_id, "metric": reading.metric, "value": reading.value},
         )
         pond = self.ponds.get(reading.pond_id)
-        if pond and reading.metric == "DO" and reading.quality == "GOOD" and reading.value < pond.dissolved_oxygen_min:
+        anomaly: Optional[tuple[str, str]] = None
+        metric_name = SENSOR_NAME_BY_METRIC.get(reading.metric, reading.metric)
+        if pond and reading.quality == "GOOD":
+            if reading.metric == "DO" and reading.value < pond.dissolved_oxygen_min:
+                anomaly = (
+                    "%s 低溶氧" % pond.name,
+                    "溶氧 %.2f%s，低于安全线 %.2f%s"
+                    % (reading.value, reading.unit, pond.dissolved_oxygen_min, reading.unit),
+                )
+            elif reading.metric in WATER_QUALITY_HIGH_LIMITS:
+                limit = WATER_QUALITY_HIGH_LIMITS[reading.metric]
+                if reading.value > limit:
+                    anomaly = (
+                        "%s %s超标" % (pond.name, metric_name),
+                        "%s %.2f%s，高于安全线 %.2f%s"
+                        % (metric_name, reading.value, reading.unit, limit, reading.unit),
+                    )
+            elif reading.metric in WATER_QUALITY_RANGES:
+                lower, upper = WATER_QUALITY_RANGES[reading.metric]
+                if reading.value < lower or reading.value > upper:
+                    anomaly = (
+                        "%s %s异常" % (pond.name, metric_name),
+                        "%s %.2f，超出安全范围 %.2f-%.2f" % (metric_name, reading.value, lower, upper),
+                    )
+        if anomaly:
             active = self.active_incident_for_pond(reading.pond_id)
             evidence = Evidence(
                 id=new_id("evi"),
                 type="sensor_snapshot",
-                summary="溶氧 %.2f%s，低于安全线 %.2f%s" % (
-                    reading.value,
-                    reading.unit,
-                    pond.dissolved_oxygen_min,
-                    reading.unit,
-                ),
+                summary=anomaly[1],
                 refs=[reading.source_event_id],
             )
             if active:
                 active.evidence.append(evidence)
-                self.emit("incident.evidence_merged", "低溶氧证据已合并到现有事件", {"incident_id": active.id})
+                self.emit(
+                    "incident.evidence_merged",
+                    "%s证据已合并到现有事件" % metric_name,
+                    {"incident_id": active.id, "metric": reading.metric},
+                )
                 return active
             incident = Incident(
                 id=new_id("inc"),
                 pond_id=reading.pond_id,
-                title="%s 低溶氧" % pond.name,
+                title=anomaly[0],
                 evidence=[evidence],
             )
             self.incidents[incident.id] = incident
-            self.emit("incident.detected", incident.title, {"incident_id": incident.id, "pond_id": reading.pond_id})
+            self.emit(
+                "incident.detected",
+                incident.title,
+                {"incident_id": incident.id, "pond_id": reading.pond_id, "metric": reading.metric},
+            )
             return incident
         return None
 

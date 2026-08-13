@@ -52,9 +52,9 @@
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
       letter-spacing: 0;
     }
-    button, input, select { font: inherit; letter-spacing: 0; }
+    button, input, select, textarea { font: inherit; letter-spacing: 0; }
     button { cursor: pointer; }
-    button:focus-visible, input:focus-visible, select:focus-visible {
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
       outline: 2px solid var(--blue);
       outline-offset: 2px;
     }
@@ -226,15 +226,32 @@
     .patrol-pond-list { display: grid; gap: 4px; margin-top: 7px; }
     .patrol-pond-row {
       display: grid;
-      grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) auto;
-      gap: 10px;
+      grid-template-columns: minmax(180px, 1fr) minmax(150px, auto) auto;
+      gap: 7px 10px;
       align-items: center;
-      min-height: 32px;
-      padding: 5px 8px;
+      min-height: 70px;
+      padding: 8px;
       background: var(--surface-alt);
       border-radius: 5px;
       font-size: 11px;
     }
+    .patrol-sensor-strip { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+    .patrol-sensor {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 4px 6px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 9px;
+    }
+    .patrol-sensor span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .patrol-sensor b { flex: 0 0 auto; color: var(--ink); font-size: 9px; }
+    .patrol-sensor b.danger { color: var(--red); }
     .dot { width: 8px; height: 8px; display: inline-block; border-radius: 50%; background: var(--brand); }
     .dot.warning { background: var(--amber); }
     .dot.danger { background: var(--red); }
@@ -316,6 +333,10 @@
     .alert-time { flex: 0 0 auto; color: var(--muted); font-size: 9px; }
     .alert-summary { margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.55; }
     .alert-cause { margin-top: 7px; padding: 7px; border-radius: 5px; background: var(--surface-alt); font-size: 9px; }
+    .alert-outcome { margin-top: 7px; padding: 7px; border-left: 3px solid var(--blue); background: var(--blue-soft); color: var(--ink); font-size: 9px; line-height: 1.55; }
+    .alert-outcome.success { border-color: var(--brand); background: var(--brand-soft); }
+    .alert-outcome.failed { border-color: var(--red); background: var(--red-soft); }
+    .alert-outcome.warning { border-color: var(--amber); background: var(--amber-soft); }
     .flow-track { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 9px; color: var(--blue); font-size: 9px; text-align: center; }
     .flow-step { position: relative; padding-top: 10px; }
     .flow-step::before { content: ""; position: absolute; top: 3px; left: 0; right: 0; height: 2px; background: #c8dbff; }
@@ -330,11 +351,12 @@
     .legend-item { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
     .legend-swatch { width: 8px; height: 8px; border-radius: 2px; }
     .page-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 14px; }
+    .assistant-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(330px, .75fr); gap: 14px; }
     .stack { display: grid; gap: 14px; align-content: start; }
     .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .field { display: grid; gap: 5px; min-width: 0; color: var(--muted); font-size: 10px; }
     .field.wide { grid-column: 1 / -1; }
-    input, select {
+    input, select, textarea {
       width: 100%;
       min-height: 36px;
       padding: 7px 9px;
@@ -344,6 +366,7 @@
       background: var(--surface);
       font-size: 12px;
     }
+    textarea { resize: vertical; line-height: 1.5; }
     .checkbox-field { display: flex; align-items: center; gap: 8px; min-height: 36px; color: var(--ink); font-size: 12px; }
     .checkbox-field input { width: 16px; min-height: 16px; }
     .message { min-height: 18px; margin-top: 8px; color: var(--muted); font-size: 10px; }
@@ -352,6 +375,27 @@
     .run-row-head, .event-row-head { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; font-weight: 750; }
     .run-row-meta, .event-row-meta { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.5; }
     .run-steps { margin: 7px 0 0; padding-left: 18px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .chat-panel { min-height: 620px; display: grid; grid-template-rows: auto minmax(380px, 1fr) auto; padding: 0; overflow: hidden; }
+    .chat-head { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .chat-log { min-height: 0; max-height: 610px; padding: 18px; overflow-y: auto; overscroll-behavior: contain; }
+    .chat-empty { min-height: 300px; display: grid; place-items: center; align-content: center; gap: 9px; color: var(--muted); text-align: center; font-size: 11px; }
+    .chat-empty svg { width: 30px; height: 30px; color: var(--brand); }
+    .chat-empty strong { color: var(--ink); font-size: 13px; }
+    .chat-message { width: min(86%, 720px); display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 8px; margin-bottom: 16px; }
+    .chat-message.user { grid-template-columns: minmax(0, 1fr) 30px; margin-left: auto; }
+    .chat-avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; color: var(--brand-dark); background: var(--brand-soft); }
+    .chat-message.user .chat-avatar { grid-column: 2; color: var(--blue); background: var(--blue-soft); }
+    .chat-avatar svg { width: 15px; height: 15px; }
+    .chat-bubble { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .chat-message.user .chat-bubble { grid-column: 1; grid-row: 1; border-color: #b8d9ce; background: var(--brand-soft); }
+    .chat-message.pending .chat-bubble { color: var(--muted); }
+    .chat-composer { padding: 12px 14px; border-top: 1px solid var(--line); background: var(--surface-alt); }
+    .chat-compose-row { display: grid; grid-template-columns: 118px minmax(0, 1fr) 38px; gap: 8px; align-items: end; }
+    .chat-compose-row textarea { height: 64px; min-height: 64px; max-height: 160px; resize: none; background: var(--surface); }
+    .chat-send { width: 38px; height: 38px; color: #fff; background: var(--brand); }
+    .chat-send:hover { color: #fff; background: var(--brand-dark); border-color: transparent; }
+    .chat-send:disabled { cursor: wait; opacity: .55; }
+    .chat-context { color: var(--muted); font-size: 10px; }
     .asset-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
     .asset-stat { padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-alt); }
     .asset-stat-label { color: var(--muted); font-size: 10px; }
@@ -424,7 +468,7 @@
       z-index: 40;
       width: var(--capsule-collapsed-width);
       max-width: calc(50vw - 18px);
-      min-height: 54px;
+      height: 54px;
       padding: 9px 10px;
       overflow: hidden;
       border: 1px solid #e8a8a8;
@@ -447,6 +491,7 @@
       grid-template-columns: 34px minmax(0, 1fr) 18px;
       align-items: center;
       gap: 10px;
+      height: 34px;
     }
     .alert-capsule-icon {
       width: 34px;
@@ -461,56 +506,36 @@
       cursor: pointer;
     }
     .alert-capsule-icon svg { width: 17px; height: 17px; }
-    .alert-capsule-copy {
+    .alert-capsule-list {
+      height: 34px;
       min-width: 0;
+      overflow: hidden;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .12s ease;
+    }
+    .alert-capsule:hover:not(.is-collapsed) .alert-capsule-list, .alert-capsule.is-pinned .alert-capsule-list { opacity: 1; pointer-events: auto; }
+    .alert-capsule-track { transition: transform .34s ease; transform: translateY(calc(var(--capsule-alert-index, 0) * -34px)); }
+    .alert-capsule-track.no-transition { transition: none; }
+    .alert-capsule-chevron { width: 16px; height: 16px; color: var(--red); opacity: 0; transition: opacity .12s ease, transform .18s ease; }
+    .alert-capsule:hover:not(.is-collapsed) .alert-capsule-chevron, .alert-capsule.is-pinned .alert-capsule-chevron { opacity: 1; }
+    .alert-capsule.is-pinned .alert-capsule-chevron { transform: rotate(180deg); }
+    .capsule-alert {
+      width: 100%;
+      height: 34px;
+      display: block;
       padding: 0;
       overflow: hidden;
       border: 0;
       color: inherit;
       background: transparent;
       text-align: left;
-      opacity: 0;
-      pointer-events: none;
-      cursor: pointer;
-      transition: opacity .12s ease;
-    }
-    .alert-capsule:hover:not(.is-collapsed) .alert-capsule-copy, .alert-capsule.is-pinned .alert-capsule-copy { opacity: 1; pointer-events: auto; }
-    .alert-capsule-copy b, .alert-capsule-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .alert-capsule-copy b { color: var(--red); font-size: 11px; }
-    .alert-capsule-copy span { margin-top: 2px; color: var(--muted); font-size: 10px; }
-    .alert-capsule-chevron { width: 16px; height: 16px; color: var(--red); opacity: 0; transition: opacity .12s ease, transform .18s ease; }
-    .alert-capsule:hover:not(.is-collapsed) .alert-capsule-chevron, .alert-capsule.is-pinned .alert-capsule-chevron { opacity: 1; }
-    .alert-capsule.is-pinned .alert-capsule-chevron { transform: rotate(90deg); }
-    .alert-capsule-list {
-      max-height: 0;
-      margin-top: 0;
-      overflow: hidden;
-      opacity: 0;
-      transition: max-height .2s ease, margin-top .2s ease, opacity .15s ease;
-    }
-    .alert-capsule:hover:not(.is-collapsed) .alert-capsule-list, .alert-capsule.is-pinned .alert-capsule-list {
-      max-height: min(320px, 42vh);
-      margin-top: 8px;
-      overflow-y: auto;
-      overscroll-behavior: contain;
-      opacity: 1;
-    }
-    .capsule-alert {
-      width: 100%;
-      padding: 8px 4px;
-      border-top: 1px solid color-mix(in srgb, var(--red) 18%, transparent);
-      border-right: 0;
-      border-bottom: 0;
-      border-left: 0;
-      color: inherit;
-      background: transparent;
-      text-align: left;
       cursor: pointer;
     }
-    .capsule-alert:hover { background: color-mix(in srgb, var(--red) 7%, transparent); }
-    .capsule-alert b, .capsule-alert span { display: block; }
-    .capsule-alert b { color: var(--ink); font-size: 10px; white-space: nowrap; }
-    .capsule-alert span { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+    .capsule-alert:hover { color: var(--red); }
+    .capsule-alert b, .capsule-alert span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .capsule-alert b { color: var(--red); font-size: 11px; line-height: 16px; }
+    .capsule-alert span { color: var(--muted); font-size: 10px; line-height: 16px; }
     .app-footer {
       min-height: 38px;
       display: flex;
@@ -525,7 +550,7 @@
     }
     .system-ok { display: flex; align-items: center; gap: 6px; }
     @media (max-width: 1080px) {
-      .patrol-panel, .dashboard-grid, .page-grid { grid-template-columns: 1fr; }
+      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout { grid-template-columns: 1fr; }
       .patrol-main { padding-right: 0; padding-bottom: 16px; border-right: 0; border-bottom: 1px solid #cdd5f4; }
       .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -542,7 +567,12 @@
       .panel-heading { align-items: stretch; flex-direction: column; }
       .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary { grid-template-columns: 1fr; }
       .metric-tile { min-height: 68px; }
-      .patrol-pond-row { grid-template-columns: 1fr; gap: 3px; }
+      .patrol-pond-row { grid-template-columns: 1fr auto; gap: 6px; }
+      .patrol-sensor-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .chat-panel { min-height: 560px; }
+      .chat-message { width: 94%; }
+      .chat-compose-row { grid-template-columns: minmax(0, 1fr) 38px; }
+      .chat-compose-row select { grid-column: 1 / -1; }
       .chart-wrap { min-height: 250px; }
       .trend-canvas { height: 220px; }
       .app-footer { align-items: flex-start; flex-direction: column; }
@@ -589,7 +619,7 @@
             </div>
             <div class="actions">
               <span id="demo_data_badge" class="status-badge info" hidden><i data-lucide="database"></i>模拟数据</span>
-              <button class="button danger" type="button" onclick="runDemo('failure')"><i data-lucide="triangle-alert"></i>演示故障</button>
+              <button class="button danger" type="button" onclick="runDemo('alerts')"><i data-lucide="triangle-alert"></i>模拟告警</button>
               <button class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
             </div>
           </div>
@@ -636,7 +666,21 @@
     </section>
 
     <section id="view_assistant" class="view">
-      <div class="page-grid">
+      <div class="assistant-layout">
+        <section class="tool-panel chat-panel">
+          <div class="chat-head">
+            <h2 class="section-title"><i data-lucide="bot"></i>CrewAI 助手</h2>
+            <span id="assistant_model_badge" class="status-badge warning">模型未配置</span>
+          </div>
+          <div id="assistant_chat" class="chat-log" role="log" aria-live="polite"></div>
+          <form id="assistant_chat_form" class="chat-composer" onsubmit="submitAssistantChat(event)">
+            <div class="chat-compose-row">
+              <select id="assistant_chat_pond" title="对话范围" aria-label="对话范围"><option value="">全场</option></select>
+              <textarea id="assistant_chat_input" maxlength="2000" rows="2" placeholder="输入养殖运营问题" aria-label="发送给 CrewAI 的消息" onkeydown="handleAssistantChatKey(event)"></textarea>
+              <button id="assistant_chat_send" class="icon-button chat-send" type="submit" title="发送消息"><i data-lucide="send"></i></button>
+            </div>
+          </form>
+        </section>
         <div class="stack">
           <section class="tool-panel">
             <div class="section-heading"><h2 class="section-title"><i data-lucide="message-square-text"></i>Agent 任务台</h2><span class="status-badge info">CrewAI / LLM</span></div>
@@ -651,11 +695,11 @@
             <div class="section-heading"><h2 class="section-title"><i data-lucide="workflow"></i>Agent 运行轨迹</h2><span id="run_meta" class="section-meta"></span></div>
             <div id="run_list" class="run-list"></div>
           </section>
+          <section class="tool-panel">
+            <div class="section-heading"><h2 class="section-title"><i data-lucide="radio"></i>实时事件</h2><span class="section-meta">Outbox / Redis</span></div>
+            <div id="assistant_events" class="event-list"></div>
+          </section>
         </div>
-        <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="radio"></i>实时事件</h2><span class="section-meta">Outbox / Redis</span></div>
-          <div id="assistant_events" class="event-list"></div>
-        </section>
       </div>
     </section>
 
@@ -767,10 +811,9 @@
   <aside id="alert_capsule" class="alert-capsule" hidden aria-label="未关闭告警" onmouseleave="releaseAlertCapsuleHover()">
     <div class="alert-capsule-head">
       <button id="alert_capsule_toggle" class="alert-capsule-icon" type="button" aria-expanded="false" title="固定展开告警" onclick="toggleAlertCapsule(event)"><i data-lucide="bell-ring"></i></button>
-      <button class="alert-capsule-copy" type="button" onclick="openAlertView(event)"><b id="alert_capsule_title">检测到异常</b><span id="alert_capsule_detail">点击查看告警信息</span></button>
+      <div id="alert_capsule_list" class="alert-capsule-list" aria-label="未关闭告警轮播"></div>
       <i class="alert-capsule-chevron" data-lucide="chevron-right"></i>
     </div>
-    <div id="alert_capsule_list" class="alert-capsule-list" aria-label="未关闭告警列表"></div>
   </aside>
   <div id="toast" class="toast" hidden></div>
 
@@ -780,6 +823,12 @@
     let currentLlm = {};
     let currentView = 'monitor';
     let countdownTarget = null;
+    let countdownIntervalSeconds = 0;
+    let countdownRefreshPending = false;
+    let alertCarouselTimer = null;
+    let alertCarouselResetTimer = null;
+    let assistantChatHistory = [];
+    let assistantChatBusy = false;
     const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
     const closedIncidents = new Set(['RESOLVED', 'DISMISSED']);
 
@@ -873,6 +922,30 @@
     function releaseAlertCapsuleHover() {
       document.getElementById('alert_capsule').classList.remove('is-collapsed');
     }
+    function stopAlertCarousel() {
+      clearInterval(alertCarouselTimer);
+      clearTimeout(alertCarouselResetTimer);
+      alertCarouselTimer = null;
+      alertCarouselResetTimer = null;
+    }
+    function startAlertCarousel(itemCount) {
+      stopAlertCarousel();
+      const track = document.getElementById('alert_capsule_track');
+      if (!track || itemCount < 2) return;
+      let index = 0;
+      alertCarouselTimer = setInterval(() => {
+        index += 1;
+        track.classList.remove('no-transition');
+        track.style.setProperty('--capsule-alert-index', String(index));
+        if (index !== itemCount) return;
+        alertCarouselResetTimer = setTimeout(() => {
+          track.classList.add('no-transition');
+          index = 0;
+          track.style.setProperty('--capsule-alert-index', '0');
+          requestAnimationFrame(() => requestAnimationFrame(() => track.classList.remove('no-transition')));
+        }, 380);
+      }, 4000);
+    }
     function openAlertView(event) {
       event.stopPropagation();
       switchView('monitor');
@@ -890,14 +963,20 @@
       iconRefresh();
     }
     const waterMetrics = [
-      {metric:'AMMONIA', label:'氨氮', digits:2},
-      {metric:'NITRITE', label:'亚硝酸根离子', digits:2},
-      {metric:'TURBIDITY', label:'浊度', digits:1},
-      {metric:'CHLOROPHYLL', label:'叶绿素', digits:1},
+      {metric:'AMMONIA', label:'氨氮', digits:2, max:0.5},
+      {metric:'NITRITE', label:'亚硝酸根离子', digits:2, max:0.2},
+      {metric:'TURBIDITY', label:'浊度', digits:1, max:50},
+      {metric:'CHLOROPHYLL', label:'叶绿素', digits:1, max:30},
       {metric:'DO', label:'溶解氧', digits:1},
-      {metric:'PH', label:'pH', digits:2, hideUnit:true},
-      {metric:'TEMPERATURE', label:'水温', digits:1}
+      {metric:'PH', label:'pH', digits:2, hideUnit:true, min:6.5, max:8.5},
+      {metric:'TEMPERATURE', label:'水温', digits:1, max:32}
     ];
+    function metricIsAbnormal(metric, reading, pond = null) {
+      if (!reading) return false;
+      const value = Number(reading.value);
+      if (metric.metric === 'DO') return pond ? value < Number(pond.dissolved_oxygen_min) : false;
+      return (metric.min !== undefined && value < metric.min) || (metric.max !== undefined && value > metric.max);
+    }
     function latestMetricReading(pondId, metric) {
       return (currentState.readings || []).filter(item => item.pond_id === pondId && item.metric === metric).sort((a,b) => new Date(b.sampled_at) - new Date(a.sampled_at))[0];
     }
@@ -912,9 +991,11 @@
       const incident = activeIncident(pond.id);
       const sensorIds = new Set((currentState.sensors || []).filter(item => item.pond_id === pond.id).map(item => item.id));
       const health = (currentState.sensor_health || []).filter(item => sensorIds.has(item.sensor_id));
+      const devices = (currentState.devices || []).filter(item => item.pond_id === pond.id);
       if (incident && ['ESCALATED','ACTION_FAILED','MANUAL_REQUIRED'].includes(incident.status)) return {tone:'danger', label:'严重'};
       if (incident || (reading && Number(reading.value) < Number(pond.dissolved_oxygen_min))) return {tone:'warning', label:'警告'};
       if (health.some(item => item.status !== 'ONLINE')) return {tone:'warning', label:'关注'};
+      if (devices.some(item => !item.healthy)) return {tone:'warning', label:'关注'};
       return {tone:'', label:reading ? '正常' : '待接入'};
     }
     function renderPatrol() {
@@ -934,18 +1015,40 @@
       const ponds = currentState.ponds || [];
       document.getElementById('patrol_scope').textContent = `${ponds.length} 个池塘 · 可滚动查看`;
       document.getElementById('patrol_pond_list').innerHTML = ponds.length ? ponds.slice(0, 10).map(pond => {
-        const reading = latestReading(pond.id);
         const condition = pondCondition(pond);
-        return `<div class="patrol-pond-row"><span><span class="dot ${condition.tone}"></span>　<b>${escapeHtml(pond.id)}</b> ${escapeHtml(pond.name)}</span><span>DO ${reading ? `${fmtNumber(reading.value)} ${escapeHtml(reading.unit)}` : '暂无读数'}</span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div>`;
+        const readings = waterMetrics.map(metric => ({...metric, reading:latestMetricReading(pond.id, metric.metric)}));
+        const sampledAt = readings.map(item => item.reading?.sampled_at).filter(Boolean).sort((a,b) => new Date(b) - new Date(a))[0];
+        const sensorStrip = readings.map(item => {
+          const unit = item.reading && !item.hideUnit ? ` ${escapeHtml(item.reading.unit || '')}` : '';
+          const tone = metricIsAbnormal(item, item.reading, pond) ? 'danger' : '';
+          return `<span class="patrol-sensor"><span>${escapeHtml(item.label)}</span><b class="${tone}">${item.reading ? `${fmtNumber(item.reading.value, item.digits)}${unit}` : '--'}</b></span>`;
+        }).join('');
+        return `<div class="patrol-pond-row"><span><span class="dot ${condition.tone}"></span>　<b>${escapeHtml(pond.id)}</b> ${escapeHtml(pond.name)}</span><time>采样 ${fmtDate(sampledAt)}</time>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div></div>`;
       }).join('') : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
       const schedules = (currentState.schedules || []).filter(item => item.status === 'ACTIVE' && item.job_type === 'patrol');
-      const next = schedules.map(item => new Date(item.next_run_at)).filter(date => !Number.isNaN(date.getTime())).sort((a,b) => a-b)[0];
-      countdownTarget = next || new Date(Date.now() + 30 * 60 * 1000);
-      document.getElementById('next_patrol_time').textContent = fmtDate(countdownTarget);
+      const nextSchedule = schedules.filter(item => item.next_run_at).sort((a,b) => new Date(a.next_run_at) - new Date(b.next_run_at))[0];
+      countdownTarget = nextSchedule ? new Date(nextSchedule.next_run_at) : null;
+      countdownIntervalSeconds = Number(nextSchedule?.interval_seconds) || 0;
+      advanceCountdownTarget();
+      document.getElementById('next_patrol_time').textContent = countdownTarget ? fmtDate(countdownTarget) : '--';
       updateCountdown();
+    }
+    function advanceCountdownTarget(now = Date.now()) {
+      if (!countdownTarget || !countdownIntervalSeconds || countdownTarget.getTime() > now) return false;
+      const intervalMs = countdownIntervalSeconds * 1000;
+      const periods = Math.floor((now - countdownTarget.getTime()) / intervalMs) + 1;
+      countdownTarget = new Date(countdownTarget.getTime() + periods * intervalMs);
+      return true;
     }
     function updateCountdown() {
       if (!countdownTarget) return;
+      if (advanceCountdownTarget()) {
+        document.getElementById('next_patrol_time').textContent = fmtDate(countdownTarget);
+        if (!countdownRefreshPending) {
+          countdownRefreshPending = true;
+          refresh().finally(() => { countdownRefreshPending = false; });
+        }
+      }
       let seconds = Math.max(0, Math.floor((countdownTarget.getTime() - Date.now()) / 1000));
       const hours = Math.floor(seconds / 3600);
       seconds %= 3600;
@@ -963,7 +1066,7 @@
         ['waves','养殖池', currentState.ponds?.length || 0, `${currentState.farms?.length || 0} 个养殖场`, ''],
         ['triangle-alert','活跃告警', active.length, `${active.filter(item => item.status === 'ESCALATED').length} 条已升级`, active.length ? 'alert' : ''],
         ['clipboard-list','今日任务', openTasks.length + pendingApprovals.length, `${pendingApprovals.length} 待批 · ${openTasks.length} 人工`, ''],
-        ['wifi','设备在线', devices.length ? `${Math.round(healthy / devices.length * 100)}%` : '--', `${healthy}/${devices.length} 台健康`, '']
+        ['wifi','设备在线', devices.length ? `${healthy}/${devices.length}` : '--', devices.length ? `全场设备 · 在线率 ${Math.round(healthy / devices.length * 100)}%` : '全场暂无设备', '']
       ];
       document.getElementById('metric_grid').innerHTML = metrics.map((item,index) => `<div class="metric-tile ${item[4]}"><span class="metric-icon ${index===1?'red':index===2?'amber':index===3?'blue':''}"><i data-lucide="${item[0]}"></i></span><div class="metric-copy"><div><span class="metric-label">${item[1]}</span><span class="metric-number">${item[2]}</span></div><div class="metric-note">${item[3]}</div></div></div>`).join('');
     }
@@ -1000,36 +1103,63 @@
         const device = (currentState.devices || []).find(item => item.pond_id === pond.id);
         const metrics = waterMetrics.map(item => {
           const value = latestMetricReading(pond.id, item.metric);
-          const doTone = item.metric === 'DO' && value && Number(value.value) < Number(pond.dissolved_oxygen_min) ? 'danger' : '';
+          const metricTone = metricIsAbnormal(item, value, pond) ? 'danger' : '';
           const unit = value && !item.hideUnit ? `<small>${escapeHtml(value.unit || '')}</small>` : '';
-          return `<span class="pond-metric">${item.label}<b class="${doTone}">${value ? fmtNumber(value.value, item.digits) : '--'}${unit}</b></span>`;
+          return `<span class="pond-metric">${item.label}<b class="${metricTone}">${value ? fmtNumber(value.value, item.digits) : '--'}${unit}</b></span>`;
         }).join('');
-        return `<article class="pond-card"><div class="pond-head"><span class="pond-name"><span class="dot ${condition.tone}"></span>　${escapeHtml(pond.id)}　<span style="font-weight:500;color:var(--muted)">${escapeHtml(pond.species || '')}</span></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div><div class="pond-metrics">${metrics}</div><div class="pond-foot"><span>传感器 ${online}/${sensors.length} 在线</span><span>增氧机 ${escapeHtml(device?.shadow_state || '--')}</span></div></article>`;
+        const deviceStatus = !device ? '--' : device.healthy ? device.shadow_state : '离线';
+        return `<article class="pond-card"><div class="pond-head"><span class="pond-name"><span class="dot ${condition.tone}"></span>　${escapeHtml(pond.id)}　<span style="font-weight:500;color:var(--muted)">${escapeHtml(pond.species || '')}</span></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div><div class="pond-metrics">${metrics}</div><div class="pond-foot"><span>传感器 ${online}/${sensors.length} 在线</span><span>增氧机 ${escapeHtml(deviceStatus)}</span></div></article>`;
       }).join('') : '<div class="empty">暂无水质监控对象</div>';
     }
     function renderAlerts() {
       const incidents = (currentState.incidents || []).filter(item => !closedIncidents.has(item.status)).reverse();
       const commands = currentState.commands || [];
+      const runs = currentState.agent_runs || [];
+      const tasks = currentState.manual_tasks || [];
+      const proposals = currentState.action_proposals || [];
+      const approvals = currentState.approvals || [];
       document.getElementById('alert_meta').textContent = `${incidents.length} 条未关闭`;
       const capsule = document.getElementById('alert_capsule');
       capsule.hidden = incidents.length === 0;
       if (!incidents.length) {
+        stopAlertCarousel();
         capsule.classList.remove('is-pinned', 'is-collapsed');
         document.getElementById('alert_capsule_toggle').setAttribute('aria-expanded', 'false');
       }
       if (incidents.length) {
-        const latest = incidents[0];
-        document.getElementById('alert_capsule_title').textContent = `${incidents.length} 条告警待处置 · ${latest.pond_id || '未知池塘'}`;
-        document.getElementById('alert_capsule_detail').textContent = latest.title || '点击查看告警信息';
-        document.getElementById('alert_capsule_list').innerHTML = incidents.map(item => {
+        const carouselItems = incidents.length > 1 ? [...incidents, incidents[0]] : incidents;
+        document.getElementById('alert_capsule_list').innerHTML = `<div id="alert_capsule_track" class="alert-capsule-track">${carouselItems.map(item => {
           const evidence = item.evidence?.at(-1);
-          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(evidence?.summary || item.status || '等待处置')}</span></button>`;
-        }).join('');
+          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${incidents.length} 条待处置 · ${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(evidence?.summary || item.status || '等待处置')}</span></button>`;
+        }).join('')}</div>`;
+        startAlertCarousel(incidents.length);
       }
       document.getElementById('alert_list').innerHTML = incidents.length ? incidents.map(item => {
         const evidence = item.evidence?.at(-1);
-        const command = [...commands].reverse().find(command => command.pond_id === item.pond_id);
-        return `<article class="alert-item"><div class="alert-head"><div class="alert-title">${badge(item.status, item.risk)}　${escapeHtml(item.title)}</div><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span></div><div class="alert-summary">${escapeHtml(evidence?.summary || '等待证据')}</div><div class="alert-cause"><b>触发原因：</b>${escapeHtml(evidence?.refs?.join(', ') || '--')}${command ? `　<b>设备命令：</b>${escapeHtml(command.status)}` : ''}</div><div class="flow-track"><span class="flow-step">待处置</span><span class="flow-step">Agent 研判</span><span class="flow-step">执行/审批</span><span class="flow-step ${['ESCALATED','ACTION_FAILED'].includes(item.status)?'failed':''}">复核闭环</span></div></article>`;
+        const command = [...commands].reverse().find(candidate => (item.command_ids || []).includes(candidate.id));
+        const run = [...runs].reverse().find(candidate => candidate.incident_id === item.id);
+        const task = [...tasks].reverse().find(candidate => candidate.incident_id === item.id);
+        const proposal = [...proposals].reverse().find(candidate => candidate.incident_id === item.id);
+        const approval = proposal ? [...approvals].reverse().find(candidate => candidate.proposal_id === proposal.id) : null;
+        const outcome = [];
+        let outcomeTone = '';
+        if (command) {
+          const succeeded = command.status === 'CONFIRMED';
+          const failed = ['FAILED','REJECTED','TIMED_OUT','CANCELLED'].includes(command.status);
+          outcome.push(`设备动作 ${command.device_id} → ${command.target_state}：${succeeded ? '执行成功' : failed ? `执行失败（${command.status}）` : command.status}`);
+          outcomeTone = succeeded ? 'success' : failed ? 'failed' : '';
+        }
+        if (approval) {
+          outcome.push(`人工审批：${approval.status}`);
+          if (approval.status === 'PENDING' && outcomeTone !== 'failed') outcomeTone = 'warning';
+        }
+        if (task) {
+          outcome.push(`人工任务：${task.title} · ${task.status} · ${task.assignee}`);
+          if (task.status !== 'COMPLETED' && outcomeTone !== 'failed') outcomeTone = 'warning';
+        }
+        if (run) outcome.push(`Agent 决策：${run.stop_reason || run.status}`);
+        if (!outcome.length) outcome.push('Agent 决策排队中');
+        return `<article class="alert-item"><div class="alert-head"><div class="alert-title">${badge(item.status, item.risk)}　${escapeHtml(item.title)}</div><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span></div><div class="alert-summary">${escapeHtml(evidence?.summary || '等待证据')}</div><div class="alert-cause"><b>触发原因：</b>${escapeHtml(evidence?.refs?.join(', ') || '--')}</div><div class="alert-outcome ${outcomeTone}"><b>处理结果：</b>${escapeHtml(outcome.join('；'))}</div><div class="flow-track"><span class="flow-step">待处置</span><span class="flow-step">Agent 研判</span><span class="flow-step">执行/审批</span><span class="flow-step ${['ESCALATED','ACTION_FAILED'].includes(item.status)?'failed':''}">复核闭环</span></div></article>`;
       }).join('') : '<div class="empty">当前没有未关闭告警</div>';
     }
     function renderRuns() {
@@ -1039,6 +1169,17 @@
     }
     function eventRows(limit = 30) {
       return [...(currentState.events || [])].reverse().slice(0, limit).map(item => `<article class="event-row"><div class="event-row-head"><span>#${item.sequence} ${escapeHtml(item.event_type)}</span><span>${fmtDate(item.occurred_at, false)}</span></div><div class="event-row-meta">${escapeHtml(item.summary)}</div></article>`).join('') || '<div class="empty">暂无事件</div>';
+    }
+    function renderAssistantChat() {
+      const log = document.getElementById('assistant_chat');
+      if (!assistantChatHistory.length && !assistantChatBusy) {
+        log.innerHTML = '<div class="chat-empty"><i data-lucide="messages-square"></i><strong>CrewAI 养殖运营助手</strong><span>选择全场或指定鱼塘后开始对话</span></div>';
+        return;
+      }
+      const messages = assistantChatHistory.map(item => `<div class="chat-message ${item.role}"><span class="chat-avatar"><i data-lucide="${item.role === 'user' ? 'user-round' : 'bot'}"></i></span><div class="chat-bubble">${escapeHtml(item.content)}</div></div>`);
+      if (assistantChatBusy) messages.push('<div class="chat-message assistant pending"><span class="chat-avatar"><i data-lucide="bot"></i></span><div class="chat-bubble">CrewAI 正在调用 Agent 和只读工具...</div></div>');
+      log.innerHTML = messages.join('');
+      requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; iconRefresh(); });
     }
     function renderAssistant() {
       renderRuns();
@@ -1051,6 +1192,15 @@
       badgeNode.className = `status-badge ${currentLlm.enabled ? '' : 'warning'}`;
       badgeNode.textContent = currentLlm.enabled ? '已启用' : '未启用';
       document.getElementById('llm_message').textContent = currentLlm.api_key_configured ? `密钥已配置：${currentLlm.api_key_preview}` : '尚未配置 API Key';
+      const chatBadge = document.getElementById('assistant_model_badge');
+      const modelReady = Boolean(currentLlm.enabled && currentLlm.api_key_configured);
+      chatBadge.className = `status-badge ${modelReady ? '' : 'warning'}`;
+      chatBadge.textContent = modelReady ? `${currentLlm.provider} / ${currentLlm.model}` : '模型未配置';
+      const pondSelect = document.getElementById('assistant_chat_pond');
+      const selectedPond = pondSelect.value;
+      pondSelect.innerHTML = '<option value="">全场</option>' + (currentState.ponds || []).map(pond => `<option value="${escapeHtml(pond.id)}">${escapeHtml(pond.id)} · ${escapeHtml(pond.name)}</option>`).join('');
+      if ([...pondSelect.options].some(option => option.value === selectedPond)) pondSelect.value = selectedPond;
+      renderAssistantChat();
     }
     function syncAssetForm() {
       const type = document.getElementById('asset_type').value;
@@ -1178,6 +1328,42 @@
       const pondId = document.getElementById('agent_pond_id').value.trim();
       document.getElementById('agent_message').textContent = '任务提交中...';
       return mutate(() => api('/api/v1/agent-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({goal,pond_id:pondId||null})}), 'Agent 任务已提交').finally(() => { document.getElementById('agent_message').textContent = ''; });
+    }
+    function handleAssistantChatKey(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        document.getElementById('assistant_chat_form').requestSubmit();
+      }
+    }
+    async function submitAssistantChat(event) {
+      event.preventDefault();
+      if (assistantChatBusy) return;
+      const input = document.getElementById('assistant_chat_input');
+      const message = input.value.trim();
+      if (!message) return;
+      const history = assistantChatHistory.slice(-12);
+      assistantChatHistory.push({role:'user', content:message});
+      input.value = '';
+      assistantChatBusy = true;
+      document.getElementById('assistant_chat_send').disabled = true;
+      renderAssistantChat();
+      try {
+        const result = await api('/api/v1/agent-chat', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({message, pond_id:document.getElementById('assistant_chat_pond').value || null, history})
+        });
+        assistantChatHistory.push({role:'assistant', content:result.reply});
+        await refresh();
+      } catch (error) {
+        assistantChatHistory.push({role:'assistant', content:`无法完成本次对话：${error.message}`});
+        showToast(`CrewAI 对话失败：${error.message}`, true);
+      } finally {
+        assistantChatBusy = false;
+        document.getElementById('assistant_chat_send').disabled = false;
+        renderAssistantChat();
+        input.focus();
+      }
     }
     function saveLlm() {
       const payload = {provider:document.getElementById('llm_provider').value,model:document.getElementById('llm_model').value,base_url:document.getElementById('llm_base_url').value,api_key:document.getElementById('llm_api_key').value,enabled:document.getElementById('llm_enabled').checked};

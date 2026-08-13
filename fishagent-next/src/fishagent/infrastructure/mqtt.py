@@ -8,6 +8,7 @@ import json
 import re
 import threading
 import uuid
+from queue import Queue
 from typing import Any, Callable, Optional
 
 TOPIC_PATTERN = re.compile(r"^farms/(?P<farm_id>[^/]+)/ponds/(?P<pond_id>[^/]+)/sensors/(?P<sensor_id>[^/]+)$")
@@ -20,12 +21,20 @@ class MqttTelemetryAdapter:
         self.topic = topic
         self.ingest = ingest
         self.client: Any = None
+        self._ingest_queue: Queue[Optional[dict[str, Any]]] = Queue()
+        self._ingest_worker: Optional[threading.Thread] = None
         self.last_error: Optional[str] = None
 
     def start(self) -> None:
         try:
             import paho.mqtt.client as mqtt
 
+            self._ingest_worker = threading.Thread(
+                target=self._run_ingest_worker,
+                name="fishagent-mqtt-ingest",
+                daemon=True,
+            )
+            self._ingest_worker.start()
             self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="fishagent-telemetry")
             self.client.on_connect = self._on_connect
             self.client.on_message = self._on_message
@@ -38,6 +47,10 @@ class MqttTelemetryAdapter:
         if self.client:
             self.client.loop_stop()
             self.client.disconnect()
+        if self._ingest_worker:
+            self._ingest_queue.put(None)
+            self._ingest_worker.join(timeout=2)
+            self._ingest_worker = None
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         if reason_code == 0 or not getattr(reason_code, "is_failure", False):
@@ -47,6 +60,7 @@ class MqttTelemetryAdapter:
             self.last_error = "MQTT connection refused: %s" % reason_code
 
     def _on_message(self, client, userdata, message) -> None:
+        del client, userdata
         match = TOPIC_PATTERN.match(message.topic)
         if not match:
             self.last_error = "invalid telemetry topic"
@@ -56,21 +70,38 @@ class MqttTelemetryAdapter:
             metric = str(payload.get("metric") or "").upper()
             if not metric:
                 raise ValueError("metric is required")
-            self.ingest(
-                pond_id=match.group("pond_id"),
-                value=float(payload["value"]),
-                metric=metric,
-                unit=str(payload["unit"]) if payload.get("unit") else None,
-                source_event_id=payload.get("source_event_id"),
-                sensor_id=match.group("sensor_id"),
-                quality=str(payload.get("quality") or "GOOD"),
-                seconds_old=int(payload.get("seconds_old", 0)),
-                auto_run=bool(payload.get("auto_run", True)),
-                defer_persist=bool(payload.get("defer_persist", False)),
-            )
+            ingest_payload = {
+                "pond_id": match.group("pond_id"),
+                "value": float(payload["value"]),
+                "metric": metric,
+                "unit": str(payload["unit"]) if payload.get("unit") else None,
+                "source_event_id": payload.get("source_event_id"),
+                "sensor_id": match.group("sensor_id"),
+                "quality": str(payload.get("quality") or "GOOD"),
+                "seconds_old": int(payload.get("seconds_old", 0)),
+                "auto_run": bool(payload.get("auto_run", True)),
+                "defer_persist": bool(payload.get("defer_persist", False)),
+            }
+            if self._ingest_worker is None:
+                self.ingest(**ingest_payload)
+            else:
+                self._ingest_queue.put(ingest_payload)
             self.last_error = None
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             self.last_error = "invalid MQTT telemetry payload: %s" % exc
+
+    def _run_ingest_worker(self) -> None:
+        while True:
+            payload = self._ingest_queue.get()
+            try:
+                if payload is None:
+                    return
+                self.ingest(**payload)
+                self.last_error = None
+            except Exception as exc:
+                self.last_error = "MQTT telemetry ingest failed: %s" % exc
+            finally:
+                self._ingest_queue.task_done()
 
 
 class MqttTelemetryPublisher:

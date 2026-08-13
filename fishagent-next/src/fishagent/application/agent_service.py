@@ -1,12 +1,13 @@
 import time
 from datetime import datetime, timedelta
-from threading import RLock
+from queue import Empty, Queue
+from threading import RLock, Thread
 from typing import Any, Optional, cast
 
 from fishagent.agent_runtime.contracts import IncidentDecision
-from fishagent.application.demo_data import DEMO_SENSOR_BY_METRIC, DEMO_WATER_SERIES
+from fishagent.application.demo_data import DEMO_SENSOR_BY_METRIC, DEMO_SENSOR_SPECS, DEMO_WATER_SERIES
 from fishagent.application.policy import evaluate_action
-from fishagent.application.store import InMemoryStore
+from fishagent.application.store import WATER_QUALITY_HIGH_LIMITS, WATER_QUALITY_RANGES, InMemoryStore
 from fishagent.domain.models import (
     ActionProposal,
     AgentRun,
@@ -17,6 +18,7 @@ from fishagent.domain.models import (
     Device,
     DeviceCommand,
     Escalation,
+    Evidence,
     Farm,
     HealthStatus,
     Incident,
@@ -121,24 +123,29 @@ class FishAgentSystem:
         quality: str = "GOOD",
         auto_run: bool = True,
         defer_persist: bool = False,
+        metric: str = "DO",
+        unit: Optional[str] = None,
     ) -> Optional[Incident]:
+        metric = metric.upper()
+        spec = DEMO_SENSOR_BY_METRIC.get(metric, {"slug": metric.lower(), "unit": unit or ""})
+        resolved_unit = unit or str(spec["unit"])
         if self.telemetry_publisher is None:
             return self.ingest_reading(
                 pond_id,
                 value,
-                metric="DO",
-                unit="mg/L",
+                metric=metric,
+                unit=resolved_unit,
                 source_event_id=source_event_id,
                 seconds_old=seconds_old,
                 quality=quality,
                 auto_run=auto_run,
             )
-        sensor_id = "do-%s" % pond_id.lower()
+        sensor_id = "%s-%s" % (spec["slug"], pond_id.lower())
         if not self.telemetry_publisher.publish_reading(
             pond_id=pond_id,
             sensor_id=sensor_id,
-            metric="DO",
-            unit="mg/L",
+            metric=metric,
+            unit=resolved_unit,
             value=value,
             source_event_id=source_event_id,
             quality=quality,
@@ -147,11 +154,35 @@ class FishAgentSystem:
             defer_persist=defer_persist,
         ):
             raise RuntimeError("MQTT mock telemetry publish failed")
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + (95 if auto_run else 5)
+        transient_statuses = {
+            IncidentStatus.DETECTED,
+            IncidentStatus.INVESTIGATING,
+            IncidentStatus.ACTION_PROPOSED,
+            IncidentStatus.EXECUTING,
+        }
         while time.monotonic() < deadline:
             if any(item.source_event_id == source_event_id for item in self.store.readings):
-                return self.store.active_incident_for_pond(pond_id)
+                matching_incident = next(
+                    (
+                        incident
+                        for incident in reversed(list(self.store.incidents.values()))
+                        if any(source_event_id in evidence.refs for evidence in incident.evidence)
+                    ),
+                    None,
+                )
+                if not auto_run or matching_incident is None or matching_incident.status not in transient_statuses:
+                    return matching_incident
             time.sleep(0.02)
+        if any(item.source_event_id == source_event_id for item in self.store.readings):
+            return next(
+                (
+                    incident
+                    for incident in reversed(list(self.store.incidents.values()))
+                    if any(source_event_id in evidence.refs for evidence in incident.evidence)
+                ),
+                None,
+            )
         raise RuntimeError("MQTT mock telemetry was not consumed before timeout")
 
     def create_farm(self, payload: dict) -> Farm:
@@ -316,23 +347,126 @@ class FishAgentSystem:
         run = AgentRun(id=new_id("run"), goal="执行全场巡查", status="RUNNING")
         self.store.agent_runs[run.id] = run
         run.step("supervisor-agent", "start_patrol", "读取全场养殖单元和活动事件")
+        incidents_to_decide: list[str] = []
         for pond in self.store.ponds.values():
-            latest = self.store.latest_reading(pond.id, "DO")
-            summary = "最新溶氧 %.2fmg/L" % latest.value if latest else "暂无最新溶氧读数"
+            latest_readings = [self.store.latest_reading(pond.id, spec["metric"]) for spec in DEMO_SENSOR_SPECS]
+            available = [reading for reading in latest_readings if reading is not None]
+            summary = "；".join(
+                "%s %.2f%s" % (spec["name"], reading.value, reading.unit)
+                for spec, reading in zip(DEMO_SENSOR_SPECS, latest_readings)
+                if reading is not None
+            ) or "暂无传感器读数"
+            sensor_ids = {sensor.id for sensor in self.store.sensors.values() if sensor.pond_id == pond.id}
+            unhealthy_sensors = [
+                health
+                for sensor_id, health in self.store.sensor_health.items()
+                if sensor_id in sensor_ids and health.status != HealthStatus.ONLINE
+            ]
+            unhealthy_devices = [
+                device for device in self.store.devices.values() if device.pond_id == pond.id and not device.healthy
+            ]
+            latest_do = next((reading for reading in available if reading.metric == "DO"), None)
+            reasons = []
+            if len(available) < len(DEMO_SENSOR_SPECS):
+                reasons.append("传感器数据不完整")
+            if latest_do is not None and latest_do.value < pond.dissolved_oxygen_min:
+                reasons.append("溶氧低于安全线")
+            for spec, reading in zip(DEMO_SENSOR_SPECS, latest_readings):
+                if reading is None:
+                    continue
+                high_limit = WATER_QUALITY_HIGH_LIMITS.get(reading.metric)
+                safe_range = WATER_QUALITY_RANGES.get(reading.metric)
+                if high_limit is not None and reading.value > high_limit:
+                    reasons.append("%s高于安全线" % spec["name"])
+                elif safe_range is not None and not safe_range[0] <= reading.value <= safe_range[1]:
+                    reasons.append("%s超出安全范围" % spec["name"])
+            if unhealthy_sensors:
+                reasons.append("%d 个传感器异常" % len(unhealthy_sensors))
+            if unhealthy_devices:
+                reasons.append("%d 台设备离线" % len(unhealthy_devices))
+            active = self.store.active_incident_for_pond(pond.id)
+            if active and not reasons:
+                reasons.append("存在未关闭异常事件")
+            status = "NEEDS_ATTENTION" if reasons or active else "NORMAL"
             run.step("sensor-monitor-agent", "inspect_pond", "%s：%s" % (pond.name, summary))
             finding = PatrolFinding(
                 id=new_id("finding"),
                 patrol_run_id=run.id,
                 pond_id=pond.id,
-                status="NORMAL" if latest and latest.value >= pond.dissolved_oxygen_min else "NEEDS_ATTENTION",
-                summary=summary,
-                evidence_refs=[latest.source_event_id] if latest else [],
+                status=status,
+                summary="%s%s" % (summary, "；异常：%s" % "、".join(reasons) if reasons else ""),
+                evidence_refs=[reading.source_event_id for reading in available],
             )
             self.store.patrol_findings[finding.id] = finding
+            if status == "NEEDS_ATTENTION" and active is None:
+                active = Incident(
+                    id=new_id("inc"),
+                    pond_id=pond.id,
+                    title="%s 巡查异常" % pond.name,
+                    evidence=[
+                        Evidence(
+                            id=new_id("evi"),
+                            type="patrol_finding",
+                            summary=finding.summary,
+                            refs=finding.evidence_refs,
+                        )
+                    ],
+                )
+                self.store.incidents[active.id] = active
+                self.store.emit(
+                    "incident.detected",
+                    active.title,
+                    {"incident_id": active.id, "pond_id": pond.id, "source": "patrol"},
+                )
+            if active and active.status == IncidentStatus.DETECTED:
+                incidents_to_decide.append(active.id)
         run.status = "COMPLETED"
         run.stop_reason = "PATROL_COMPLETED"
         self.store.emit("patrol.completed", "全场巡查完成", {"run_id": run.id}, correlation_id=run.id)
+        if self.agent_orchestrator is not None:
+            for incident_id in dict.fromkeys(incidents_to_decide):
+                decision_run = self.run_incident_flow(incident_id)
+                run.step(
+                    "supervisor-agent",
+                    "dispatch_incident",
+                    "异常已提交 CrewAI 决策：%s" % (decision_run.stop_reason or decision_run.status),
+                )
         return run
+
+    def run_chat(
+        self,
+        message: str,
+        history: Optional[list[dict[str, str]]] = None,
+        pond_id: Optional[str] = None,
+    ) -> tuple[AgentRun, str]:
+        normalized = message.strip()
+        if not normalized:
+            raise ValueError("message is required")
+        if pond_id and pond_id not in self.store.ponds:
+            raise ValueError("pond_id does not exist")
+        run = AgentRun(id=new_id("run"), goal="对话：%s" % normalized[:80], status="RUNNING")
+        self.store.agent_runs[run.id] = run
+        orchestrator = self.agent_orchestrator
+        if orchestrator is None or not orchestrator.available:
+            run.status = "FAILED"
+            run.stop_reason = "LLM_REQUIRED"
+            reply = "CrewAI 未启用或模型 API Key 未配置"
+            run.step("supervisor-agent", "chat.stop", reply)
+            self.store.emit("agent.chat.failed", reply, {"run_id": run.id}, correlation_id=run.id)
+            return run, reply
+        result = orchestrator.chat(normalized, (history or [])[-12:], pond_id)
+        for agent, action, summary in result.steps:
+            run.step(agent, action, summary)
+        run.delegated_agents = sorted(set(run.delegated_agents + result.delegated_agents))
+        run.status = "COMPLETED" if result.stop_reason == "CREW_CHAT_COMPLETED" else "FAILED"
+        run.stop_reason = result.stop_reason
+        self.store.emit(
+            "agent.chat.completed" if run.status == "COMPLETED" else "agent.chat.failed",
+            result.summary,
+            {"run_id": run.id, "pond_id": pond_id, "stop_reason": result.stop_reason},
+            correlation_id=run.id,
+        )
+        return run, result.summary
 
     def run_goal(self, goal: str, pond_id: Optional[str] = None) -> AgentRun:
         normalized = goal.strip()
@@ -501,6 +635,29 @@ class FishAgentSystem:
         health.status = HealthStatus.ONLINE if quality == "GOOD" else HealthStatus.ERROR
         health.message = "" if quality == "GOOD" else "读数质量：%s" % quality
         incident = self.store.add_reading(reading)
+        if incident is None and quality != "GOOD" and auto_run:
+            incident = self.store.active_incident_for_pond(pond_id)
+            evidence = Evidence(
+                id=new_id("evi"),
+                type="sensor_health",
+                summary="%s 传感器读数质量异常：%s" % ((spec or {"name": metric})["name"], quality),
+                refs=[reading.source_event_id],
+            )
+            if incident:
+                incident.evidence.append(evidence)
+            else:
+                incident = Incident(
+                    id=new_id("inc"),
+                    pond_id=pond_id,
+                    title="%s %s传感器异常" % (self.store.ponds[pond_id].name, (spec or {"name": metric})["name"]),
+                    evidence=[evidence],
+                )
+                self.store.incidents[incident.id] = incident
+                self.store.emit(
+                    "incident.detected",
+                    incident.title,
+                    {"incident_id": incident.id, "pond_id": pond_id, "metric": metric, "quality": quality},
+                )
         if incident and incident.status == IncidentStatus.DETECTED and auto_run:
             self.run_incident_flow(incident.id)
         return incident
@@ -562,6 +719,25 @@ class FishAgentSystem:
         self.store.emit("agent.run.completed", summary, {"run_id": run.id, "reason": reason}, correlation_id=run.id)
         return run
 
+    @staticmethod
+    def _decide_incident_with_timeout(orchestrator: Any, context: dict, timeout_seconds: int) -> Any:
+        results: Queue[tuple[bool, Any]] = Queue(maxsize=1)
+
+        def invoke() -> None:
+            try:
+                results.put((True, orchestrator.decide_incident(context)))
+            except Exception as exc:
+                results.put((False, exc))
+
+        Thread(target=invoke, name="crewai-incident-decision", daemon=True).start()
+        try:
+            succeeded, value = results.get(timeout=max(1, timeout_seconds))
+        except Empty as exc:
+            raise TimeoutError("CrewAI incident decision exceeded its runtime budget") from exc
+        if not succeeded:
+            raise cast(Exception, value)
+        return value
+
     def _run_llm_incident_flow(self, incident_id: str) -> AgentRun:
         incident = self.store.incidents[incident_id]
         run = AgentRun(id=new_id("run"), goal="模型驱动处理 %s" % incident.title, incident_id=incident_id, status="RUNNING")
@@ -570,7 +746,14 @@ class FishAgentSystem:
         incident.transition(IncidentStatus.INVESTIGATING)
         orchestrator = cast(Any, self.agent_orchestrator)
         try:
-            result = orchestrator.decide_incident(self._incident_llm_context(incident_id))
+            result = self._decide_incident_with_timeout(
+                orchestrator,
+                self._incident_llm_context(incident_id),
+                run.budget.get("seconds", 90),
+            )
+        except TimeoutError:
+            run.step("supervisor-agent", "incident.timeout", "CrewAI 超过 90 秒运行预算，迟到结果已作废")
+            return self._llm_manual_stop(incident, run, "LLM_TIMEOUT", "模型决策超时，已转人工确认")
         except Exception as exc:
             run.step("supervisor-agent", "incident.failed", "模型调用失败：%s" % exc)
             return self._llm_manual_stop(incident, run, "LLM_UNAVAILABLE", "模型不可用，已转人工确认")
@@ -1062,7 +1245,15 @@ class FishAgentSystem:
 
     def run_demo(self, mode: str) -> dict:
         self._reset_demo_with_telemetry()
-        if mode == "approval":
+        if mode == "alerts":
+            self._demo_reading("B-01", 2.8, source_event_id="demo-alert-do")
+            self._demo_reading(
+                "B-02",
+                0.82,
+                source_event_id="demo-alert-ammonia",
+                metric="AMMONIA",
+            )
+        elif mode == "approval":
             incident = self._demo_reading("B-01", 2.1, source_event_id="demo-approval", auto_run=False)
             if incident:
                 self.run_incident_flow(incident.id, risk_override=RiskLevel.L2)
