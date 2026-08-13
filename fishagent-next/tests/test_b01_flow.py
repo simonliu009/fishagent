@@ -206,6 +206,24 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(public["api_key_preview"], "sk-sec...")
         self.assertNotIn("sk-secret-value", str(public))
 
+    def test_llm_config_normalizes_chat_completions_endpoint(self) -> None:
+        config = LLMConfig()
+        config.update_from_payload(
+            {
+                "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1/chat/completions",
+                "model": "openrouter/free",
+            }
+        )
+        self.assertEqual(config.provider, "openrouter")
+        self.assertEqual(config.base_url, "https://openrouter.ai/api/v1")
+        self.assertEqual(config.model, "openrouter/free")
+
+    def test_llm_config_does_not_treat_placeholder_as_a_key(self) -> None:
+        config = LLMConfig(api_key="sk-or-v1-REPLACE_WITH_YOUR_KEY", enabled=True)
+        self.assertFalse(config.has_api_key())
+        self.assertFalse(config.public_dict()["api_key_configured"])
+
     def test_system_does_not_seed_demo_assets_on_startup(self) -> None:
         system = FishAgentSystem()
         state = system.snapshot()

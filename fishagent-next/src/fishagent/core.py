@@ -11,6 +11,14 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def normalize_llm_base_url(value: str) -> str:
+    base_url = value.strip().rstrip("/")
+    suffix = "/chat/completions"
+    if base_url.endswith(suffix):
+        base_url = base_url[: -len(suffix)]
+    return base_url
+
+
 @dataclass
 class LLMConfig:
     provider: str = "zai"
@@ -19,11 +27,15 @@ class LLMConfig:
     api_key: str = ""
     enabled: bool = False
 
+    def has_api_key(self) -> bool:
+        value = self.api_key.strip()
+        return bool(value and "REPLACE_WITH_YOUR_KEY" not in value)
+
     @classmethod
     def from_env(cls) -> "LLMConfig":
         return cls(
             provider=os.environ.get("FISHAGENT_LLM_PROVIDER", cls.provider),
-            base_url=os.environ.get("FISHAGENT_LLM_BASE_URL", cls.base_url),
+            base_url=normalize_llm_base_url(os.environ.get("FISHAGENT_LLM_BASE_URL", cls.base_url)),
             model=os.environ.get("FISHAGENT_LLM_MODEL", cls.model),
             api_key=os.environ.get("FISHAGENT_LLM_API_KEY", ""),
             enabled=_bool_env("FISHAGENT_LLM_ENABLED", False),
@@ -35,14 +47,15 @@ class LLMConfig:
             "base_url": self.base_url,
             "model": self.model,
             "enabled": self.enabled,
-            "api_key_configured": bool(self.api_key),
-            "api_key_preview": ("%s..." % self.api_key[:6]) if self.api_key else "",
+            "api_key_configured": self.has_api_key(),
+            "api_key_preview": ("%s..." % self.api_key[:6]) if self.has_api_key() else "",
         }
 
     def update_from_payload(self, payload: dict) -> None:
         for key in ("provider", "base_url", "model", "api_key"):
             if key in payload:
-                setattr(self, key, str(payload.get(key) or "").strip())
+                value = str(payload.get(key) or "").strip()
+                setattr(self, key, normalize_llm_base_url(value) if key == "base_url" else value)
         if "enabled" in payload:
             value = payload["enabled"]
             self.enabled = value if isinstance(value, bool) else str(value).lower() in {"1", "true", "yes", "on"}

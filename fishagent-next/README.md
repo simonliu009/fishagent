@@ -86,6 +86,8 @@ FISHAGENT_ADMIN_PASSWORD=change-me
 
 设置 `FISHAGENT_LLM_ENABLED=true` 和 API Key 后，用户目标和事件闭环会进入 CrewAI 主决策、传感器监控、巡查分析和行动规划 Agent；模型只输出结构化决策，设备指令由执行边界发布到 MQTT。未配置模型时不会使用硬编码规则自动控制设备，而是转人工任务。
 
+OpenRouter 免费路由预设写在 `.env.example`。复制为 `.env` 后，将 `FISHAGENT_LLM_API_KEY=sk-or-v1-REPLACE_WITH_YOUR_KEY` 替换为真实 Key；提供商使用 `openrouter`，模型使用 `openrouter/free`。Base URL 为 `https://openrouter.ai/api/v1`，也可以在右上角模型设置中粘贴完整的 `https://openrouter.ai/api/v1/chat/completions`，系统会自动规范化路径。
+
 Celery Beat 每 5 秒调用 `dispatch_due_jobs`，通过 PostgreSQL 状态和业务幂等键领取到期复核/巡查作业，再交给 Worker 执行。Redis 只负责队列和实时加速，Outbox 事件号由 PostgreSQL 全局序列分配，支持多进程并发写入；Web 读请求会刷新最新快照但不回写，避免轮询覆盖 Worker 状态。
 
 MQTT 主题格式为 `farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`，消息示例：

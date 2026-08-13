@@ -1,13 +1,16 @@
 import json
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from fishagent.core import LLMConfig
 from fishagent.domain.models import Device
 from fishagent.infrastructure.gateways import SimulatorDeviceGateway
 from fishagent.infrastructure.mqtt import MqttTelemetryAdapter
 from fishagent.infrastructure.queue.celery_app import celery_app
 from fishagent.web.app import app
+from fishagent.web.server import test_llm_connection as check_llm_connection
 
 
 class RuntimeBoundaryTests(unittest.TestCase):
@@ -21,6 +24,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         for view in ("assets", "work", "schedules", "audit"):
             self.assertIn(f'id="view_{view}"', response.text)
         self.assertIn('onclick="openLlmDialog()"', response.text)
+        self.assertIn('<option value="openrouter">OpenRouter</option>', response.text)
         self.assertIn('id="llm_layer"', response.text)
         self.assertIn('id="alert_capsule"', response.text)
         self.assertIn('id="alert_capsule_toggle"', response.text)
@@ -28,6 +32,35 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('id="alert_panel"', response.text)
         self.assertIn('onclick="toggleAlertCapsule(event)"', response.text)
         self.assertIn('onclick="openAlertView(event)"', response.text)
+
+    def test_llm_connection_posts_selected_model_to_chat_completions(self) -> None:
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def read(self):
+                return b'{"model":"openrouter/free","choices":[{"message":{"content":"OK"}}]}'
+
+        config = LLMConfig(
+            provider="openrouter",
+            base_url="https://openrouter.ai/api/v1",
+            model="openrouter/free",
+            api_key="test-key",
+            enabled=True,
+        )
+        with patch("fishagent.web.server.urlopen", return_value=Response()) as mocked:
+            result = check_llm_connection(config)
+
+        request = mocked.call_args.args[0]
+        self.assertEqual(request.full_url, "https://openrouter.ai/api/v1/chat/completions")
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(json.loads(request.data)["model"], "openrouter/free")
+        self.assertTrue(result["ok"])
 
     def test_fastapi_openapi_and_websocket_replay(self) -> None:
         with TestClient(app) as client:

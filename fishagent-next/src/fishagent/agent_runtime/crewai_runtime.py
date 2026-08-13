@@ -32,7 +32,7 @@ class CrewAIOrchestrator:
     def __init__(self, system: Any, llm_config: LLMConfig) -> None:
         self.system = system
         self.llm_config = llm_config
-        self.available = bool(llm_config.enabled and llm_config.api_key)
+        self.available = bool(llm_config.enabled and llm_config.has_api_key())
         self.last_error: Optional[str] = None
         try:
             from crewai import LLM, Agent, Crew, Process, Task
@@ -71,7 +71,7 @@ class CrewAIOrchestrator:
         if not self.available:
             raise CrewAIUnavailable("CrewAI 未启用或模型 API Key 未配置")
         model = self.llm_config.model
-        if self.llm_config.provider.lower() not in {"openai", "zai", "openai-compatible"}:
+        if self.llm_config.provider.lower() not in {"openai", "zai", "openai-compatible", "openrouter"}:
             model = "%s/%s" % (self.llm_config.provider, model)
         return self._LLM(
             model=model,

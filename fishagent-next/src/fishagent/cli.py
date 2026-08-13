@@ -40,7 +40,10 @@ def main() -> None:
             checks["minio"] = minio.health() if minio else {"status": "disabled"}
         else:
             checks["minio"] = {"status": "disabled"}
-        checks["llm"] = {"status": "configured" if config.llm.api_key else "not_configured", "model": config.llm.model}
+        checks["llm"] = {
+            "status": "configured" if config.llm.has_api_key() else "not_configured",
+            "model": config.llm.model,
+        }
         print(json.dumps(checks, ensure_ascii=False, indent=2))
         raise SystemExit(0 if checks["postgres"]["status"] in {"ok", "disabled"} else 1)
     if args.command == "demo":

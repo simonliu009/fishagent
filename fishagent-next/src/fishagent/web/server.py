@@ -160,17 +160,38 @@ def authorize(handler: BaseHTTPRequestHandler, path: str, write: bool = False) -
 
 def test_llm_connection(config: Optional[LLMConfig] = None) -> dict:
     llm = config or CONFIG.llm
-    if not llm.api_key:
+    if not llm.has_api_key():
         raise ValueError("API Key 未配置")
-    url = llm.base_url.rstrip("/") + "/models"
+    url = llm.base_url.rstrip("/") + "/chat/completions"
+    payload = json.dumps(
+        {
+            "model": llm.model,
+            "messages": [{"role": "user", "content": "Reply with OK."}],
+            "max_tokens": 8,
+            "temperature": 0,
+        }
+    ).encode("utf-8")
     request = Request(
         url,
-        headers={"Authorization": "Bearer %s" % llm.api_key, "Accept": "application/json"},
-        method="GET",
+        data=payload,
+        headers={
+            "Authorization": "Bearer %s" % llm.api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "FishAgent",
+        },
+        method="POST",
     )
     try:
         with urlopen(request, timeout=8) as response:
-            return {"ok": 200 <= response.status < 300, "status_code": response.status, "endpoint": url}
+            body = json.loads(response.read().decode("utf-8"))
+            return {
+                "ok": 200 <= response.status < 300 and bool(body.get("choices")),
+                "status_code": response.status,
+                "endpoint": url,
+                "model": body.get("model") or llm.model,
+            }
     except HTTPError as exc:
         return {"ok": False, "status_code": exc.code, "endpoint": url, "detail": "模型服务拒绝了连接"}
     except URLError as exc:

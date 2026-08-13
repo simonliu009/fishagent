@@ -754,7 +754,7 @@
       </div>
       <div class="section-heading"><span class="section-meta">配置保存在服务端</span><span id="llm_badge" class="status-badge warning">未启用</span></div>
       <div class="form-grid">
-        <label class="field">提供商<select id="llm_provider"><option value="zai">Z.ai</option><option value="openai">OpenAI</option><option value="compatible">OpenAI-compatible</option></select></label>
+        <label class="field">提供商<select id="llm_provider" onchange="applyLlmProviderPreset()"><option value="zai">Z.ai</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="compatible">OpenAI-compatible</option></select></label>
         <label class="field">模型<input id="llm_model"></label>
         <label class="field wide">Base URL<input id="llm_base_url"></label>
         <label class="field wide">API Key<input id="llm_api_key" type="password" placeholder="留空保持当前密钥"></label>
@@ -849,6 +849,11 @@
       layer.hidden = false;
       iconRefresh();
       requestAnimationFrame(() => document.getElementById('llm_provider').focus());
+    }
+    function applyLlmProviderPreset() {
+      if (document.getElementById('llm_provider').value !== 'openrouter') return;
+      document.getElementById('llm_model').value = 'openrouter/free';
+      document.getElementById('llm_base_url').value = 'https://openrouter.ai/api/v1';
     }
     function closeLlmDialog(event) {
       const layer = document.getElementById('llm_layer');
