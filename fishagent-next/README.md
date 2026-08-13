@@ -11,7 +11,7 @@
 - HTTP API 与浏览器控制台，当前前端端口 `3008`；`3001` 保留给 nginx。
 - PostgreSQL 持久化快照与 Outbox，Redis 实时事件发布，MinIO 健康探针。
 - Celery Beat 到期任务分发、默认 Worker 执行和 MQTT 遥测适配器。
-- CrewAI 可选自主调查运行时，设备写操作仍只能经过确定性策略门。
+- CrewAI/LLM 主决策运行时，设备写操作仍只能经过确定性策略门。
 - FastAPI OpenAPI、WebSocket 事件回放、S3/MinIO 证据上传和签名下载地址。
 - 大模型 API 配置入口、API Key 脱敏展示，以及可选的管理员登录和 CSRF 防护。
 
@@ -20,7 +20,7 @@
 ```bash
 cd fishagent-next
 uv python pin 3.12
-uv sync
+uv sync --extra agent
 PYTHONPATH=src uv run python -m fishagent.cli doctor
 ```
 
@@ -57,6 +57,7 @@ cp .env.example .env
 
 - **PostgreSQL**：业务状态的最终来源，保存养殖资产、读数、事件闭环、审批、命令和调度状态；同时记录 Outbox 事件，重启后可恢复。当前兼容快照和关系投影在同一事务内写入，领域表由 Alembic 管理。
 - **Redis**：实时事件加速通道，用于发布 `fishagent.events`；Redis 不承担业务数据最终持久化，短暂不可用时健康检查会标记 degraded。
+- **MQTT/Mosquitto**：本地 IoT Broker，mock 遥测通过 MQTT 上报，模型决策后的设备命令通过 MQTT 发布；默认监听 `127.0.0.1:1883`。
 - **MinIO**：S3 兼容对象存储，保存证据文件和经过校验的相机视觉帧，并提供短期签名下载；它不参与业务表查询和事务。
 
 SQLite 适合单进程、本地演示或单元测试，所以测试仍可以通过清空 `FISHAGENT_DATABASE_URL` 使用内存存储。但生产运行需要并发写入、事务、Outbox、重启恢复和多进程部署，SQLite 的文件锁和单机边界不适合作为此系统的共享业务源；因此默认采用 PostgreSQL，而不是把 SQLite 伪装成生产持久层。
@@ -82,7 +83,7 @@ FISHAGENT_ADMIN_PASSWORD=change-me
 
 ## Agent、队列与接入
 
-设置 `FISHAGENT_LLM_ENABLED=true` 和 API Key 后，用户目标会进入 CrewAI 主决策、传感器监控、巡查分析和行动规划 Agent；CrewAI 只产生结构化调查结果和动作建议，不能直接调用设备写接口。未配置模型时，确定性 B-01 流程仍然可运行。
+设置 `FISHAGENT_LLM_ENABLED=true` 和 API Key 后，用户目标和事件闭环会进入 CrewAI 主决策、传感器监控、巡查分析和行动规划 Agent；模型只输出结构化决策，设备指令由执行边界发布到 MQTT。未配置模型时不会使用硬编码规则自动控制设备，而是转人工任务。
 
 Celery Beat 每 5 秒调用 `dispatch_due_jobs`，通过 PostgreSQL 状态和业务幂等键领取到期复核/巡查作业，再交给 Worker 执行。Redis 只负责队列和实时加速，Outbox 事件号由 PostgreSQL 全局序列分配，支持多进程并发写入；Web 读请求会刷新最新快照但不回写，避免轮询覆盖 Worker 状态。
 
@@ -148,6 +149,6 @@ PYTHONPATH=src uv run python -m unittest discover -s tests
 
 ## 边界说明
 
-当前是可运行的模块化单体：PostgreSQL、Redis、MinIO、FastAPI、NiceGUI、Celery Worker/Beat、MQTT 和可选 CrewAI 已接入运行时；HTTP Snapshot/RTSP 抽帧、视觉上传校验和视觉 Worker 已接入，真实厂商设备协议、实际模型推理、疾病/投喂分析和多用户持久化目录仍是后续扩展。
+当前是可运行的模块化单体：PostgreSQL、Redis、MinIO、FastAPI、NiceGUI、Celery Worker/Beat、MQTT 和 CrewAI/LLM 已接入运行时；HTTP Snapshot/RTSP 抽帧、视觉上传校验和视觉 Worker 已接入，真实厂商设备协议、模型评测与提示词版本治理、疾病/投喂分析和多用户持久化目录仍是后续扩展。
 
 当前实现不在启动时隐式 seed；演示数据通过页面按钮、`/api/v1/demo/init` 或 demo 命令显式初始化。大模型配置保存到 `data/runtime_config.json`，API 响应不会回显完整密钥。

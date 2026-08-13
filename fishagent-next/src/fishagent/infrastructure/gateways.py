@@ -1,8 +1,10 @@
 """Device gateway ports and safe simulator/HTTP adapters."""
 
 import json
+import threading
+import uuid
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Callable, Optional, Protocol
 from urllib.request import Request, urlopen
 
 from fishagent.domain.models import Device
@@ -37,6 +39,89 @@ class SimulatorDeviceGateway:
         if not device.healthy:
             return GatewayResult(False, False, False, "设备网关报告设备不健康")
         return GatewayResult(True, True, True, "模拟设备已确认目标状态")
+
+
+class MqttDeviceGateway:
+    """Publish device commands as MQTT IoT messages with a local ACK simulator."""
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        topic_template: str = "fishagent/ponds/{pond_id}/devices/{device_id}/commands",
+        simulate_ack: bool = True,
+        client_factory: Optional[Callable[..., Any]] = None,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.topic_template = topic_template
+        self.simulate_ack = simulate_ack
+        self.client_factory = client_factory
+        self.client: Any = None
+        self._lock = threading.Lock()
+        self.last_error = ""
+
+    def get_capabilities(self, device: Device) -> dict:
+        return {"device_id": device.id, "capability": device.capability, "states": ["on", "off"]}
+
+    def get_shadow_state(self, device: Device) -> str:
+        return device.shadow_state
+
+    def _ensure_client(self) -> Any:
+        if self.client is not None:
+            return self.client
+        with self._lock:
+            if self.client is not None:
+                return self.client
+            factory = self.client_factory
+            if factory is None:
+                import paho.mqtt.client as mqtt
+
+                factory = mqtt.Client
+            self.client = factory(client_id="fishagent-device-%s" % uuid.uuid4().hex[:10])
+            self.client.connect(self.host, self.port, keepalive=30)
+            self.client.loop_start()
+            return self.client
+
+    def send_command(self, device: Device, target_state: str, idempotency_key: str) -> GatewayResult:
+        if not device.healthy:
+            return GatewayResult(False, False, False, "设备网关报告设备不健康")
+        topic = self.topic_template.format(pond_id=device.pond_id, device_id=device.id)
+        payload = json.dumps(
+            {
+                "command": "set_state",
+                "device_id": device.id,
+                "pond_id": device.pond_id,
+                "target_state": target_state,
+                "idempotency_key": idempotency_key,
+                "source": "fishagent.execution-agent",
+            },
+            ensure_ascii=False,
+        )
+        try:
+            client = self._ensure_client()
+            result = client.publish(topic, payload, qos=1, retain=False)
+            rc = int(getattr(result, "rc", 0))
+            if rc != 0:
+                raise RuntimeError("MQTT publish failed with rc=%s" % rc)
+            self.last_error = ""
+            detail = "MQTT IoT command published to %s" % topic
+            return GatewayResult(True, True, self.simulate_ack, detail if self.simulate_ack else detail + "; waiting for device ACK")
+        except Exception as exc:
+            self.last_error = str(exc)
+            return GatewayResult(False, False, False, "MQTT IoT command publish failed: %s" % exc)
+
+    def close(self) -> None:
+        if self.client is not None:
+            self.client.loop_stop()
+            self.client.disconnect()
+            self.client = None
+
+
+def mqtt_gateway_from_config(enabled: bool, host: str, port: int, topic_template: str) -> Optional[MqttDeviceGateway]:
+    if not enabled:
+        return None
+    return MqttDeviceGateway(host, port, topic_template)
 
 
 class HttpDeviceGateway:

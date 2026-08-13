@@ -1,7 +1,9 @@
+import time
 from datetime import datetime, timedelta
 from threading import RLock
 from typing import Any, Optional, cast
 
+from fishagent.agent_runtime.contracts import IncidentDecision
 from fishagent.application.policy import evaluate_action
 from fishagent.application.store import InMemoryStore
 from fishagent.domain.models import (
@@ -49,12 +51,14 @@ class FishAgentSystem:
         event_publisher: Optional[RedisEventPublisher] = None,
         device_gateway: Optional[DeviceGateway] = None,
         agent_orchestrator: Optional[Any] = None,
+        telemetry_publisher: Optional[Any] = None,
     ) -> None:
         self.store = store or InMemoryStore()
         self.repository = repository
         self.event_publisher = event_publisher
         self.device_gateway = device_gateway or SimulatorDeviceGateway()
         self.agent_orchestrator = agent_orchestrator
+        self.telemetry_publisher = telemetry_publisher
         self._job_lock = RLock()
         if self.repository:
             persisted = self.repository.load()
@@ -64,6 +68,42 @@ class FishAgentSystem:
     def initialize_demo(self) -> dict:
         self.store.reset_demo()
         return self.snapshot()
+
+    def _demo_reading(
+        self,
+        pond_id: str,
+        value: float,
+        source_event_id: str,
+        seconds_old: int = 0,
+        quality: str = "GOOD",
+        auto_run: bool = True,
+    ) -> Optional[Incident]:
+        if self.telemetry_publisher is None:
+            return self.ingest_do(
+                pond_id,
+                value,
+                source_event_id=source_event_id,
+                seconds_old=seconds_old,
+                quality=quality,
+                auto_run=auto_run,
+            )
+        sensor_id = "do-%s" % pond_id.lower()
+        if not self.telemetry_publisher.publish_reading(
+            pond_id=pond_id,
+            sensor_id=sensor_id,
+            value=value,
+            source_event_id=source_event_id,
+            quality=quality,
+            seconds_old=seconds_old,
+            auto_run=auto_run,
+        ):
+            raise RuntimeError("MQTT mock telemetry publish failed")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if any(item.source_event_id == source_event_id for item in self.store.readings):
+                return self.store.active_incident_for_pond(pond_id)
+            time.sleep(0.02)
+        raise RuntimeError("MQTT mock telemetry was not consumed before timeout")
 
     def create_farm(self, payload: dict) -> Farm:
         farm = Farm(
@@ -249,14 +289,19 @@ class FishAgentSystem:
         normalized = goal.strip()
         if not normalized:
             raise ValueError("goal is required")
-        if normalized.lower() in {"patrol", "巡查", "巡查全场", "全场巡查"}:
-            return self.run_patrol()
         if pond_id and pond_id not in self.store.ponds:
             raise ValueError("pond_id does not exist")
-        active = self.store.active_incident_for_pond(pond_id) if pond_id else None
-        if active and active.status == IncidentStatus.DETECTED:
-            return self.run_incident_flow(active.id)
-        if self.agent_orchestrator and self.agent_orchestrator.available:
+        if self.agent_orchestrator is not None:
+            active = self.store.active_incident_for_pond(pond_id) if pond_id else None
+            if active and active.status == IncidentStatus.DETECTED:
+                return self.run_incident_flow(active.id)
+            if not self.agent_orchestrator.available:
+                run = AgentRun(id=new_id("run"), goal=normalized, status="FAILED")
+                self.store.agent_runs[run.id] = run
+                run.stop_reason = "LLM_REQUIRED"
+                run.step("supervisor-agent", "stop", "大模型未配置，系统不会使用硬编码规则替代模型决策")
+                self.store.emit("agent.run.failed", "大模型未配置，无法执行模型驱动目标", {"run_id": run.id}, correlation_id=run.id)
+                return run
             run = AgentRun(id=new_id("run"), goal=normalized, status="RUNNING")
             self.store.agent_runs[run.id] = run
             result = self.agent_orchestrator.run(normalized, pond_id)
@@ -272,6 +317,11 @@ class FishAgentSystem:
                 correlation_id=run.id,
             )
             return run
+        if normalized.lower() in {"patrol", "巡查", "巡查全场", "全场巡查"}:
+            return self.run_patrol()
+        active = self.store.active_incident_for_pond(pond_id) if pond_id else None
+        if active and active.status == IncidentStatus.DETECTED:
+            return self.run_incident_flow(active.id)
         run = AgentRun(id=new_id("run"), goal=normalized, status="RUNNING")
         self.store.agent_runs[run.id] = run
         run.step("supervisor-agent", "interpret_goal", "解析用户目标并检查可用证据")
@@ -396,6 +446,112 @@ class FishAgentSystem:
         return incident
 
     def run_incident_flow(self, incident_id: str, risk_override: Optional[RiskLevel] = None) -> AgentRun:
+        if self.agent_orchestrator is not None:
+            return self._run_llm_incident_flow(incident_id)
+        return self._run_rule_incident_flow(incident_id, risk_override)
+
+    def _incident_llm_context(self, incident_id: str) -> dict:
+        snapshot = self._snapshot(persist=False)
+        incident = next(item for item in snapshot["incidents"] if item["id"] == incident_id)
+        pond_id = incident["pond_id"]
+        return {
+            "incident": incident,
+            "pond": next((item for item in snapshot["ponds"] if item["id"] == pond_id), None),
+            "readings": [item for item in snapshot["readings"] if item["pond_id"] == pond_id][-20:],
+            "sensor_health": [item for item in snapshot["sensor_health"] if item["sensor_id"] in {sensor["id"] for sensor in snapshot["sensors"] if sensor["pond_id"] == pond_id}],
+            "devices": [item for item in snapshot["devices"] if item["pond_id"] == pond_id],
+            "cameras": [item for item in snapshot["cameras"] if item["pond_id"] == pond_id],
+            "active_incidents": [item for item in snapshot["incidents"] if item["status"] not in {"RESOLVED", "DISMISSED"}],
+        }
+
+    def _llm_manual_stop(self, incident: Incident, run: AgentRun, reason: str, summary: str) -> AgentRun:
+        if incident.status == IncidentStatus.INVESTIGATING:
+            incident.transition(IncidentStatus.ACTION_PROPOSED)
+        if incident.status == IncidentStatus.ACTION_PROPOSED:
+            incident.transition(IncidentStatus.MANUAL_REQUIRED)
+        incident.assignee = "现场操作员"
+        self.create_manual_task(
+            title="模型驱动处置待人工确认：%s" % incident.title,
+            description=reason,
+            incident_id=incident.id,
+        )
+        run.status = "COMPLETED"
+        run.stop_reason = reason
+        self.store.emit("agent.run.completed", summary, {"run_id": run.id, "reason": reason}, correlation_id=run.id)
+        return run
+
+    def _run_llm_incident_flow(self, incident_id: str) -> AgentRun:
+        incident = self.store.incidents[incident_id]
+        run = AgentRun(id=new_id("run"), goal="模型驱动处理 %s" % incident.title, incident_id=incident_id, status="RUNNING")
+        self.store.agent_runs[run.id] = run
+        self.store.emit("agent.run.started", run.goal, {"run_id": run.id, "mode": "llm"}, correlation_id=run.id)
+        incident.transition(IncidentStatus.INVESTIGATING)
+        orchestrator = cast(Any, self.agent_orchestrator)
+        try:
+            result = orchestrator.decide_incident(self._incident_llm_context(incident_id))
+        except Exception as exc:
+            run.step("supervisor-agent", "incident.failed", "模型调用失败：%s" % exc)
+            return self._llm_manual_stop(incident, run, "LLM_UNAVAILABLE", "模型不可用，已转人工确认")
+        for agent, action, summary in result.steps:
+            run.step(agent, action, summary)
+        run.delegated_agents = sorted(set(run.delegated_agents + result.delegated_agents))
+        decision: Optional[IncidentDecision] = result.decision
+        if decision is None:
+            return self._llm_manual_stop(incident, run, "LLM_DECISION_INVALID", result.summary)
+
+        run.step("execution-agent", "validate_llm_decision", "结构化动作通过协议校验，提交安全策略门")
+        incident.transition(IncidentStatus.ACTION_PROPOSED)
+        try:
+            risk = RiskLevel(decision.risk)
+            if decision.action in {"NO_ACTION", "REFRESH_EVIDENCE", "MANUAL_REQUIRED"}:
+                return self._llm_manual_stop(incident, run, "LLM_%s" % decision.action, decision.rationale)
+            if risk in {RiskLevel.L2, RiskLevel.L3} or decision.action == "REQUEST_APPROVAL":
+                proposal_risk = RiskLevel.L2 if risk == RiskLevel.L1 else risk
+                proposal = self.propose_action(
+                    incident_id=incident.id,
+                    device_id=decision.device_id,
+                    target_state=decision.target_state,
+                    risk=proposal_risk,
+                    rationale=decision.rationale,
+                )
+                if proposal.status in {"REJECTED", "FAILED"}:
+                    return self._llm_manual_stop(
+                        incident,
+                        run,
+                        "LLM_POLICY_REJECTED",
+                        "模型建议未通过设备策略门，已转人工确认",
+                    )
+                run.step("execution-agent", "route_action", "模型建议已转为 %s 受控流程" % proposal_risk.value)
+                run.status = "WAITING_APPROVAL" if proposal_risk == RiskLevel.L2 else "COMPLETED"
+                run.stop_reason = "WAITING_APPROVAL" if proposal_risk == RiskLevel.L2 else "MANUAL_REQUIRED"
+                return run
+            if decision.action != "EXECUTE" or risk != RiskLevel.L1:
+                return self._llm_manual_stop(incident, run, "LLM_ACTION_REQUIRES_REVIEW", decision.rationale)
+            command = self.request_action_execution(
+                run,
+                incident,
+                device_id=decision.device_id,
+                target_state=decision.target_state,
+                risk=RiskLevel.L1,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return self._llm_manual_stop(incident, run, "LLM_ACTION_INVALID", str(exc))
+        if command.status == CommandStatus.CONFIRMED:
+            incident.transition(IncidentStatus.EXECUTING)
+            incident.transition(IncidentStatus.VERIFY_PENDING)
+            self._schedule_verification(incident, utcnow() + timedelta(seconds=decision.verification_delay_seconds))
+            run.status = "COMPLETED"
+            run.stop_reason = "LLM_ACTION_EXECUTED"
+            self.store.emit("agent.run.completed", decision.rationale, {"run_id": run.id, "command_id": command.id}, correlation_id=run.id)
+        else:
+            incident.transition(IncidentStatus.ACTION_FAILED)
+            incident.transition(IncidentStatus.ESCALATED)
+            run.status = "FAILED"
+            run.stop_reason = "LLM_POLICY_REJECTED"
+            self.store.emit("agent.run.failed", command.policy_reason, {"run_id": run.id, "command_id": command.id}, correlation_id=run.id)
+        return run
+
+    def _run_rule_incident_flow(self, incident_id: str, risk_override: Optional[RiskLevel] = None) -> AgentRun:
         incident = self.store.incidents[incident_id]
         run = AgentRun(id=new_id("run"), goal="处理 %s" % incident.title, incident_id=incident_id, status="RUNNING")
         self.store.agent_runs[run.id] = run
@@ -819,26 +975,26 @@ class FishAgentSystem:
     def run_demo(self, mode: str) -> dict:
         self.store.reset_demo()
         if mode == "approval":
-            incident = self.ingest_do("B-01", 2.1, source_event_id="demo-approval", auto_run=False)
+            incident = self._demo_reading("B-01", 2.1, source_event_id="demo-approval", auto_run=False)
             if incident:
                 self.run_incident_flow(incident.id, risk_override=RiskLevel.L2)
         elif mode == "dedup":
             self.store.devices["aerator-b01-1"].shadow_state = "on"
-            incident = self.ingest_do("B-01", 2.1, source_event_id="demo-dedup")
+            incident = self._demo_reading("B-01", 2.1, source_event_id="demo-dedup")
             if incident:
                 self.store.force_verification_due(incident.id)
                 self.verify_incident(incident.id)
         elif mode == "failure":
-            incident = self.ingest_do("B-01", 2.1, source_event_id="demo-failure")
+            incident = self._demo_reading("B-01", 2.1, source_event_id="demo-failure")
             if incident:
                 self.store.force_verification_due(incident.id)
-                self.ingest_do("B-01", 2.3, source_event_id="demo-failure-review")
+                self._demo_reading("B-01", 2.3, source_event_id="demo-failure-review")
                 self.verify_incident(incident.id)
         else:
-            incident = self.ingest_do("B-01", 2.1, source_event_id="demo-success")
+            incident = self._demo_reading("B-01", 2.1, source_event_id="demo-success")
             if incident:
                 self.store.force_verification_due(incident.id)
-                self.ingest_do("B-01", 5.2, source_event_id="demo-success-review")
+                self._demo_reading("B-01", 5.2, source_event_id="demo-success-review")
                 self.verify_incident(incident.id)
         return self.snapshot()
 

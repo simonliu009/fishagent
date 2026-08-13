@@ -6,6 +6,8 @@ Payload: {"metric":"DO", "value":2.1, "source_event_id":"..."}
 
 import json
 import re
+import threading
+import uuid
 from typing import Any, Callable, Optional
 
 TOPIC_PATTERN = re.compile(r"^farms/(?P<farm_id>[^/]+)/ponds/(?P<pond_id>[^/]+)/sensors/(?P<sensor_id>[^/]+)$")
@@ -61,7 +63,72 @@ class MqttTelemetryAdapter:
                 sensor_id=match.group("sensor_id"),
                 quality=str(payload.get("quality") or "GOOD"),
                 seconds_old=int(payload.get("seconds_old", 0)),
+                auto_run=bool(payload.get("auto_run", True)),
             )
             self.last_error = None
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             self.last_error = "invalid MQTT telemetry payload: %s" % exc
+
+
+class MqttTelemetryPublisher:
+    """Publish mock and integration telemetry through the local MQTT broker."""
+
+    def __init__(self, host: str, port: int, farm_id: str = "farm-demo") -> None:
+        self.host = host
+        self.port = port
+        self.farm_id = farm_id
+        self.client: Any = None
+        self._lock = threading.Lock()
+        self.last_error: Optional[str] = None
+
+    def _ensure_client(self) -> Any:
+        if self.client is not None:
+            return self.client
+        with self._lock:
+            if self.client is not None:
+                return self.client
+            import paho.mqtt.client as mqtt
+
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="fishagent-mock-%s" % uuid.uuid4().hex[:10])
+            self.client.connect(self.host, self.port, keepalive=30)
+            self.client.loop_start()
+            return self.client
+
+    def publish_reading(
+        self,
+        pond_id: str,
+        sensor_id: str,
+        value: float,
+        source_event_id: str,
+        quality: str = "GOOD",
+        seconds_old: int = 0,
+        auto_run: bool = True,
+    ) -> bool:
+        topic = "farms/%s/ponds/%s/sensors/%s" % (self.farm_id, pond_id, sensor_id)
+        payload = json.dumps(
+            {
+                "metric": "DO",
+                "value": value,
+                "source_event_id": source_event_id,
+                "quality": quality,
+                "seconds_old": seconds_old,
+                "auto_run": auto_run,
+                "source": "fishagent.mock-telemetry",
+            },
+            ensure_ascii=False,
+        )
+        try:
+            result = self._ensure_client().publish(topic, payload, qos=1, retain=False)
+            if int(getattr(result, "rc", 0)) != 0:
+                raise RuntimeError("MQTT publish failed with rc=%s" % getattr(result, "rc", "unknown"))
+            self.last_error = None
+            return True
+        except Exception as exc:
+            self.last_error = str(exc)
+            return False
+
+    def close(self) -> None:
+        if self.client is not None:
+            self.client.loop_stop()
+            self.client.disconnect()
+            self.client = None

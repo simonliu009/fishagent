@@ -13,6 +13,8 @@ from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import AppConfig, LLMConfig, RuntimeConfigStore
 from fishagent.domain.models import RiskLevel, ScheduleStatus
 from fishagent.infrastructure.auth import auth_from_config
+from fishagent.infrastructure.gateways import mqtt_gateway_from_config
+from fishagent.infrastructure.mqtt import MqttTelemetryAdapter, MqttTelemetryPublisher
 from fishagent.infrastructure.object_store import object_store_from_config
 from fishagent.infrastructure.persistence import PersistenceError, repository_from_config
 from fishagent.infrastructure.realtime import publisher_from_config
@@ -26,12 +28,31 @@ OBJECT_STORE = object_store_from_config(
     CONFIG.minio_secret_key,
     CONFIG.minio_bucket,
 )
-SYSTEM = FishAgentSystem(repository=REPOSITORY, event_publisher=EVENT_PUBLISHER)
+DEVICE_GATEWAY = mqtt_gateway_from_config(
+    CONFIG.mqtt_enabled,
+    CONFIG.mqtt_host,
+    CONFIG.mqtt_port,
+    CONFIG.mqtt_command_topic,
+)
+TELEMETRY_PUBLISHER = MqttTelemetryPublisher(CONFIG.mqtt_host, CONFIG.mqtt_port) if CONFIG.mqtt_enabled else None
+SYSTEM = FishAgentSystem(
+    repository=REPOSITORY,
+    event_publisher=EVENT_PUBLISHER,
+    device_gateway=DEVICE_GATEWAY,
+    telemetry_publisher=TELEMETRY_PUBLISHER,
+)
 AUTH = auth_from_config(CONFIG.auth_enabled, CONFIG.auth_username, CONFIG.auth_password)
 CONFIG_STORE = RuntimeConfigStore()
 CONFIG.llm = CONFIG_STORE.load_llm(CONFIG.llm)
 SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
 STATIC_DIR = Path(__file__).parent / "static"
+MQTT_ADAPTER: MqttTelemetryAdapter | None = None
+
+
+def ingest_mqtt_and_persist(**payload):
+    result = SYSTEM.ingest_do(**payload)
+    SYSTEM.snapshot()
+    return result
 
 
 def json_response(
@@ -324,7 +345,7 @@ def page() -> str:
     </section>
     <section class="panel" style="margin-top:16px">
       <div class="panel-title"><h2>大模型 API 配置</h2><span class="status">OpenAI-compatible</span></div>
-      <div class="muted">用于后续 CrewAI/OpenAI-compatible 接入；当前垂直切片仍由确定性 Agent 运行。</div>
+      <div class="muted">启用后由 CrewAI/大模型负责研判和动作建议；设备指令通过 MQTT 发布，模型不可用时转人工。</div>
       <div class="form-grid">
         <label>提供商<select id="llm_provider"><option value="zai">Z.ai</option><option value="openai">OpenAI</option><option value="compatible">OpenAI-compatible</option></select></label>
         <label>模型<input id="llm_model"></label>
@@ -734,6 +755,7 @@ class Handler(BaseHTTPRequestHandler):
                 "大模型 API 配置已更新：%s / %s" % (CONFIG.llm.provider, CONFIG.llm.model),
             )
             CONFIG_STORE.save_llm(CONFIG.llm)
+            SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
             json_response(self, 200, {"llm": CONFIG.llm.public_dict()})
             return
         if path == "/api/v1/agent-runs":
@@ -896,6 +918,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    global MQTT_ADAPTER
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=CONFIG.host)
     parser.add_argument("--port", type=int, default=CONFIG.port)
@@ -903,6 +926,14 @@ def main() -> None:
     CONFIG.host = args.host
     CONFIG.port = args.port
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    if CONFIG.mqtt_enabled:
+        MQTT_ADAPTER = MqttTelemetryAdapter(
+            CONFIG.mqtt_host,
+            CONFIG.mqtt_port,
+            CONFIG.mqtt_topic,
+            ingest_mqtt_and_persist,
+        )
+        MQTT_ADAPTER.start()
     scheduler_stop = threading.Event()
 
     def scheduler_loop() -> None:
@@ -921,6 +952,12 @@ def main() -> None:
         scheduler_stop.set()
         scheduler.join(timeout=2)
         server.server_close()
+        if MQTT_ADAPTER:
+            MQTT_ADAPTER.stop()
+        if DEVICE_GATEWAY:
+            DEVICE_GATEWAY.close()
+        if TELEMETRY_PUBLISHER:
+            TELEMETRY_PUBLISHER.close()
 
 
 if __name__ == "__main__":

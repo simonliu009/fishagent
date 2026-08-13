@@ -1,15 +1,127 @@
 import json
 import unittest
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
+from fishagent.agent_runtime.contracts import IncidentDecision
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.application.policy import evaluate_action
 from fishagent.core import LLMConfig, RuntimeConfigStore
-from fishagent.domain.models import IncidentStatus, JobStatus, RiskLevel, SensorReading, utcnow
+from fishagent.domain.models import Device, IncidentStatus, JobStatus, RiskLevel, SensorReading, utcnow
 from fishagent.infrastructure.auth import AuthManager
+from fishagent.infrastructure.gateways import MqttDeviceGateway
 
 
 class B01FlowTest(unittest.TestCase):
+    def test_llm_decision_drives_incident_execution(self) -> None:
+        class FakeOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                self.context = context
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="EXECUTE",
+                        device_id="aerator-b01-1",
+                        target_state="on",
+                        risk="L1",
+                        rationale="模型确认低溶氧证据新鲜，建议开启增氧机并复核。",
+                    ),
+                    summary="model decision",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["sensor-monitor-agent", "action-planning-agent"],
+                    steps=[("supervisor-agent", "incident.decided", "model output")],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=FakeOrchestrator())
+        system.initialize_demo()
+        incident = system.ingest_do("B-01", 2.0, source_event_id="llm-low-do")
+        self.assertIsNotNone(incident)
+        state = system.snapshot()
+        self.assertEqual(state["commands"][0]["status"], "CONFIRMED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_ACTION_EXECUTED")
+        self.assertEqual(state["incidents"][0]["status"], "VERIFY_PENDING")
+
+    def test_production_orchestrator_without_llm_never_uses_rule_execution(self) -> None:
+        class UnavailableOrchestrator:
+            available = False
+
+        system = FishAgentSystem(agent_orchestrator=UnavailableOrchestrator())
+        system.initialize_demo()
+        incident = system.ingest_do("B-01", 2.0, source_event_id="llm-missing")
+        self.assertIsNotNone(incident)
+        state = system.snapshot()
+        self.assertEqual(state["commands"], [])
+        self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_UNAVAILABLE")
+
+    def test_llm_policy_rejection_stops_without_waiting_for_missing_approval(self) -> None:
+        class FakeOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="REQUEST_APPROVAL",
+                        device_id="aerator-b01-1",
+                        target_state="on",
+                        risk="L2",
+                        rationale="证据已过期，需要人工确认。",
+                    ),
+                    summary="stale evidence",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=[],
+                    steps=[],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=FakeOrchestrator())
+        system.initialize_demo()
+        incident = system.ingest_do("B-01", 2.0, source_event_id="llm-stale", seconds_old=3600)
+        self.assertIsNotNone(incident)
+        state = system.snapshot()
+        self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_POLICY_REJECTED")
+        self.assertEqual(state["approvals"], [])
+
+    def test_mqtt_device_gateway_publishes_iot_command(self) -> None:
+        class PublishResult:
+            rc = 0
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.published = []
+
+            def connect(self, host, port, keepalive):
+                self.connection = (host, port, keepalive)
+
+            def loop_start(self):
+                pass
+
+            def publish(self, topic, payload, qos, retain):
+                self.published.append((topic, json.loads(payload), qos, retain))
+                return PublishResult()
+
+            def loop_stop(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+        client = None
+
+        def factory(**kwargs):
+            nonlocal client
+            client = FakeClient(**kwargs)
+            return client
+
+        gateway = MqttDeviceGateway("mqtt.test", 1883, client_factory=factory, simulate_ack=True)
+        device = Device(id="aerator-b01-1", pond_id="B-01", name="增氧机", capability="aeration")
+        result = gateway.send_command(device, "on", "llm-command-1")
+        self.assertTrue(result.confirmed)
+        self.assertEqual(client.published[0][0], "fishagent/ponds/B-01/devices/aerator-b01-1/commands")
+        self.assertEqual(client.published[0][1]["source"], "fishagent.execution-agent")
+        gateway.close()
     def test_success_demo_resolves_incident(self) -> None:
         system = FishAgentSystem()
         state = system.run_demo("success")

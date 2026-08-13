@@ -75,6 +75,7 @@ class AppConfig:
     mqtt_host: str = "127.0.0.1"
     mqtt_port: int = 1883
     mqtt_topic: str = "farms/+/ponds/+/sensors/+"
+    mqtt_command_topic: str = "fishagent/ponds/{pond_id}/devices/{device_id}/commands"
     auth_enabled: bool = False
     auth_username: str = "admin"
     auth_password: str = ""
@@ -99,6 +100,7 @@ class AppConfig:
             mqtt_host=os.environ.get("FISHAGENT_MQTT_HOST", "127.0.0.1"),
             mqtt_port=int(os.environ.get("FISHAGENT_MQTT_PORT", "1883")),
             mqtt_topic=os.environ.get("FISHAGENT_MQTT_TOPIC", cls.mqtt_topic),
+            mqtt_command_topic=os.environ.get("FISHAGENT_MQTT_COMMAND_TOPIC", cls.mqtt_command_topic),
             auth_enabled=_bool_env("FISHAGENT_AUTH_ENABLED", False),
             auth_username=os.environ.get("FISHAGENT_ADMIN_USERNAME", "admin"),
             auth_password=os.environ.get("FISHAGENT_ADMIN_PASSWORD", ""),

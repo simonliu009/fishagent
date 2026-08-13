@@ -39,6 +39,7 @@ services:
       FISHAGENT_MQTT_ENABLED: "true"
       FISHAGENT_MQTT_HOST: mqtt
       FISHAGENT_MQTT_PORT: 1883
+      FISHAGENT_MQTT_COMMAND_TOPIC: fishagent/ponds/{pond_id}/devices/{device_id}/commands
     volumes:
       - fishagent-data:/app/data
     ports:
@@ -83,6 +84,10 @@ services:
       FISHAGENT_LLM_MODEL: ${FISHAGENT_LLM_MODEL:-glm-4.5}
       FISHAGENT_LLM_API_KEY: ${FISHAGENT_LLM_API_KEY:-}
       FISHAGENT_LLM_ENABLED: ${FISHAGENT_LLM_ENABLED:-false}
+      FISHAGENT_MQTT_ENABLED: "true"
+      FISHAGENT_MQTT_HOST: mqtt
+      FISHAGENT_MQTT_PORT: 1883
+      FISHAGENT_MQTT_COMMAND_TOPIC: fishagent/ponds/{pond_id}/devices/{device_id}/commands
     volumes:
       - fishagent-data:/app/data
     depends_on:

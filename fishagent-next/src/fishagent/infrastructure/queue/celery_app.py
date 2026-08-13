@@ -13,6 +13,7 @@ from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import AppConfig, RuntimeConfigStore
 from fishagent.domain.models import VisionFrame, new_id
+from fishagent.infrastructure.gateways import mqtt_gateway_from_config
 from fishagent.infrastructure.object_store import object_store_from_config
 from fishagent.infrastructure.persistence import repository_from_config
 from fishagent.infrastructure.realtime import publisher_from_config
@@ -58,6 +59,12 @@ def system() -> FishAgentSystem:
     app = FishAgentSystem(
         repository=repository_from_config(CONFIG.database_url),
         event_publisher=publisher_from_config(CONFIG.redis_url),
+        device_gateway=mqtt_gateway_from_config(
+            CONFIG.mqtt_enabled,
+            CONFIG.mqtt_host,
+            CONFIG.mqtt_port,
+            CONFIG.mqtt_command_topic,
+        ),
     )
     app.agent_orchestrator = CrewAIOrchestrator(app, llm_config)
     return app

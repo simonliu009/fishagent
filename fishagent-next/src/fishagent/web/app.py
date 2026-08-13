@@ -23,7 +23,8 @@ from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import AppConfig, RuntimeConfigStore
 from fishagent.domain.models import RiskLevel, ScheduleStatus, VisionFrame, new_id, utcnow
 from fishagent.infrastructure.auth import auth_from_config
-from fishagent.infrastructure.mqtt import MqttTelemetryAdapter
+from fishagent.infrastructure.gateways import mqtt_gateway_from_config
+from fishagent.infrastructure.mqtt import MqttTelemetryAdapter, MqttTelemetryPublisher
 from fishagent.infrastructure.object_store import object_store_from_config
 from fishagent.infrastructure.persistence import PersistenceError, repository_from_config
 from fishagent.infrastructure.realtime import publisher_from_config
@@ -38,7 +39,19 @@ OBJECT_STORE = object_store_from_config(
     CONFIG.minio_secret_key,
     CONFIG.minio_bucket,
 )
-SYSTEM = FishAgentSystem(repository=REPOSITORY, event_publisher=EVENT_PUBLISHER)
+DEVICE_GATEWAY = mqtt_gateway_from_config(
+    CONFIG.mqtt_enabled,
+    CONFIG.mqtt_host,
+    CONFIG.mqtt_port,
+    CONFIG.mqtt_command_topic,
+)
+TELEMETRY_PUBLISHER = MqttTelemetryPublisher(CONFIG.mqtt_host, CONFIG.mqtt_port) if CONFIG.mqtt_enabled else None
+SYSTEM = FishAgentSystem(
+    repository=REPOSITORY,
+    event_publisher=EVENT_PUBLISHER,
+    device_gateway=DEVICE_GATEWAY,
+    telemetry_publisher=TELEMETRY_PUBLISHER,
+)
 AUTH = auth_from_config(CONFIG.auth_enabled, CONFIG.auth_username, CONFIG.auth_password)
 CONFIG_STORE = RuntimeConfigStore()
 CONFIG.llm = CONFIG_STORE.load_llm(CONFIG.llm)
@@ -71,6 +84,10 @@ async def lifespan(_application: FastAPI):
     finally:
         if MQTT_ADAPTER:
             MQTT_ADAPTER.stop()
+        if DEVICE_GATEWAY:
+            DEVICE_GATEWAY.close()
+        if TELEMETRY_PUBLISHER:
+            TELEMETRY_PUBLISHER.close()
 
 app = FastAPI(
     title="智渔 Agent API",
@@ -389,6 +406,7 @@ async def update_llm_config(request: Request, payload: JsonPayload) -> dict:
         resource_id="llm",
     )
     CONFIG_STORE.save_llm(CONFIG.llm)
+    SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
     SYSTEM.snapshot()
     return {"llm": CONFIG.llm.public_dict()}
 

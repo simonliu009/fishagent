@@ -18,7 +18,9 @@
 - `GET|POST /api/v1/farms|zones|ponds|sensors|devices|cameras`
 - `GET /api/v1/sensors/{sensor_id}/health`
 - `POST /api/v1/telemetry/readings:batch`
-- MQTT：`farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`
+- MQTT 读数：`farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`
+- MQTT 设备指令：`fishagent/ponds/{pond_id}/devices/{device_id}/commands`
+  - payload：`command=set_state`、`target_state`、`idempotency_key`、`source=fishagent.execution-agent`
 - `POST /api/v1/evidence`
 - `GET /api/v1/evidence/{object_name}`
 - `POST /api/v1/cameras/{camera_id}/capture`

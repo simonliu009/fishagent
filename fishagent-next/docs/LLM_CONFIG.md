@@ -1,6 +1,6 @@
 # 大模型 API 配置入口
 
-当前系统预留 OpenAI-compatible 模型配置，用于后续接入 CrewAI LLM Adapter。
+当前系统使用 OpenAI-compatible 模型配置驱动 CrewAI Agent。配置更新后立即刷新 Web 进程中的模型编排器。
 
 ## 环境变量
 
@@ -15,6 +15,8 @@
 - `GET /api/v1/config/llm`
 - `POST /api/v1/config/llm`
 - `POST /api/v1/config/llm/test`：使用已保存的 API Key 请求 OpenAI-compatible `/models`，只返回连通性和 HTTP 状态。
+
+启用模型后，事件闭环和用户目标由 CrewAI/LLM 产生结构化决策。设备动作通过 `FISHAGENT_MQTT_COMMAND_TOPIC` 发布到 MQTT，策略门仍负责协议、风险、审批、幂等和复核约束。模型不可用时不会使用硬编码规则代替模型执行，而是转人工。
 
 写入示例：
 
