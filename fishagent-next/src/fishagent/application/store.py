@@ -94,30 +94,58 @@ class InMemoryStore:
         self.events.clear()
         self.executed_idempotency_keys.clear()
         self.farms["farm-demo"] = Farm(id="farm-demo", name="青湾智慧渔场", location="浙江湖州")
-        self.zones["zone-demo"] = Zone(id="zone-demo", farm_id="farm-demo", name="东区")
-        self.ponds["B-01"] = Pond(id="B-01", name="B-01 精养池", species="加州鲈", farm_id="farm-demo")
-        self.sensors["do-b-01"] = Sensor(
-            id="do-b-01",
-            pond_id="B-01",
-            name="B-01 溶氧传感器",
-            metric="DO",
-            unit="mg/L",
+        self.zones["zone-east"] = Zone(id="zone-east", farm_id="farm-demo", name="东区")
+        self.zones["zone-west"] = Zone(id="zone-west", farm_id="farm-demo", name="西区")
+        pond_specs = (
+            ("B-01", "B-01 鲈鱼精养池", "加州鲈", 4.0, "off"),
+            ("B-02", "B-02 草鱼生态池", "草鱼", 4.0, "on"),
+            ("B-03", "B-03 黄颡鱼育成池", "黄颡鱼", 4.5, "off"),
+            ("B-04", "B-04 对虾标粗池", "南美白对虾", 4.0, "off"),
         )
-        self.sensor_health["do-b-01"] = SensorHealth(sensor_id="do-b-01", last_heartbeat_at=utcnow())
-        self.devices["aerator-b01-1"] = Device(
-            id="aerator-b01-1",
-            pond_id="B-01",
-            name="B-01 一号增氧机",
-            capability="aeration",
+        for pond_id, name, species, do_min, device_state in pond_specs:
+            pond_slug = pond_id.lower().replace("-", "")
+            sensor_id = "do-%s" % pond_id.lower()
+            self.ponds[pond_id] = Pond(
+                id=pond_id,
+                name=name,
+                species=species,
+                farm_id="farm-demo",
+                dissolved_oxygen_min=do_min,
+            )
+            self.sensors[sensor_id] = Sensor(
+                id=sensor_id,
+                pond_id=pond_id,
+                name="%s 溶氧传感器" % pond_id,
+                metric="DO",
+                unit="mg/L",
+            )
+            self.sensor_health[sensor_id] = SensorHealth(sensor_id=sensor_id, last_heartbeat_at=utcnow())
+            self.devices["aerator-%s-1" % pond_slug] = Device(
+                id="aerator-%s-1" % pond_slug,
+                pond_id=pond_id,
+                name="%s 一号增氧机" % pond_id,
+                capability="aeration",
+                shadow_state=device_state,
+            )
+            self.cameras["camera-%s" % pond_slug] = CameraSource(
+                id="camera-%s" % pond_slug,
+                pond_id=pond_id,
+                name="%s 岸边摄像头" % pond_id,
+                source_type="HTTP_SNAPSHOT",
+                status="UNAVAILABLE",
+            )
+        self.schedules["schedule-demo-patrol"] = ScheduleDefinition(
+            id="schedule-demo-patrol",
+            name="五分钟全场巡查",
+            job_type="patrol",
+            interval_seconds=300,
+            next_run_at=utcnow() + timedelta(seconds=300),
         )
-        self.cameras["camera-b01"] = CameraSource(
-            id="camera-b01",
-            pond_id="B-01",
-            name="B-01 北侧摄像头",
-            source_type="HTTP_SNAPSHOT",
-            status="UNAVAILABLE",
+        self.emit(
+            "system.demo.initialized",
+            "演示数据已初始化：4 个池塘及传感器、增氧机、摄像头",
+            {"pond_ids": [item[0] for item in pond_specs]},
         )
-        self.emit("system.demo.initialized", "演示数据已初始化：B-01、溶氧传感器、增氧机")
 
     def emit(
         self,

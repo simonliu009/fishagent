@@ -44,6 +44,13 @@ from fishagent.infrastructure.realtime import RedisEventPublisher
 
 
 class FishAgentSystem:
+    DEMO_DO_SERIES = {
+        "B-01": (5.7, 5.6, 5.5, 5.3, 5.2, 5.4, 5.6, 5.5, 5.7),
+        "B-02": (5.0, 4.9, 4.7, 4.6, 4.5, 4.4, 4.5, 4.3, 4.2),
+        "B-03": (6.0, 6.1, 6.3, 6.4, 6.2, 6.5, 6.4, 6.6, 6.5),
+        "B-04": (5.3, 5.2, 5.0, 4.8, 4.9, 5.1, 4.9, 4.8, 4.9),
+    }
+
     def __init__(
         self,
         store: Optional[InMemoryStore] = None,
@@ -66,8 +73,23 @@ class FishAgentSystem:
                 self.store.restore_snapshot(persisted)
 
     def initialize_demo(self) -> dict:
-        self.store.reset_demo()
+        self._reset_demo_with_telemetry()
         return self.snapshot()
+
+    def _reset_demo_with_telemetry(self) -> None:
+        self.store.reset_demo()
+        for pond_id, values in self.DEMO_DO_SERIES.items():
+            for index, value in enumerate(values):
+                is_latest = index == len(values) - 1
+                self._demo_reading(
+                    pond_id,
+                    value,
+                    source_event_id="demo-seed-%s-%02d" % (pond_id.lower(), index + 1),
+                    seconds_old=(len(values) - index - 1) * 3 * 60 * 60,
+                    quality="SUSPECT" if pond_id == "B-04" and is_latest else "GOOD",
+                    auto_run=False,
+                    defer_persist=True,
+                )
 
     def _demo_reading(
         self,
@@ -77,6 +99,7 @@ class FishAgentSystem:
         seconds_old: int = 0,
         quality: str = "GOOD",
         auto_run: bool = True,
+        defer_persist: bool = False,
     ) -> Optional[Incident]:
         if self.telemetry_publisher is None:
             return self.ingest_do(
@@ -96,6 +119,7 @@ class FishAgentSystem:
             quality=quality,
             seconds_old=seconds_old,
             auto_run=auto_run,
+            defer_persist=defer_persist,
         ):
             raise RuntimeError("MQTT mock telemetry publish failed")
         deadline = time.monotonic() + 5
@@ -560,7 +584,13 @@ class FishAgentSystem:
         incident.transition(IncidentStatus.INVESTIGATING)
         run.step("supervisor-agent", "validate_trigger", "确认触发源为低溶氧传感器事件")
 
-        latest_do = self.store.latest_reading(incident.pond_id, "DO")
+        evidence_refs = {ref for evidence in incident.evidence for ref in evidence.refs}
+        trigger_readings = [
+            reading
+            for reading in self.store.readings
+            if reading.pond_id == incident.pond_id and reading.source_event_id in evidence_refs
+        ]
+        latest_do = max(trigger_readings, key=lambda reading: reading.sampled_at) if trigger_readings else None
         run.step("sensor-monitor-agent", "get_pond_snapshot", "读取最新溶氧、水质质量和采样时间")
         if latest_do is None or not latest_do.is_fresh():
             run.step("supervisor-agent", "stop", "核心数据过期或缺失，要求刷新数据")
@@ -973,7 +1003,7 @@ class FishAgentSystem:
             return job
 
     def run_demo(self, mode: str) -> dict:
-        self.store.reset_demo()
+        self._reset_demo_with_telemetry()
         if mode == "approval":
             incident = self._demo_reading("B-01", 2.1, source_event_id="demo-approval", auto_run=False)
             if incident:
@@ -1010,7 +1040,15 @@ class FishAgentSystem:
         return self._snapshot(persist=False)
 
     def _snapshot(self, persist: bool = True) -> dict:
+        is_demo_dataset = any(reading.source_event_id.startswith("demo-seed-") for reading in self.store.readings)
         data = {
+            "dataset": {
+                "dataset_id": "four_pond_demo_v1",
+                "source_classification": "simulated_persistent",
+                "description": "四池塘轻量演示数据",
+            }
+            if is_demo_dataset
+            else None,
             "farms": [farm.__dict__ for farm in self.store.farms.values()],
             "zones": [zone.__dict__ for zone in self.store.zones.values()],
             "ponds": [pond.__dict__ for pond in self.store.ponds.values()],

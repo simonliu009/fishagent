@@ -586,6 +586,7 @@
               <div><h1>Agent 巡查总览</h1><p class="eyebrow">感知 → 决策 → 执行 → 复核，全程留痕</p></div>
             </div>
             <div class="actions">
+              <span id="demo_data_badge" class="status-badge info" hidden><i data-lucide="database"></i>模拟数据</span>
               <button class="button danger" type="button" onclick="runDemo('failure')"><i data-lucide="triangle-alert"></i>演示故障</button>
               <button class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
             </div>
@@ -890,8 +891,11 @@
     function pondCondition(pond) {
       const reading = latestReading(pond.id);
       const incident = activeIncident(pond.id);
+      const sensor = (currentState.sensors || []).find(item => item.pond_id === pond.id && item.metric === 'DO');
+      const health = (currentState.sensor_health || []).find(item => item.sensor_id === sensor?.id);
       if (incident && ['ESCALATED','ACTION_FAILED','MANUAL_REQUIRED'].includes(incident.status)) return {tone:'danger', label:'严重'};
       if (incident || (reading && Number(reading.value) < Number(pond.dissolved_oxygen_min))) return {tone:'warning', label:'警告'};
+      if (health && health.status !== 'ONLINE') return {tone:'warning', label:'关注'};
       return {tone:'', label:reading ? '正常' : '待接入'};
     }
     function renderPatrol() {
@@ -902,6 +906,7 @@
       const abnormal = findings.filter(item => item.status !== 'NORMAL').length;
       const commands = currentState.commands || [];
       const confirmed = commands.filter(item => item.status === 'CONFIRMED').length;
+      document.getElementById('demo_data_badge').hidden = currentState.dataset?.source_classification !== 'simulated_persistent';
       document.getElementById('patrol_summary').innerHTML = [
         ['clock-3','上次巡查', lastRun ? fmtDate(lastRun.steps?.at(-1)?.created_at) : '尚未执行', lastRun?.stop_reason || '等待自动触发'],
         ['triangle-alert','巡查结果', abnormal ? `发现 ${abnormal} 处异常` : '未发现新异常', `已形成 ${findings.length} 条巡查结论`],
@@ -964,7 +969,8 @@
     }
     function renderWater() {
       const ponds = currentState.ponds || [];
-      document.getElementById('water_meta').textContent = `${ponds.length} 个养殖单元`;
+      const sourceLabel = currentState.dataset?.source_classification === 'simulated_persistent' ? ' · 模拟数据' : '';
+      document.getElementById('water_meta').textContent = `${ponds.length} 个养殖单元${sourceLabel}`;
       document.getElementById('pond_grid').innerHTML = ponds.length ? ponds.map(pond => {
         const reading = latestReading(pond.id);
         const condition = pondCondition(pond);

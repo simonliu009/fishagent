@@ -50,8 +50,12 @@ MQTT_ADAPTER: MqttTelemetryAdapter | None = None
 
 
 def ingest_mqtt_and_persist(**payload):
+    defer_persist = bool(payload.pop("defer_persist", False)) and str(payload.get("source_event_id", "")).startswith(
+        "demo-seed-"
+    )
     result = SYSTEM.ingest_do(**payload)
-    SYSTEM.snapshot()
+    if not defer_persist:
+        SYSTEM.snapshot()
     return result
 
 

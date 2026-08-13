@@ -217,11 +217,43 @@ class B01FlowTest(unittest.TestCase):
         system = FishAgentSystem()
         state = system.initialize_demo()
         self.assertEqual(state["farms"][0]["id"], "farm-demo")
-        self.assertEqual(state["ponds"][0]["id"], "B-01")
-        self.assertEqual(state["sensors"][0]["id"], "do-b-01")
-        self.assertEqual(state["devices"][0]["id"], "aerator-b01-1")
-        self.assertEqual(state["cameras"][0]["id"], "camera-b01")
+        self.assertEqual({item["id"] for item in state["ponds"]}, {"B-01", "B-02", "B-03", "B-04"})
+        self.assertEqual(len(state["sensors"]), 4)
+        self.assertEqual(len(state["devices"]), 4)
+        self.assertEqual(len(state["cameras"]), 4)
+        self.assertEqual(len(state["readings"]), 36)
+        self.assertEqual(len(state["schedules"]), 1)
+        self.assertEqual(state["incidents"], [])
+        self.assertEqual(state["dataset"]["dataset_id"], "four_pond_demo_v1")
+        self.assertEqual(state["dataset"]["source_classification"], "simulated_persistent")
+        health = {item["sensor_id"]: item["status"] for item in state["sensor_health"]}
+        self.assertEqual(health["do-b-01"], "ONLINE")
+        self.assertEqual(health["do-b-04"], "ERROR")
         self.assertEqual(state["events"][0]["event_type"], "system.demo.initialized")
+
+    def test_demo_mock_telemetry_uses_publisher_boundary(self) -> None:
+        published = []
+
+        class LoopbackPublisher:
+            def __init__(self) -> None:
+                self.system = None
+
+            def publish_reading(self, **payload):
+                published.append(payload.copy())
+                payload.pop("defer_persist", None)
+                self.system.ingest_do(**payload)
+                return True
+
+        publisher = LoopbackPublisher()
+        system = FishAgentSystem(telemetry_publisher=publisher)
+        publisher.system = system
+        state = system.initialize_demo()
+
+        self.assertEqual(len(published), 36)
+        self.assertEqual({item["pond_id"] for item in published}, {"B-01", "B-02", "B-03", "B-04"})
+        self.assertTrue(all(item["auto_run"] is False for item in published))
+        self.assertTrue(all(item["defer_persist"] is True for item in published))
+        self.assertEqual(len(state["readings"]), 36)
 
     def test_asset_creation_validates_relationships(self) -> None:
         system = FishAgentSystem()
@@ -355,9 +387,11 @@ class B01FlowTest(unittest.TestCase):
 
     def test_demo_reset_keeps_event_sequence_monotonic(self) -> None:
         system = FishAgentSystem()
-        first = system.initialize_demo()["event_sequence"]
-        second = system.initialize_demo()["event_sequence"]
-        self.assertGreater(second, first)
+        first = system.initialize_demo()
+        second = system.initialize_demo()
+        self.assertGreater(second["event_sequence"], first["event_sequence"])
+        self.assertEqual(len(second["ponds"]), 4)
+        self.assertEqual(len(second["readings"]), 36)
 
     def test_auth_session_requires_password_and_expires(self) -> None:
         auth = AuthManager(enabled=True, username="admin", password="secret")

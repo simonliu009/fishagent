@@ -64,6 +64,7 @@ class MqttTelemetryAdapter:
                 quality=str(payload.get("quality") or "GOOD"),
                 seconds_old=int(payload.get("seconds_old", 0)),
                 auto_run=bool(payload.get("auto_run", True)),
+                defer_persist=bool(payload.get("defer_persist", False)),
             )
             self.last_error = None
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -103,6 +104,7 @@ class MqttTelemetryPublisher:
         quality: str = "GOOD",
         seconds_old: int = 0,
         auto_run: bool = True,
+        defer_persist: bool = False,
     ) -> bool:
         topic = "farms/%s/ponds/%s/sensors/%s" % (self.farm_id, pond_id, sensor_id)
         payload = json.dumps(
@@ -113,6 +115,7 @@ class MqttTelemetryPublisher:
                 "quality": quality,
                 "seconds_old": seconds_old,
                 "auto_run": auto_run,
+                "defer_persist": defer_persist,
                 "source": "fishagent.mock-telemetry",
             },
             ensure_ascii=False,
