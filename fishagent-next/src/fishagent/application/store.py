@@ -1,18 +1,27 @@
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
-from fishagent.application.demo_data import DEMO_SENSOR_SPECS
+from fishagent.application.demo_data import (
+    DEMO_ANALYSIS_CASES,
+    DEMO_CAMERA_OBSERVATIONS,
+    DEMO_DISEASE_KNOWLEDGE,
+    DEMO_SENSOR_SPECS,
+    DEMO_WEATHER,
+)
 from fishagent.domain.models import (
     ActionProposal,
     AgentRun,
     AgentStep,
+    AnalysisCase,
     Approval,
     ApprovalStatus,
     AuditEvent,
+    CameraObservation,
     CameraSource,
     CommandStatus,
     Device,
     DeviceCommand,
+    DiseaseKnowledgeArticle,
     Escalation,
     Evidence,
     Farm,
@@ -34,6 +43,7 @@ from fishagent.domain.models import (
     VerificationPlan,
     VerificationResult,
     VisionFrame,
+    WeatherObservation,
     Zone,
     new_id,
     utcnow,
@@ -60,6 +70,10 @@ class InMemoryStore:
         self.devices: Dict[str, Device] = {}
         self.cameras: Dict[str, CameraSource] = {}
         self.vision_frames: Dict[str, VisionFrame] = {}
+        self.weather_observations: Dict[str, WeatherObservation] = {}
+        self.camera_observations: Dict[str, CameraObservation] = {}
+        self.disease_knowledge: Dict[str, DiseaseKnowledgeArticle] = {}
+        self.analysis_cases: Dict[str, AnalysisCase] = {}
         self.readings: List[SensorReading] = []
         self.incidents: Dict[str, Incident] = {}
         self.action_proposals: Dict[str, ActionProposal] = {}
@@ -88,6 +102,10 @@ class InMemoryStore:
         self.devices.clear()
         self.cameras.clear()
         self.vision_frames.clear()
+        self.weather_observations.clear()
+        self.camera_observations.clear()
+        self.disease_knowledge.clear()
+        self.analysis_cases.clear()
         self.readings.clear()
         self.incidents.clear()
         self.action_proposals.clear()
@@ -148,15 +166,115 @@ class InMemoryStore:
                     pond_id=pond_id,
                     name="%s %s" % (pond_id, device_name),
                     capability=capability,
-                    shadow_state=device_state if capability == "aeration" else "off",
+                    shadow_state=(
+                        device_state
+                        if capability == "aeration"
+                        else "on"
+                        if (pond_id == "B-03" and capability == "feeding") or (pond_id == "B-04" and capability == "valve_control")
+                        else "off"
+                    ),
                     healthy=not (pond_id == "B-04" and capability == "aeration"),
                 )
-            self.cameras["camera-%s" % pond_slug] = CameraSource(
-                id="camera-%s" % pond_slug,
+            self.cameras["camera-surface-%s" % pond_slug] = CameraSource(
+                id="camera-surface-%s" % pond_slug,
                 pond_id=pond_id,
-                name="%s 岸边摄像头" % pond_id,
-                source_type="HTTP_SNAPSHOT",
-                status="UNAVAILABLE",
+                name="%s 水面摄像头" % pond_id,
+                source_type="MOCK_SURFACE",
+                camera_role="SURFACE",
+                status="ONLINE",
+                source_url="mock://surface/%s" % pond_id,
+                last_frame_at=utcnow(),
+                last_frame_id="frame-surface-%s" % pond_slug,
+                last_frame_hash="mock-surface-%s" % pond_slug,
+                last_frame_width=1920,
+                last_frame_height=1080,
+            )
+            self.cameras["camera-underwater-%s" % pond_slug] = CameraSource(
+                id="camera-underwater-%s" % pond_slug,
+                pond_id=pond_id,
+                name="%s 水下摄像头" % pond_id,
+                source_type="MOCK_UNDERWATER",
+                camera_role="UNDERWATER",
+                status="ONLINE",
+                source_url="mock://underwater/%s" % pond_id,
+                last_frame_at=utcnow(),
+                last_frame_id="frame-underwater-%s" % pond_slug,
+                last_frame_hash="mock-underwater-%s" % pond_slug,
+                last_frame_width=1280,
+                last_frame_height=720,
+            )
+        for pond_id, weather in DEMO_WEATHER.items():
+            weather_data = cast(dict[str, Any], weather)
+            self.weather_observations["weather-%s" % pond_id] = WeatherObservation(
+                id="weather-%s" % pond_id,
+                pond_id=pond_id,
+                observed_at=utcnow(),
+                condition=str(weather_data["condition"]),
+                temperature_c=float(weather_data["temperature_c"]),
+                wind_speed_mps=float(weather_data["wind_speed_mps"]),
+                wind_direction=str(weather_data["wind_direction"]),
+                humidity_pct=int(weather_data["humidity_pct"]),
+                rain_probability_pct=int(weather_data["rain_probability_pct"]),
+                pressure_hpa=float(weather_data["pressure_hpa"]),
+                forecast=str(weather_data["forecast"]),
+            )
+        for article in DEMO_DISEASE_KNOWLEDGE:
+            article_data = cast(dict[str, Any], article)
+            self.disease_knowledge[str(article_data["id"])] = DiseaseKnowledgeArticle(
+                id=str(article_data["id"]),
+                name=str(article_data["name"]),
+                species=str(article_data["species"]),
+                signs=str(article_data["signs"]),
+                visual_cues=list(article_data["visual_cues"]),
+                recommended_actions=list(article_data["recommended_actions"]),
+                severity=str(article_data["severity"]),
+            )
+        for observation in DEMO_CAMERA_OBSERVATIONS:
+            observation_data = cast(dict[str, Any], observation)
+            captured_at = utcnow()
+            observation_id = str(observation_data["id"])
+            self.camera_observations[observation_id] = CameraObservation(
+                id=observation_id,
+                camera_id=str(observation_data["camera_id"]),
+                pond_id=str(observation_data["pond_id"]),
+                camera_role=str(observation_data["camera_role"]),
+                observation_type=str(observation_data["observation_type"]),
+                status=str(observation_data["status"]),
+                summary=str(observation_data["summary"]),
+                labels=list(observation_data["labels"]),
+                confidence=float(observation_data["confidence"]),
+                captured_at=captured_at,
+                evidence_refs=[observation_id],
+            )
+            camera = self.cameras[str(observation_data["camera_id"])]
+            camera.last_frame_at = captured_at
+            self.vision_frames["frame-%s" % observation_id] = VisionFrame(
+                id="frame-%s" % observation_id,
+                camera_id=camera.id,
+                source_url=camera.source_url,
+                object_name=str(observation_data["observation_type"]),
+                content_type="application/mock-vision",
+                sha256="mock-%s" % observation["id"],
+                width=camera.last_frame_width or 1280,
+                height=camera.last_frame_height or 720,
+                captured_at=captured_at,
+            )
+        for case in DEMO_ANALYSIS_CASES:
+            case_data = cast(dict[str, Any], case)
+            case_id = str(case_data["id"])
+            self.analysis_cases[case_id] = AnalysisCase(
+                id=case_id,
+                sequence=int(case_data["sequence"]),
+                title=str(case_data["title"]),
+                category=str(case_data["category"]),
+                pond_id=str(case_data["pond_id"]),
+                trigger=str(case_data["trigger"]),
+                description=str(case_data["description"]),
+                evidence_refs=list(case_data["evidence_refs"]),
+                expected_path=str(case_data["expected_path"]),
+                expected_device_id=str(case_data["expected_device_id"]),
+                expected_target_state=str(case_data["expected_target_state"]),
+                expected_result=str(case_data["expected_result"]),
             )
         self.schedules["schedule-demo-patrol"] = ScheduleDefinition(
             id="schedule-demo-patrol",
@@ -167,11 +285,13 @@ class InMemoryStore:
         )
         self.emit(
             "system.demo.initialized",
-            "演示数据已初始化：4 个池塘、28 个水质传感器及 28 台设备",
+            "演示数据已初始化：4 个池塘、28 个传感器、28 台设备、8 路摄像头及 4 个 Agent 分析案例",
             {
                 "pond_ids": [item[0] for item in pond_specs],
                 "sensor_metrics": [item["metric"] for item in DEMO_SENSOR_SPECS],
                 "device_count": len(self.devices),
+                "camera_count": len(self.cameras),
+                "analysis_case_count": len(self.analysis_cases),
             },
         )
 
@@ -244,6 +364,7 @@ class InMemoryStore:
                 pond_id=item["pond_id"],
                 name=item["name"],
                 source_type=item["source_type"],
+                camera_role=item.get("camera_role", "SURFACE"),
                 status=item.get("status", "UNAVAILABLE"),
                 last_frame_at=self._datetime(item.get("last_frame_at")),
                 source_url=item.get("source_url", ""),
@@ -268,6 +389,72 @@ class InMemoryStore:
                 captured_at=self._datetime(item.get("captured_at")) or utcnow(),
             )
             for item in payload.get("vision_frames", [])
+        }
+        self.weather_observations = {
+            item["id"]: WeatherObservation(
+                id=item["id"],
+                pond_id=item["pond_id"],
+                condition=item["condition"],
+                temperature_c=float(item["temperature_c"]),
+                wind_speed_mps=float(item["wind_speed_mps"]),
+                wind_direction=item.get("wind_direction", ""),
+                humidity_pct=int(item.get("humidity_pct", 0)),
+                rain_probability_pct=int(item.get("rain_probability_pct", 0)),
+                pressure_hpa=float(item.get("pressure_hpa", 0)),
+                forecast=item.get("forecast", ""),
+                observed_at=self._datetime(item.get("observed_at")) or utcnow(),
+            )
+            for item in payload.get("weather_observations", [])
+        }
+        self.camera_observations = {
+            item["id"]: CameraObservation(
+                id=item["id"],
+                camera_id=item["camera_id"],
+                pond_id=item["pond_id"],
+                camera_role=item.get("camera_role", "SURFACE"),
+                observation_type=item["observation_type"],
+                status=item.get("status", "READY"),
+                summary=item["summary"],
+                labels=item.get("labels", []),
+                confidence=float(item.get("confidence", 0.0)),
+                captured_at=self._datetime(item.get("captured_at")) or utcnow(),
+                evidence_refs=item.get("evidence_refs", []),
+            )
+            for item in payload.get("camera_observations", [])
+        }
+        self.disease_knowledge = {
+            item["id"]: DiseaseKnowledgeArticle(
+                id=item["id"],
+                name=item["name"],
+                species=item.get("species", ""),
+                signs=item.get("signs", ""),
+                visual_cues=item.get("visual_cues", []),
+                recommended_actions=item.get("recommended_actions", []),
+                severity=item.get("severity", "MEDIUM"),
+            )
+            for item in payload.get("disease_knowledge", [])
+        }
+        self.analysis_cases = {
+            item["id"]: AnalysisCase(
+                id=item["id"],
+                sequence=int(item["sequence"]),
+                title=item["title"],
+                category=item["category"],
+                pond_id=item["pond_id"],
+                trigger=item["trigger"],
+                description=item["description"],
+                evidence_refs=item.get("evidence_refs", []),
+                expected_path=item.get("expected_path", ""),
+                expected_device_id=item.get("expected_device_id", ""),
+                expected_target_state=item.get("expected_target_state", ""),
+                expected_result=item.get("expected_result", ""),
+                status=item.get("status", "READY"),
+                incident_id=item.get("incident_id"),
+                agent_run_id=item.get("agent_run_id"),
+                result_summary=item.get("result_summary", ""),
+                updated_at=self._datetime(item.get("updated_at")) or utcnow(),
+            )
+            for item in payload.get("analysis_cases", [])
         }
         self.readings = [
             SensorReading(

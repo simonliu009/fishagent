@@ -171,6 +171,7 @@ class CameraSource:
     pond_id: str
     name: str
     source_type: str
+    camera_role: str = "SURFACE"
     status: str = "UNAVAILABLE"
     last_frame_at: Optional[datetime] = None
     source_url: str = ""
@@ -192,6 +193,68 @@ class VisionFrame:
     width: int
     height: int
     captured_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class WeatherObservation:
+    id: str
+    pond_id: str
+    condition: str
+    temperature_c: float
+    wind_speed_mps: float
+    wind_direction: str
+    humidity_pct: int
+    rain_probability_pct: int
+    pressure_hpa: float
+    forecast: str
+    observed_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class CameraObservation:
+    id: str
+    camera_id: str
+    pond_id: str
+    camera_role: str
+    observation_type: str
+    status: str
+    summary: str
+    labels: List[str] = field(default_factory=list)
+    confidence: float = 0.0
+    captured_at: datetime = field(default_factory=utcnow)
+    evidence_refs: List[str] = field(default_factory=list)
+
+
+@dataclass
+class DiseaseKnowledgeArticle:
+    id: str
+    name: str
+    species: str
+    signs: str
+    visual_cues: List[str] = field(default_factory=list)
+    recommended_actions: List[str] = field(default_factory=list)
+    severity: str = "MEDIUM"
+
+
+@dataclass
+class AnalysisCase:
+    id: str
+    sequence: int
+    title: str
+    category: str
+    pond_id: str
+    trigger: str
+    description: str
+    evidence_refs: List[str] = field(default_factory=list)
+    expected_path: str = ""
+    expected_device_id: str = ""
+    expected_target_state: str = ""
+    expected_result: str = ""
+    status: str = "READY"
+    incident_id: Optional[str] = None
+    agent_run_id: Optional[str] = None
+    result_summary: str = ""
+    updated_at: datetime = field(default_factory=utcnow)
 
 
 @dataclass
@@ -371,7 +434,7 @@ class Incident:
                 IncidentStatus.ACTION_FAILED,
             },
             IncidentStatus.WAITING_APPROVAL: {IncidentStatus.EXECUTING, IncidentStatus.DISMISSED},
-            IncidentStatus.EXECUTING: {IncidentStatus.VERIFY_PENDING, IncidentStatus.ACTION_FAILED},
+            IncidentStatus.EXECUTING: {IncidentStatus.VERIFY_PENDING, IncidentStatus.RESOLVED, IncidentStatus.ACTION_FAILED},
             IncidentStatus.VERIFY_PENDING: {IncidentStatus.RESOLVED, IncidentStatus.VERIFY_FAILED},
             IncidentStatus.VERIFY_FAILED: {IncidentStatus.ESCALATED},
             IncidentStatus.ACTION_FAILED: {IncidentStatus.ESCALATED},

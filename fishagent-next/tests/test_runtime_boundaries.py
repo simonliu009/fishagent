@@ -59,7 +59,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIsNone(captured["tasks"][0].agent)
         self.assertEqual(
             [agent.role for agent in captured["agents"]],
-            ["传感器监控 Agent", "巡查分析 Agent", "行动规划 Agent"],
+            ["传感器监控 Agent", "巡查分析 Agent", "视觉与病害分析 Agent", "行动规划 Agent"],
         )
 
     def test_crewai_chat_only_exposes_final_answer(self) -> None:

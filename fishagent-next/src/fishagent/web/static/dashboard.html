@@ -99,7 +99,7 @@
     }
     .primary-nav {
       display: grid;
-      grid-template-columns: repeat(8, minmax(0, 1fr));
+      grid-template-columns: repeat(9, minmax(0, 1fr));
       background: var(--surface);
       border-bottom: 1px solid var(--line);
     }
@@ -396,6 +396,45 @@
     .chat-send:hover { color: #fff; background: var(--brand-dark); border-color: transparent; }
     .chat-send:disabled { cursor: wait; opacity: .55; }
     .chat-context { color: var(--muted); font-size: 10px; }
+    .case-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .case-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-top: 12px; }
+    .case-card { min-height: 164px; padding: 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+    .case-card:hover, .case-card.active { border-color: var(--brand); box-shadow: 0 7px 18px rgba(23, 105, 87, .12); transform: translateY(-1px); }
+    .case-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .case-number { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-right: 7px; border-radius: 50%; color: #fff; background: var(--brand); font-size: 11px; font-weight: 900; }
+    .case-title { color: var(--ink); font-size: 12px; font-weight: 850; line-height: 1.4; }
+    .case-category { margin-top: 8px; color: var(--brand-dark); font-size: 10px; font-weight: 750; }
+    .case-trigger { margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .case-result { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--ink); font-size: 10px; line-height: 1.5; }
+    .case-card-actions { display: flex; justify-content: flex-end; margin-top: 7px; }
+    .case-description { margin: 4px 0 10px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .case-flow-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 12px; margin-top: 12px; }
+    .case-flow { min-height: 250px; padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-alt); }
+    .flow-track { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 10px 2px 14px; }
+    .flow-node { position: relative; flex: 0 0 145px; min-height: 93px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .flow-node:not(:last-child)::after { content: '→'; position: absolute; right: -19px; top: 34px; z-index: 1; color: var(--brand); font-size: 18px; font-weight: 900; }
+    .flow-node + .flow-node { margin-left: 27px; }
+    .flow-node.current { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(7, 150, 111, .12); }
+    .flow-node.done { background: var(--green-soft); }
+    .flow-node-label { color: var(--brand-dark); font-size: 10px; font-weight: 850; }
+    .flow-node-action { margin-top: 7px; color: var(--ink); font-size: 11px; font-weight: 750; line-height: 1.35; }
+    .flow-node-summary { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .case-evidence-list { display: grid; gap: 7px; max-height: 260px; overflow: auto; }
+    .case-evidence-item { padding: 9px; border-left: 3px solid var(--brand); border-radius: 4px; background: var(--surface-alt); }
+    .case-evidence-item b { display: block; color: var(--ink); font-size: 10px; }
+    .case-evidence-item span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .knowledge-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+    .knowledge-card { padding: 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
+    .knowledge-card b { color: var(--ink); font-size: 11px; }
+    .knowledge-card p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .camera-observation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .camera-observation { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
+    .camera-observation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .camera-observation p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .camera-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+    .camera-tag { padding: 3px 6px; border-radius: 999px; color: var(--brand-dark); background: var(--green-soft); font-size: 9px; }
+    .patrol-summary-grid .summary-block:first-child { min-width: 0; }
+    .summary-inline-next { display: block; margin-top: 6px; color: var(--brand-dark); font-size: 10px; font-weight: 750; }
     .asset-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
     .asset-stat { padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-alt); }
     .asset-stat-label { color: var(--muted); font-size: 10px; }
@@ -550,22 +589,23 @@
     }
     .system-ok { display: flex; align-items: center; gap: 6px; }
     @media (max-width: 1080px) {
-      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout { grid-template-columns: 1fr; }
+      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout, .case-flow-layout { grid-template-columns: 1fr; }
       .patrol-main { padding-right: 0; padding-bottom: 16px; border-right: 0; border-bottom: 1px solid #cdd5f4; }
       .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .case-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 720px) {
       .app-header { padding: 9px 12px; }
       .brand-subtitle { display: none; }
       .brand { min-width: 0; }
       .brand-name { font-size: 16px; }
-      .primary-nav { overflow-x: auto; grid-template-columns: repeat(8, minmax(120px, 1fr)); }
+      .primary-nav { overflow-x: auto; grid-template-columns: repeat(9, minmax(120px, 1fr)); }
       .nav-button { min-height: 44px; }
       .app-main { padding: 12px; }
       .patrol-panel, .tool-panel { padding: 12px; }
       .panel-heading { align-items: stretch; flex-direction: column; }
-      .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary { grid-template-columns: 1fr; }
+      .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary, .case-summary-grid, .knowledge-grid, .camera-observation-grid { grid-template-columns: 1fr; }
       .metric-tile { min-height: 68px; }
       .patrol-pond-row { grid-template-columns: 1fr auto; gap: 6px; }
       .patrol-sensor-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -600,6 +640,7 @@
   <nav class="primary-nav" aria-label="主导航">
     <button class="nav-button active" type="button" data-view="monitor" onclick="switchView('monitor')"><i data-lucide="layout-dashboard"></i><span>监控总览</span></button>
     <button class="nav-button" type="button" data-view="assistant" onclick="switchView('assistant')"><i data-lucide="bot"></i><span>AI 助手</span></button>
+    <button class="nav-button" type="button" data-view="cases" onclick="switchView('cases')"><i data-lucide="route"></i><span>Agent 案例</span></button>
     <button class="nav-button" type="button" data-view="management" onclick="switchView('management')"><i data-lucide="waves"></i><span>养殖管理</span></button>
     <button class="nav-button" type="button" data-view="analytics" onclick="switchView('analytics')"><i data-lucide="chart-no-axes-combined"></i><span>数据分析</span></button>
     <button class="nav-button" type="button" data-view="assets" onclick="switchView('assets')"><i data-lucide="square-plus"></i><span>资产录入</span></button>
@@ -629,15 +670,6 @@
             <div id="patrol_pond_list" class="patrol-pond-list"></div>
           </div>
         </div>
-        <aside class="countdown">
-          <div class="countdown-title"><i data-lucide="shield-check"></i>下次自动巡查</div>
-          <div id="next_patrol_time" class="countdown-time">--</div>
-          <div class="countdown-box">
-            <div class="eyebrow">距下次巡查还有</div>
-            <div id="countdown_number" class="countdown-number">-- 分 -- 秒</div>
-          </div>
-          <p class="countdown-note">调度到期后由 Worker 领取任务；异常事件进入审批、执行与复核闭环。</p>
-        </aside>
       </section>
 
       <div id="metric_grid" class="metric-grid"></div>
@@ -700,6 +732,46 @@
             <div id="assistant_events" class="event-list"></div>
           </section>
         </div>
+      </div>
+    </section>
+
+    <section id="view_cases" class="view">
+      <section class="tool-panel">
+        <div class="case-toolbar">
+          <div>
+            <h2 class="section-title"><i data-lucide="route"></i>多模态 Agent 决策案例</h2>
+            <p class="eyebrow">水质阈值之外，依次观察天气、摄像头、知识库和设备反馈</p>
+          </div>
+          <div class="actions">
+            <button class="button secondary" type="button" onclick="initializeDemo()"><i data-lucide="rotate-ccw"></i>重置案例</button>
+            <button class="button" type="button" onclick="runAllAnalysisCases()"><i data-lucide="play"></i>依次演示全部案例</button>
+          </div>
+        </div>
+        <div id="case_sequence_meta" class="message"></div>
+        <div id="demo_catalog" class="case-summary-grid"></div>
+        <div class="section-heading" style="margin-top:16px"><h3 class="section-title"><i data-lucide="layers-3"></i>多模态案例</h3><span class="section-meta">可逐个运行</span></div>
+        <div id="case_summary_grid" class="case-summary-grid"></div>
+        <div class="case-flow-layout">
+          <div class="case-flow">
+            <div class="section-heading"><h3 class="section-title"><i data-lucide="workflow"></i><span id="case_flow_title">选择一个案例查看 Agent 流程</span></h3><span id="case_flow_status" class="section-meta"></span></div>
+            <div id="case_description" class="case-description"></div>
+            <div id="case_flow_track" class="flow-track"></div>
+          </div>
+          <div class="case-flow">
+            <div class="section-heading"><h3 class="section-title"><i data-lucide="scan-search"></i>当前证据</h3><span class="section-meta">天气 · 视觉 · 知识库</span></div>
+            <div id="case_evidence_list" class="case-evidence-list"></div>
+          </div>
+        </div>
+      </section>
+      <div class="dashboard-grid" style="margin-top:14px">
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="book-open-check"></i>病害知识库</h2><span id="knowledge_meta" class="section-meta"></span></div>
+          <div id="knowledge_grid" class="knowledge-grid"></div>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="camera"></i>水面 / 水下摄像头 Mock</h2><span id="camera_meta" class="section-meta"></span></div>
+          <div id="camera_observation_grid" class="camera-observation-grid"></div>
+        </section>
       </div>
     </section>
 
@@ -829,6 +901,14 @@
     let alertCarouselResetTimer = null;
     let assistantChatHistory = [];
     let assistantChatBusy = false;
+    let analysisCasePollTimer = null;
+    const demoCatalog = [
+      ['success', '低溶氧成功闭环', '传感器阈值', '增氧机开启 → MQTT 确认 → 复核恢复'],
+      ['failure', '设备执行失败升级', '传感器阈值', '网关失败 → 动作失败 → 升级人工'],
+      ['dedup', '幂等去重', '传感器阈值', '影子状态/幂等键检查 → 抑制重复命令'],
+      ['approval', '中风险审批', '传感器阈值', 'L2 动作建议 → 人工审批 → 受控执行'],
+      ['alerts', '混合异常', 'MQTT 多事件', '低溶氧 + 氨氮 → 分别决策 → 执行或人工'],
+    ];
     const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
     const closedIncidents = new Set(['RESOLVED', 'DISMISSED']);
 
@@ -1006,12 +1086,17 @@
       const abnormal = findings.filter(item => item.status !== 'NORMAL').length;
       const commands = currentState.commands || [];
       const confirmed = commands.filter(item => item.status === 'CONFIRMED').length;
+      const schedules = (currentState.schedules || []).filter(item => item.status === 'ACTIVE' && item.job_type === 'patrol');
+      const nextSchedule = schedules.filter(item => item.next_run_at).sort((a,b) => new Date(a.next_run_at) - new Date(b.next_run_at))[0];
+      countdownTarget = nextSchedule ? new Date(nextSchedule.next_run_at) : null;
+      countdownIntervalSeconds = Number(nextSchedule?.interval_seconds) || 0;
+      advanceCountdownTarget();
       document.getElementById('demo_data_badge').hidden = currentState.dataset?.source_classification !== 'simulated_persistent';
       document.getElementById('patrol_summary').innerHTML = [
         ['clock-3','上次巡查', lastRun ? fmtDate(lastRun.steps?.at(-1)?.created_at) : '尚未执行', lastRun?.stop_reason || '等待自动触发'],
         ['triangle-alert','巡查结果', abnormal ? `发现 ${abnormal} 处异常` : '未发现新异常', `已形成 ${findings.length} 条巡查结论`],
         ['activity','执行情况', `${confirmed} 次自动处置`, `${commands.length - confirmed} 项待确认或失败`]
-      ].map(item => `<div class="summary-block"><div class="summary-label"><i data-lucide="${item[0]}"></i>${item[1]}</div><div class="summary-value">${escapeHtml(item[2])}</div><div class="summary-note">${escapeHtml(item[3])}</div></div>`).join('');
+      ].map((item, index) => `<div class="summary-block"><div class="summary-label"><i data-lucide="${item[0]}"></i>${item[1]}</div><div class="summary-value">${escapeHtml(item[2])}</div><div class="summary-note">${escapeHtml(item[3])}${index === 0 && countdownTarget ? `<span class="summary-inline-next"><i data-lucide="calendar-clock"></i>下次 ${fmtDate(countdownTarget)} · <span id="countdown_number">-- 分 -- 秒</span></span>` : ''}</div></div>`).join('');
       const ponds = currentState.ponds || [];
       document.getElementById('patrol_scope').textContent = `${ponds.length} 个池塘 · 可滚动查看`;
       document.getElementById('patrol_pond_list').innerHTML = ponds.length ? ponds.slice(0, 10).map(pond => {
@@ -1025,12 +1110,6 @@
         }).join('');
         return `<div class="patrol-pond-row"><span><span class="dot ${condition.tone}"></span>　<b>${escapeHtml(pond.id)}</b> ${escapeHtml(pond.name)}</span><time>采样 ${fmtDate(sampledAt)}</time>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div></div>`;
       }).join('') : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
-      const schedules = (currentState.schedules || []).filter(item => item.status === 'ACTIVE' && item.job_type === 'patrol');
-      const nextSchedule = schedules.filter(item => item.next_run_at).sort((a,b) => new Date(a.next_run_at) - new Date(b.next_run_at))[0];
-      countdownTarget = nextSchedule ? new Date(nextSchedule.next_run_at) : null;
-      countdownIntervalSeconds = Number(nextSchedule?.interval_seconds) || 0;
-      advanceCountdownTarget();
-      document.getElementById('next_patrol_time').textContent = countdownTarget ? fmtDate(countdownTarget) : '--';
       updateCountdown();
     }
     function advanceCountdownTarget(now = Date.now()) {
@@ -1043,7 +1122,8 @@
     function updateCountdown() {
       if (!countdownTarget) return;
       if (advanceCountdownTarget()) {
-        document.getElementById('next_patrol_time').textContent = fmtDate(countdownTarget);
+        const nextNode = document.getElementById('next_patrol_time');
+        if (nextNode) nextNode.textContent = fmtDate(countdownTarget);
         if (!countdownRefreshPending) {
           countdownRefreshPending = true;
           refresh().finally(() => { countdownRefreshPending = false; });
@@ -1054,7 +1134,8 @@
       seconds %= 3600;
       const minutes = Math.floor(seconds / 60);
       const tail = seconds % 60;
-      document.getElementById('countdown_number').textContent = hours ? `${hours} 时 ${String(minutes).padStart(2,'0')} 分` : `${String(minutes).padStart(2,'0')} 分 ${String(tail).padStart(2,'0')} 秒`;
+      const countdownNode = document.getElementById('countdown_number');
+      if (countdownNode) countdownNode.textContent = hours ? `${hours} 时 ${String(minutes).padStart(2,'0')} 分` : `${String(minutes).padStart(2,'0')} 分 ${String(tail).padStart(2,'0')} 秒`;
     }
     function renderMetrics() {
       const active = (currentState.incidents || []).filter(item => !closedIncidents.has(item.status));
@@ -1239,6 +1320,69 @@
       document.getElementById('event_meta').textContent = `${currentState.events?.length || 0} 条事件`;
       document.getElementById('raw_state').textContent = JSON.stringify(currentState, null, 2);
     }
+    let selectedCaseId = null;
+    function caseFlowNodes(caseItem) {
+      const run = (currentState.agent_runs || []).find(item => item.id === caseItem.agent_run_id);
+      const steps = run?.steps || [];
+      const nodes = [
+        ['触发', caseItem.trigger, `证据 ${caseItem.evidence_refs?.length || 0} 项`],
+        ['证据汇总', '摄像头 / 天气 / 知识库', steps.find(item => item.action === 'incident.started')?.summary || '等待 Agent 读取多模态证据'],
+        ['CrewAI 决策', run?.stop_reason || '待执行', steps.find(item => item.agent === 'supervisor-agent')?.summary || '主管 Agent 动态委派专职 Agent'],
+        ['策略门', caseItem.expected_device_id ? `${caseItem.expected_target_state || '建议'} · 受控设备` : '人工复核边界', steps.find(item => item.action === 'validate_llm_decision' || item.action === 'route_action')?.summary || '检查能力、风险和审批条件'],
+        ['结果', caseItem.status || 'READY', caseItem.result_summary || caseItem.expected_result],
+      ];
+      return nodes.map((node, index) => `<div class="flow-node ${index < Math.max(0, Math.min(nodes.length, steps.length + 1)) ? 'done' : ''} ${index === Math.min(nodes.length - 1, steps.length) ? 'current' : ''}"><div class="flow-node-label">${index + 1}. ${escapeHtml(node[0])}</div><div class="flow-node-action">${escapeHtml(node[1])}</div><div class="flow-node-summary">${escapeHtml(node[2])}</div></div>`).join('');
+    }
+    function renderCases() {
+      const cases = [...(currentState.analysis_cases || [])].sort((a,b) => a.sequence - b.sequence);
+      if (!selectedCaseId || !cases.some(item => item.id === selectedCaseId)) selectedCaseId = cases[0]?.id || null;
+      const selected = cases.find(item => item.id === selectedCaseId) || cases[0];
+      document.getElementById('demo_catalog').innerHTML = demoCatalog.map(item => `<article class="case-card"><div class="case-card-head"><div><span class="case-number">${escapeHtml(item[0].slice(0,1).toUpperCase())}</span><span class="case-title">${escapeHtml(item[1])}</span></div>${badge('NORMAL', '可演示')}</div><div class="case-category">${escapeHtml(item[2])}</div><div class="case-result">${escapeHtml(item[3])}</div><div class="case-card-actions"><button class="icon-button" type="button" title="运行此 Demo" onclick="event.stopPropagation();runDemo('${item[0]}')"><i data-lucide="play"></i></button></div></article>`).join('');
+      document.getElementById('case_summary_grid').innerHTML = cases.length ? cases.map(item => `<article class="case-card ${item.id === selected?.id ? 'active' : ''}" onclick="selectAnalysisCase('${item.id}')"><div class="case-card-head"><div><span class="case-number">${item.sequence}</span><span class="case-title">${escapeHtml(item.title)}</span></div>${badge(item.status === 'READY' ? 'PENDING' : item.status, item.status === 'READY' ? '待演示' : item.status)}</div><div class="case-category">${escapeHtml(item.category)} · ${escapeHtml(item.pond_id)}</div><div class="case-trigger">${escapeHtml(item.trigger)}</div><div class="case-result">${escapeHtml(item.result_summary || item.expected_result)}</div><div class="case-card-actions"><button class="icon-button" type="button" title="运行此案例" onclick="event.stopPropagation();runAnalysisCase('${item.id}')"><i data-lucide="play"></i></button></div></article>`).join('') : '<div class="empty">暂无分析案例，请初始化演示资产</div>';
+      if (!selected) {
+        document.getElementById('case_flow_title').textContent = '选择一个案例查看 Agent 流程';
+        document.getElementById('case_flow_status').textContent = '';
+        document.getElementById('case_flow_track').innerHTML = '<div class="empty">暂无案例</div>';
+        document.getElementById('case_evidence_list').innerHTML = '';
+      } else {
+        document.getElementById('case_flow_title').textContent = selected.title;
+        document.getElementById('case_flow_status').textContent = `${selected.category} · ${selected.pond_id}`;
+        document.getElementById('case_description').textContent = `${selected.description} 预期流程：${selected.expected_path}`;
+        document.getElementById('case_flow_track').innerHTML = caseFlowNodes(selected);
+        const weather = (currentState.weather_observations || []).find(item => item.id === `weather-${selected.pond_id}`);
+        const observations = (currentState.camera_observations || []).filter(item => item.pond_id === selected.pond_id);
+        const articles = (currentState.disease_knowledge || []).filter(item => selected.evidence_refs?.includes(item.id));
+        const evidence = [];
+        if (weather && selected.evidence_refs?.includes(weather.id)) evidence.push(`<div class="case-evidence-item"><b>天气上下文 · ${escapeHtml(weather.condition)}</b><span>${escapeHtml(weather.forecast)}，风速 ${fmtNumber(weather.wind_speed_mps,1)} m/s，降雨概率 ${weather.rain_probability_pct}%</span></div>`);
+        observations.filter(item => selected.evidence_refs?.includes(item.id)).forEach(item => evidence.push(`<div class="case-evidence-item"><b>${escapeHtml(item.camera_role === 'UNDERWATER' ? '水下' : '水面')}摄像头 · 置信度 ${Math.round(item.confidence * 100)}%</b><span>${escapeHtml(item.summary)}</span></div>`));
+        articles.forEach(item => evidence.push(`<div class="case-evidence-item"><b>病害知识库 · ${escapeHtml(item.name)}</b><span>${escapeHtml(item.signs)}；${escapeHtml(item.recommended_actions.join('、'))}</span></div>`));
+        document.getElementById('case_evidence_list').innerHTML = evidence.join('') || '<div class="empty">等待案例证据</div>';
+      }
+      if (!selected) document.getElementById('case_description').textContent = '';
+      document.getElementById('knowledge_meta').textContent = `${(currentState.disease_knowledge || []).length} 篇参考条目`;
+      document.getElementById('knowledge_grid').innerHTML = (currentState.disease_knowledge || []).map(item => `<article class="knowledge-card"><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.species)} · ${escapeHtml(item.signs)}</p><p>可检索特征：${escapeHtml(item.visual_cues.join('、'))}</p></article>`).join('') || '<div class="empty">暂无知识条目</div>';
+      const observations = currentState.camera_observations || [];
+      document.getElementById('camera_meta').textContent = `${(currentState.cameras || []).length} 路摄像头 · ${observations.length} 条 Mock 观察`;
+      document.getElementById('camera_observation_grid').innerHTML = observations.map(item => `<article class="camera-observation"><div class="camera-observation-head"><b>${escapeHtml(item.pond_id)} · ${escapeHtml(item.camera_role === 'UNDERWATER' ? '水下' : '水面')}</b>${badge('NORMAL', `${Math.round(item.confidence * 100)}%`)}</div><p>${escapeHtml(item.summary)}</p><div class="camera-tags">${item.labels.map(label => `<span class="camera-tag">${escapeHtml(label)}</span>`).join('')}</div></article>`).join('') || '<div class="empty">暂无摄像头观察</div>';
+      document.getElementById('case_sequence_meta').textContent = cases.length ? `共 ${cases.length} 个案例 · 可单独运行或按顺序演示 · 证据分析不依赖传感器阈值` : '';
+    }
+    function selectAnalysisCase(caseId) { selectedCaseId = caseId; renderCases(); iconRefresh(); }
+    async function runAnalysisCase(caseId) {
+      try { await api(`/api/v1/analysis-cases/${caseId}/run`, {method:'POST'}); showToast('案例 Agent 流程已完成'); await refresh(); } catch (error) { showToast(`案例执行失败：${error.message}`, true); }
+    }
+    async function runAllAnalysisCases() {
+      try {
+        await api('/api/v1/analysis-cases/run-all', {method:'POST'});
+        showToast('全部案例已按顺序启动');
+        await refresh();
+        clearInterval(analysisCasePollTimer);
+        analysisCasePollTimer = setInterval(async () => {
+          await refresh();
+          const running = (currentState.analysis_cases || []).some(item => item.status === 'RUNNING');
+          if (!running) clearInterval(analysisCasePollTimer);
+        }, 2500);
+      } catch (error) { showToast(`案例序列启动失败：${error.message}`, true); }
+    }
     function drawChart(canvasId, legendId) {
       const canvas = document.getElementById(canvasId);
       if (!canvas || canvas.offsetWidth < 40) return;
@@ -1300,7 +1444,7 @@
     }
     function drawCharts() { drawChart('monitor_chart','monitor_legend'); drawChart('analytics_chart','analytics_legend'); }
     function renderAll() {
-      renderPatrol(); renderMetrics(); renderExecution(); renderWater(); renderAlerts(); renderAssistant(); renderManagement(); renderAnalytics();
+      renderPatrol(); renderMetrics(); renderExecution(); renderWater(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics();
       document.getElementById('footer_status').textContent = '系统运行正常';
       requestAnimationFrame(drawCharts);
       iconRefresh();

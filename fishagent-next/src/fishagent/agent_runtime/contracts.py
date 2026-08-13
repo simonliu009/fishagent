@@ -50,8 +50,8 @@ class IncidentDecision:
         refs = payload.get("evidence_refs", [])
         if not isinstance(refs, list) or any(not isinstance(item, str) for item in refs):
             raise ValueError("evidence_refs must be a list of strings")
-        if action in {"EXECUTE", "REQUEST_APPROVAL"} and (not device_id or target_state != "on"):
-            raise ValueError("device_id and target_state=on are required for an action")
+        if action in {"EXECUTE", "REQUEST_APPROVAL"} and (not device_id or target_state not in {"on", "off"}):
+            raise ValueError("device_id and target_state on/off are required for an action")
         if action == "NO_ACTION" and target_state:
             raise ValueError("NO_ACTION cannot contain a target state")
         return cls(

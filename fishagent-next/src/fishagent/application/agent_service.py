@@ -11,6 +11,7 @@ from fishagent.application.store import WATER_QUALITY_HIGH_LIMITS, WATER_QUALITY
 from fishagent.domain.models import (
     ActionProposal,
     AgentRun,
+    AnalysisCase,
     Approval,
     ApprovalStatus,
     CameraSource,
@@ -46,6 +47,10 @@ from fishagent.infrastructure.persistence import PostgresStateRepository
 from fishagent.infrastructure.realtime import RedisEventPublisher
 
 
+class _AnalysisCaseCancelled(RuntimeError):
+    pass
+
+
 class FishAgentSystem:
     def __init__(
         self,
@@ -63,14 +68,22 @@ class FishAgentSystem:
         self.agent_orchestrator = agent_orchestrator
         self.telemetry_publisher = telemetry_publisher
         self._job_lock = RLock()
+        self._analysis_case_lock = RLock()
+        self._analysis_case_thread: Optional[Thread] = None
+        self._analysis_case_generation = 0
         if self.repository:
             persisted = self.repository.load()
             if persisted:
                 self.store.restore_snapshot(persisted)
 
     def initialize_demo(self) -> dict:
+        self._cancel_analysis_case_sequence()
         self._reset_demo_with_telemetry()
         return self.snapshot()
+
+    def _cancel_analysis_case_sequence(self) -> None:
+        with self._analysis_case_lock:
+            self._analysis_case_generation += 1
 
     def _reset_demo_with_telemetry(self) -> None:
         self.store.reset_demo()
@@ -268,6 +281,7 @@ class FishAgentSystem:
             pond_id=pond_id,
             name=str(payload.get("name") or "未命名摄像头"),
             source_type=str(payload.get("source_type") or "HTTP_SNAPSHOT"),
+            camera_role=str(payload.get("camera_role") or "SURFACE"),
             status=str(payload.get("status") or "UNAVAILABLE"),
             source_url=str(payload.get("source_url") or ""),
             privacy_policy=str(payload.get("privacy_policy") or "EVENT_ONLY"),
@@ -275,6 +289,123 @@ class FishAgentSystem:
         self.store.cameras[camera.id] = camera
         self.store.emit("asset.camera.created", "创建摄像头：%s" % camera.name, {"camera_id": camera.id})
         return camera
+
+    def _case_evidence_summary(self, case: AnalysisCase) -> str:
+        summaries: list[str] = []
+        for ref in case.evidence_refs:
+            observation = self.store.camera_observations.get(ref)
+            if observation:
+                summaries.append(
+                    "摄像头[%s] %s（置信度 %.0f%%）"
+                    % (observation.camera_role, observation.summary, observation.confidence * 100)
+                )
+                continue
+            weather = self.store.weather_observations.get(ref)
+            if weather:
+                summaries.append(
+                    "天气[%s] %s，风向%s，风速 %.1fm/s，降雨概率 %d%%"
+                    % (weather.condition, weather.forecast, weather.wind_direction, weather.wind_speed_mps, weather.rain_probability_pct)
+                )
+                continue
+            article = self.store.disease_knowledge.get(ref)
+            if article:
+                summaries.append(
+                    "知识库[%s] %s：%s；建议：%s"
+                    % (article.name, article.species, article.signs, "、".join(article.recommended_actions))
+                )
+        return "；".join(summaries)
+
+    def run_analysis_case(self, case_id: str, generation: Optional[int] = None) -> AgentRun:
+        """Turn one multimodal demo case into the normal incident decision flow."""
+        with self._analysis_case_lock:
+            if generation is not None and generation != self._analysis_case_generation:
+                raise _AnalysisCaseCancelled("案例序列已被重置")
+            case = self.store.analysis_cases[case_id]
+            if case.agent_run_id and case.agent_run_id in self.store.agent_runs:
+                return self.store.agent_runs[case.agent_run_id]
+            case.status = "RUNNING"
+            case.updated_at = utcnow()
+            evidence = Evidence(
+                id=new_id("evi"),
+                type="multimodal_analysis",
+                summary=self._case_evidence_summary(case),
+                refs=list(case.evidence_refs),
+            )
+            incident = Incident(
+                id=new_id("inc"),
+                pond_id=case.pond_id,
+                title="%s：%s" % (self.store.ponds[case.pond_id].name, case.title),
+                risk=RiskLevel.L2 if case.expected_device_id.startswith("valve-") else RiskLevel.L1,
+                evidence=[evidence],
+            )
+            self.store.incidents[incident.id] = incident
+            case.incident_id = incident.id
+            self.store.emit(
+                "analysis_case.detected",
+                case.title,
+                {"case_id": case.id, "incident_id": incident.id, "category": case.category},
+            )
+            if self.agent_orchestrator is None:
+                incident.transition(IncidentStatus.INVESTIGATING)
+                run = AgentRun(id=new_id("run"), goal="分析案例：%s" % case.title, incident_id=incident.id, status="RUNNING")
+                self.store.agent_runs[run.id] = run
+                run.step("supervisor-agent", "stop", "CrewAI 未配置，案例不使用硬编码动作替代模型决策")
+                self._llm_manual_stop(incident, run, "LLM_REQUIRED", "案例已转人工，等待配置 CrewAI")
+            else:
+                run = self.run_incident_flow(incident.id)
+            case.agent_run_id = run.id
+            case.result_summary = self._analysis_case_result(case, incident, run)
+            case.status = self._analysis_case_status(incident, run)
+            case.updated_at = utcnow()
+            self.snapshot()
+            return run
+
+    @staticmethod
+    def _analysis_case_status(incident: Incident, run: AgentRun) -> str:
+        if incident.status == IncidentStatus.WAITING_APPROVAL or run.status == "WAITING_APPROVAL":
+            return "WAITING_APPROVAL"
+        if incident.status == IncidentStatus.MANUAL_REQUIRED:
+            return "MANUAL_REQUIRED"
+        if incident.status in {IncidentStatus.RESOLVED, IncidentStatus.VERIFY_PENDING}:
+            return "COMPLETED"
+        if run.status == "FAILED":
+            return "FAILED"
+        return "COMPLETED"
+
+    @staticmethod
+    def _analysis_case_result(case: AnalysisCase, incident: Incident, run: AgentRun) -> str:
+        if run.steps:
+            return run.steps[-1].summary
+        return "案例状态：%s，事件状态：%s" % (case.status, incident.status.value)
+
+    def run_all_analysis_cases(self, generation: Optional[int] = None) -> list[AgentRun]:
+        runs: list[AgentRun] = []
+        for case in sorted(self.store.analysis_cases.values(), key=lambda item: item.sequence):
+            with self._analysis_case_lock:
+                if generation is not None and generation != self._analysis_case_generation:
+                    break
+            if case.status in {"COMPLETED", "MANUAL_REQUIRED", "WAITING_APPROVAL"}:
+                continue
+            try:
+                runs.append(self.run_analysis_case(case.id, generation=generation))
+            except _AnalysisCaseCancelled:
+                break
+        return runs
+
+    def start_analysis_case_sequence(self) -> bool:
+        with self._analysis_case_lock:
+            if self._analysis_case_thread and self._analysis_case_thread.is_alive():
+                return False
+            self._analysis_case_generation += 1
+            generation = self._analysis_case_generation
+            self._analysis_case_thread = Thread(
+                target=self.run_all_analysis_cases,
+                args=(generation,),
+                name="fishagent-analysis-case-sequence",
+                daemon=True,
+            )
+            self._analysis_case_thread.start()
+            return True
 
     def create_schedule(self, payload: dict) -> ScheduleDefinition:
         interval_seconds = int(payload.get("interval_seconds") or 300)
@@ -693,6 +824,10 @@ class FishAgentSystem:
         snapshot = self._snapshot(persist=False)
         incident = next(item for item in snapshot["incidents"] if item["id"] == incident_id)
         pond_id = incident["pond_id"]
+        analysis_case = next(
+            (item for item in snapshot.get("analysis_cases", []) if item.get("incident_id") == incident_id),
+            None,
+        )
         return {
             "incident": incident,
             "pond": next((item for item in snapshot["ponds"] if item["id"] == pond_id), None),
@@ -701,6 +836,10 @@ class FishAgentSystem:
             "devices": [item for item in snapshot["devices"] if item["pond_id"] == pond_id],
             "cameras": [item for item in snapshot["cameras"] if item["pond_id"] == pond_id],
             "active_incidents": [item for item in snapshot["incidents"] if item["status"] not in {"RESOLVED", "DISMISSED"}],
+            "weather_observations": [item for item in snapshot.get("weather_observations", []) if item["pond_id"] == pond_id],
+            "camera_observations": [item for item in snapshot.get("camera_observations", []) if item["pond_id"] == pond_id],
+            "disease_knowledge": snapshot.get("disease_knowledge", []),
+            "analysis_case": analysis_case,
         }
 
     def _llm_manual_stop(self, incident: Incident, run: AgentRun, reason: str, summary: str) -> AgentRun:
@@ -798,13 +937,18 @@ class FishAgentSystem:
                 device_id=decision.device_id,
                 target_state=decision.target_state,
                 risk=RiskLevel.L1,
+                multimodal_evidence=bool(set(decision.evidence_refs) & {ref for evidence in incident.evidence for ref in evidence.refs}),
             )
         except (KeyError, TypeError, ValueError) as exc:
             return self._llm_manual_stop(incident, run, "LLM_ACTION_INVALID", str(exc))
         if command.status == CommandStatus.CONFIRMED:
             incident.transition(IncidentStatus.EXECUTING)
-            incident.transition(IncidentStatus.VERIFY_PENDING)
-            self._schedule_verification(incident, utcnow() + timedelta(seconds=decision.verification_delay_seconds))
+            device = self.store.devices[decision.device_id]
+            if device.capability == "aeration":
+                incident.transition(IncidentStatus.VERIFY_PENDING)
+                self._schedule_verification(incident, utcnow() + timedelta(seconds=decision.verification_delay_seconds))
+            else:
+                incident.transition(IncidentStatus.RESOLVED)
             run.status = "COMPLETED"
             run.stop_reason = "LLM_ACTION_EXECUTED"
             self.store.emit("agent.run.completed", decision.rationale, {"run_id": run.id, "command_id": command.id}, correlation_id=run.id)
@@ -919,8 +1063,6 @@ class FishAgentSystem:
         if device is None:
             raise ValueError("device_id does not exist")
         latest_do = self.store.latest_reading(incident.pond_id, "DO")
-        if latest_do is None:
-            raise ValueError("latest DO reading is required")
         policy = evaluate_action(
             actor="execution-agent",
             device=device,
@@ -929,6 +1071,7 @@ class FishAgentSystem:
             risk=risk,
             latest_do=latest_do,
             idempotency_seen=False,
+            multimodal_evidence=any(evidence.type == "multimodal_analysis" for evidence in incident.evidence),
         )
         status = "PENDING_APPROVAL" if policy.status == "WAITING_APPROVAL" else policy.status
         proposal = ActionProposal(
@@ -939,7 +1082,7 @@ class FishAgentSystem:
             target_state=target_state,
             risk=risk,
             rationale=rationale or policy.reason,
-            evidence_refs=[latest_do.source_event_id],
+            evidence_refs=([latest_do.source_event_id] if latest_do else [ref for evidence in incident.evidence for ref in evidence.refs])[:20],
             status=status,
         )
         self.store.action_proposals[proposal.id] = proposal
@@ -995,11 +1138,16 @@ class FishAgentSystem:
             target_state=proposal.target_state,
             risk=proposal.risk,
             approval_granted=True,
+            multimodal_evidence=any(evidence.type == "multimodal_analysis" for evidence in incident.evidence),
         )
         if command.status == CommandStatus.CONFIRMED:
             if incident.status == IncidentStatus.EXECUTING:
-                incident.transition(IncidentStatus.VERIFY_PENDING)
-            self._schedule_verification(incident, utcnow() + timedelta(seconds=30))
+                device = self.store.devices[proposal.device_id]
+                if device.capability == "aeration":
+                    incident.transition(IncidentStatus.VERIFY_PENDING)
+                    self._schedule_verification(incident, utcnow() + timedelta(seconds=30))
+                else:
+                    incident.transition(IncidentStatus.RESOLVED)
             run.status = "COMPLETED"
             run.stop_reason = "ACTION_EXECUTED_AFTER_APPROVAL"
         else:
@@ -1047,6 +1195,7 @@ class FishAgentSystem:
         risk: RiskLevel,
         approval_granted: bool = False,
         idempotency_key: Optional[str] = None,
+        multimodal_evidence: bool = False,
     ) -> DeviceCommand:
         device = self.store.devices[device_id]
         latest_do = self.store.latest_reading(incident.pond_id, "DO")
@@ -1069,6 +1218,7 @@ class FishAgentSystem:
             latest_do=latest_do,
             idempotency_seen=idempotency_key in self.store.executed_idempotency_keys,
             approval_granted=approval_granted,
+            multimodal_evidence=multimodal_evidence,
         )
         command = DeviceCommand(
             id=new_id("cmd"),
@@ -1244,6 +1394,7 @@ class FishAgentSystem:
             return job
 
     def run_demo(self, mode: str) -> dict:
+        self._cancel_analysis_case_sequence()
         self._reset_demo_with_telemetry()
         if mode == "alerts":
             self._demo_reading("B-01", 2.8, source_event_id="demo-alert-do")
@@ -1335,6 +1486,7 @@ class FishAgentSystem:
                     "pond_id": camera.pond_id,
                     "name": camera.name,
                     "source_type": camera.source_type,
+                    "camera_role": camera.camera_role,
                     "status": camera.status,
                     "last_frame_at": camera.last_frame_at.isoformat() if camera.last_frame_at else None,
                     "source_url": camera.source_url,
@@ -1359,6 +1511,72 @@ class FishAgentSystem:
                     "captured_at": frame.captured_at.isoformat(),
                 }
                 for frame in self.store.vision_frames.values()
+            ],
+            "weather_observations": [
+                {
+                    "id": weather.id,
+                    "pond_id": weather.pond_id,
+                    "condition": weather.condition,
+                    "temperature_c": weather.temperature_c,
+                    "wind_speed_mps": weather.wind_speed_mps,
+                    "wind_direction": weather.wind_direction,
+                    "humidity_pct": weather.humidity_pct,
+                    "rain_probability_pct": weather.rain_probability_pct,
+                    "pressure_hpa": weather.pressure_hpa,
+                    "forecast": weather.forecast,
+                    "observed_at": weather.observed_at.isoformat(),
+                }
+                for weather in self.store.weather_observations.values()
+            ],
+            "camera_observations": [
+                {
+                    "id": observation.id,
+                    "camera_id": observation.camera_id,
+                    "pond_id": observation.pond_id,
+                    "camera_role": observation.camera_role,
+                    "observation_type": observation.observation_type,
+                    "status": observation.status,
+                    "summary": observation.summary,
+                    "labels": observation.labels,
+                    "confidence": observation.confidence,
+                    "captured_at": observation.captured_at.isoformat(),
+                    "evidence_refs": observation.evidence_refs,
+                }
+                for observation in self.store.camera_observations.values()
+            ],
+            "disease_knowledge": [
+                {
+                    "id": article.id,
+                    "name": article.name,
+                    "species": article.species,
+                    "signs": article.signs,
+                    "visual_cues": article.visual_cues,
+                    "recommended_actions": article.recommended_actions,
+                    "severity": article.severity,
+                }
+                for article in self.store.disease_knowledge.values()
+            ],
+            "analysis_cases": [
+                {
+                    "id": case.id,
+                    "sequence": case.sequence,
+                    "title": case.title,
+                    "category": case.category,
+                    "pond_id": case.pond_id,
+                    "trigger": case.trigger,
+                    "description": case.description,
+                    "evidence_refs": case.evidence_refs,
+                    "expected_path": case.expected_path,
+                    "expected_device_id": case.expected_device_id,
+                    "expected_target_state": case.expected_target_state,
+                    "expected_result": case.expected_result,
+                    "status": case.status,
+                    "incident_id": case.incident_id,
+                    "agent_run_id": case.agent_run_id,
+                    "result_summary": case.result_summary,
+                    "updated_at": case.updated_at.isoformat(),
+                }
+                for case in sorted(self.store.analysis_cases.values(), key=lambda item: item.sequence)
             ],
             "incidents": [
                 {

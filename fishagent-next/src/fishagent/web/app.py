@@ -449,6 +449,36 @@ async def demo(request: Request, mode: str) -> Any:
     return SYSTEM.run_demo(mode)
 
 
+@app.get("/api/v1/analysis-cases")
+async def analysis_cases(request: Request) -> dict:
+    authenticate(request, request.url.path)
+    state = SYSTEM.read_snapshot()
+    return {
+        "analysis_cases": state.get("analysis_cases", []),
+        "agent_runs": [run for run in state.get("agent_runs", []) if run.get("incident_id")],
+        "camera_observations": state.get("camera_observations", []),
+        "weather_observations": state.get("weather_observations", []),
+        "disease_knowledge": state.get("disease_knowledge", []),
+    }
+
+
+@app.post("/api/v1/analysis-cases/run-all")
+async def run_all_analysis_cases(request: Request) -> Any:
+    authenticate(request, request.url.path, write=True)
+    started = SYSTEM.start_analysis_case_sequence()
+    return encoded_response(202, {"started": started, "state": SYSTEM.snapshot()})
+
+
+@app.post("/api/v1/analysis-cases/{case_id}/run")
+async def run_analysis_case(request: Request, case_id: str) -> Any:
+    authenticate(request, request.url.path, write=True)
+    if case_id not in SYSTEM.store.analysis_cases:
+        return problem(404, "Analysis case not found")
+    run = await asyncio.to_thread(SYSTEM.run_analysis_case, case_id)
+    state = SYSTEM.snapshot()
+    return encoded_response(202, {"run": next(item for item in state["agent_runs"] if item["id"] == run.id), "state": state})
+
+
 @app.get("/api/v1/incidents")
 async def incidents(request: Request) -> dict:
     authenticate(request, "/api/v1/incidents")

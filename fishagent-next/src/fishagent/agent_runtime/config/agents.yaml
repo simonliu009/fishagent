@@ -9,6 +9,10 @@ sensor_monitor:
 patrol_analysis:
   role: 巡查分析 Agent
   goal: 关联池塘、设备影子状态和活动事件
+vision_disease_analysis:
+  role: 视觉与病害分析 Agent
+  goal: 分析水面、水下摄像头和天气上下文，检索病害知识并给出风险判断
+  backstory: 只使用结构化视觉观察和知识库证据；不得自行确诊、投药或越过人工复核边界
 action_planner:
   role: 行动规划 Agent
   goal: 形成有风险等级、证据和复核条件的动作建议

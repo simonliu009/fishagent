@@ -1,6 +1,7 @@
 import json
 import unittest
 from tempfile import TemporaryDirectory
+from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -264,7 +265,7 @@ class B01FlowTest(unittest.TestCase):
         offline = next(item for item in state["devices"] if not item["healthy"])
         self.assertEqual(offline["id"], "aerator-b04-1")
         self.assertEqual(offline["pond_id"], "B-04")
-        self.assertEqual(len(state["cameras"]), 4)
+        self.assertEqual(len(state["cameras"]), 8)
         self.assertEqual(len(state["readings"]), 252)
         self.assertEqual(len(state["schedules"]), 1)
         self.assertEqual(state["incidents"], [])
@@ -274,11 +275,96 @@ class B01FlowTest(unittest.TestCase):
             {item["metric"] for item in state["sensors"]},
             {"AMMONIA", "NITRITE", "TURBIDITY", "CHLOROPHYLL", "DO", "PH", "TEMPERATURE"},
         )
+
+    def test_demo_initializes_multimodal_cases_weather_knowledge_and_cameras(self) -> None:
+        system = FishAgentSystem()
+        state = system.initialize_demo()
+
+        self.assertEqual(len(state["cameras"]), 8)
+        self.assertEqual({item["camera_role"] for item in state["cameras"]}, {"SURFACE", "UNDERWATER"})
+        self.assertEqual(len(state["weather_observations"]), 4)
+        self.assertGreaterEqual(len(state["disease_knowledge"]), 3)
+        self.assertEqual(len(state["analysis_cases"]), 4)
+        self.assertEqual(len(state["camera_observations"]), 4)
+
+    def test_multimodal_cases_use_device_policy_and_manual_boundaries(self) -> None:
+        class MultimodalOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                case = context["analysis_case"]
+                decisions = {
+                    "case-floating-head-weather": ("EXECUTE", "aerator-b01-1", "on", "L1"),
+                    "case-underwater-disease": ("MANUAL_REQUIRED", "", "", "L3"),
+                    "case-weak-feeding-response": ("EXECUTE", "feeder-b03-1", "off", "L1"),
+                    "case-weather-front-protection": ("REQUEST_APPROVAL", "valve-b04-1", "off", "L2"),
+                }
+                action, device_id, target_state, risk = decisions[case["id"]]
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action=action,
+                        device_id=device_id,
+                        target_state=target_state,
+                        risk=risk,
+                        rationale="多模态证据已交叉验证",
+                        evidence_refs=case["evidence_refs"],
+                    ),
+                    summary="multimodal decision",
+                    delegated_agents=["camera-analysis-agent"],
+                    steps=[("camera-analysis-agent", "inspect_multimodal_evidence", "已读取摄像头、天气和知识库")],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=MultimodalOrchestrator())
+        system.initialize_demo()
+        for case in sorted(system.store.analysis_cases.values(), key=lambda item: item.sequence):
+            system.run_analysis_case(case.id)
+
+        state = system.snapshot()
+        self.assertEqual(state["commands"][0]["device_id"], "aerator-b01-1")
+        self.assertEqual(state["commands"][1]["device_id"], "feeder-b03-1")
+        self.assertEqual(len(state["manual_tasks"]), 1)
+        self.assertEqual(len(state["approvals"]), 1)
+        self.assertEqual({item["status"] for item in state["analysis_cases"]}, {"COMPLETED", "MANUAL_REQUIRED", "WAITING_APPROVAL"})
         self.assertEqual({item["metric"] for item in state["readings"]}, {item["metric"] for item in state["sensors"]})
         health = {item["sensor_id"]: item["status"] for item in state["sensor_health"]}
         self.assertEqual(health["do-b-01"], "ONLINE")
         self.assertEqual(health["do-b-04"], "ERROR")
         self.assertEqual(state["events"][0]["event_type"], "system.demo.initialized")
+
+    def test_reset_cancels_case_sequence_before_next_case(self) -> None:
+        started = Event()
+        release = Event()
+
+        class SlowOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                started.set()
+                release.wait(timeout=2)
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="需要人工复核",
+                        evidence_refs=context["incident"]["evidence"][0]["refs"],
+                    ),
+                    summary="manual review",
+                    delegated_agents=["vision-disease-agent"],
+                    steps=[],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=SlowOrchestrator())
+        system.initialize_demo()
+        self.assertTrue(system.start_analysis_case_sequence())
+        self.assertTrue(started.wait(timeout=2))
+
+        reset = Thread(target=system.initialize_demo)
+        reset.start()
+        release.set()
+        reset.join(timeout=5)
+        self.assertFalse(reset.is_alive())
+        self.assertEqual({item.status for item in system.store.analysis_cases.values()}, {"READY"})
+        self.assertEqual(system.store.incidents, {})
 
     def test_non_do_anomaly_is_routed_to_agent_and_manual_task(self) -> None:
         class ManualOrchestrator:

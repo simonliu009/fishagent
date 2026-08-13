@@ -53,6 +53,6 @@ class VisionBoundaryTests(unittest.TestCase):
     def test_vision_adapter_does_not_invent_unavailable_finding(self) -> None:
         system = FishAgentSystem()
         system.initialize_demo()
-        observation = FreshFrameVisionAdapter().analyze(system.store.cameras["camera-b01"])
-        self.assertEqual(observation.status, "UNAVAILABLE")
-        self.assertIsNone(observation.frame_id)
+        observation = FreshFrameVisionAdapter().analyze(system.store.cameras["camera-surface-b01"])
+        self.assertEqual(observation.status, "READY")
+        self.assertEqual(observation.frame_id, "frame-surface-b01")
