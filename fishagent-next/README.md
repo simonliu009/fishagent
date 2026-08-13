@@ -36,7 +36,12 @@ cp .env.example .env
 
 `.env` 默认连接本机 Docker Compose 提供的 PostgreSQL `5432`、Redis `6379`、MinIO `9000` 和 MQTT `1883`。不要把真实密码或 API Key 提交到 Git。
 
-完整 Compose 会启动 `web`、`worker-default`、`worker-vision`、`beat`、`postgres`、`redis`、`minio` 和 `mqtt`。仅运行 Python Web 进程时可使用 `./start.sh`，它会通过 Uvicorn 监听 `3008`。
+完整 Compose 会启动 `web`、`worker-default`、`worker-vision`、`beat`、`postgres`、`redis`、`minio` 和 `mqtt`。仅运行 Python Web 进程时可使用 `./start.sh [port]`，端口参数默认是 `3008`，也可以通过 `FISHAGENT_PORT` 配置。
+
+```bash
+./start.sh          # 监听 3008
+./start.sh 3010     # 监听 3010
+```
 
 访问：
 
