@@ -5,7 +5,7 @@
 ```text
 Browser
   -> Nginx :3001
-  -> FastAPI/NiceGUI :3008
+  -> FastAPI/NiceGUI :3000
        |-- PostgreSQL: domain snapshot, relational projection, outbox
        |-- Redis: Celery broker/result and live pub/sub acceleration
        |-- MinIO: evidence and camera frame objects
@@ -32,6 +32,6 @@ CrewAI 可以读取结构化证据、委派专职 Agent 和形成动作建议，
 ## 端口
 
 - 外部浏览器入口：`3001`，由 Nginx 反代。
-- 应用进程：`3008`，只绑定本机，便于统一经过 Nginx 访问。
+- 应用进程：`3000`，只绑定本机，便于统一经过 Nginx 访问。
 - 生产决策：CrewAI/LLM 输出结构化动作；MQTT 网关发布设备指令，模型不直接持有设备写工具。
 - LLM 不可用：自动处置停止并创建人工任务，不回退到硬编码动作。

@@ -21,7 +21,7 @@
 写入示例：
 
 ```bash
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/config/llm \
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/config/llm \
   -H 'Content-Type: application/json' \
   -d '{"provider":"zai","base_url":"https://api.z.ai/api/paas/v4","model":"glm-4.5","api_key":"sk-***","enabled":true}'
 ```

@@ -18,4 +18,4 @@ RUN uv sync --frozen --no-dev --extra agent
 
 COPY . .
 
-CMD ["/app/.venv/bin/uvicorn", "fishagent.web.app:app", "--host", "0.0.0.0", "--port", "3008"]
+CMD ["/app/.venv/bin/uvicorn", "fishagent.web.app:app", "--host", "0.0.0.0", "--port", "3000"]

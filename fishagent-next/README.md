@@ -8,7 +8,7 @@
 - B-01 低溶氧事件闭环：感知、Agent 研判、策略门、模拟设备命令、复核、升级。
 - 成功、复核失败、防重复三条演示路径。
 - 只读/低风险自动/中高风险阻断的安全策略。
-- HTTP API 与浏览器控制台，当前前端端口 `3008`；`3001` 保留给 nginx。
+- HTTP API 与浏览器控制台，当前前端端口 `3000`；`3001` 保留给 nginx。
 - PostgreSQL 持久化快照与 Outbox，Redis 实时事件发布，MinIO 健康探针。
 - Celery Beat 到期任务分发、默认 Worker 执行和 MQTT 遥测适配器。
 - CrewAI/LLM 主决策运行时，设备写操作仍只能经过确定性策略门。
@@ -36,22 +36,22 @@ cp .env.example .env
 
 `.env` 默认连接本机 Docker Compose 提供的 PostgreSQL `5432`、Redis `6379`、MinIO `9000` 和 MQTT `1883`。不要把真实密码或 API Key 提交到 Git。
 
-完整 Compose 会启动 `web`、`worker-default`、`worker-vision`、`beat`、`postgres`、`redis`、`minio` 和 `mqtt`。仅运行 Python Web 进程时可使用 `./start.sh [port]`，端口参数默认是 `3008`，也可以通过 `FISHAGENT_PORT` 配置。
+完整 Compose 会启动 `web`、`worker-default`、`worker-vision`、`beat`、`postgres`、`redis`、`minio` 和 `mqtt`。仅运行 Python Web 进程时可使用 `./start.sh [port]`，端口参数默认是 `3000`，也可以通过 `FISHAGENT_PORT` 配置。
 
 ```bash
-./start.sh          # 监听 3008
+./start.sh          # 监听 3000
 ./start.sh 3010     # 监听 3010
 ```
 
 访问：
 
-- 控制台：http://localhost:3008
+- 控制台：http://localhost:3000
 - nginx 公共入口：http://localhost:3001
-- 健康检查：http://localhost:3008/health/ready
-- API 状态：http://localhost:3008/api/v1/state
-- OpenAPI：http://localhost:3008/api/docs
+- 健康检查：http://localhost:3000/health/ready
+- API 状态：http://localhost:3000/api/v1/state
+- OpenAPI：http://localhost:3000/api/docs
 
-应用进程监听 `3008`，nginx 公共入口监听 `3001` 并反代到 `127.0.0.1:3008`。配置模板位于 `deploy/nginx/fishagent-3001.conf`。
+应用进程监听 `3000`，nginx 公共入口监听 `3001` 并反代到 `127.0.0.1:3000`。配置模板位于 `deploy/nginx/fishagent-3001.conf`。
 
 ## 运行时基础设施
 
@@ -98,20 +98,20 @@ MQTT 主题格式为 `farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`，消
 ## 演示接口
 
 ```bash
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/demo/init
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/demo/success
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/demo/failure
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/demo/dedup
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/init
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/success
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/failure
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/dedup
 ```
 
 资产管理接口：
 
 ```bash
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/farms \
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/farms \
   -H 'Content-Type: application/json' \
   -d '{"id":"farm-a","name":"东区养殖场","location":"湖州"}'
 
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/ponds \
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/ponds \
   -H 'Content-Type: application/json' \
   -d '{"id":"P-01","farm_id":"farm-a","name":"P-01 精养池","species":"草鱼"}'
 ```
@@ -119,7 +119,7 @@ curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/ponds \
 传入真实形态的遥测批量读数：
 
 ```bash
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/telemetry/readings:batch \
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/telemetry/readings:batch \
   -H 'Content-Type: application/json' \
   -d '{"readings":[{"pond_id":"B-01","metric":"DO","value":2.1,"source_event_id":"manual-001"}]}'
 ```
@@ -127,10 +127,10 @@ curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/telemetr
 审批、人工任务和调度接口：
 
 ```bash
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/demo/approval
-curl --noproxy localhost,127.0.0.1 http://localhost:3008/api/v1/approvals
-curl --noproxy localhost,127.0.0.1 http://localhost:3008/api/v1/manual-tasks
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3008/api/v1/scheduled-jobs:dispatch
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/approval
+curl --noproxy localhost,127.0.0.1 http://localhost:3000/api/v1/approvals
+curl --noproxy localhost,127.0.0.1 http://localhost:3000/api/v1/manual-tasks
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/scheduled-jobs:dispatch
 ```
 
 `POST /api/v1/action-proposals/{id}/approve` 只允许已创建的 L2 提案进入设备执行；L3 只会创建人工任务。服务进程每 5 秒运行一次轻量调度循环，复核和巡查作业也可以通过 `scheduled-jobs:dispatch` 显式触发。

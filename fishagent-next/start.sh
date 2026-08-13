@@ -11,7 +11,7 @@ if [ "$#" -gt 1 ]; then
   echo "usage: $0 [port]" >&2
   exit 2
 fi
-port="${1:-${FISHAGENT_PORT:-3008}}"
+port="${1:-${FISHAGENT_PORT:-3000}}"
 if ! [[ "$port" =~ ^[0-9]+$ ]] || ((10#$port < 1 || 10#$port > 65535)); then
   echo "invalid port: $port (expected 1-65535)" >&2
   exit 2

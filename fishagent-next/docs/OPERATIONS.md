@@ -9,7 +9,7 @@ cp .env.example .env
 ./stop.sh
 ```
 
-外部入口是 `http://localhost:3001`，应用直连检查是 `http://localhost:3008/health/ready`。`health/live` 只表示进程存活，`health/ready` 会检查 PostgreSQL、Redis 和 MinIO 能力。
+外部入口是 `http://localhost:3001`，应用直连检查是 `http://localhost:3000/health/ready`。`health/live` 只表示进程存活，`health/ready` 会检查 PostgreSQL、Redis 和 MinIO 能力。
 
 ## 故障处理
 

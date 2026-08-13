@@ -259,7 +259,7 @@ def page() -> str:
       <img src="/static/fish.svg" alt="FishAgent">
       <div>
         <h1>智渔 Agent 控制台</h1>
-        <div class="topline">实时运营控制台 · Nginx 入口 3001 · 应用服务 3008 · 安全策略门开启</div>
+        <div class="topline">实时运营控制台 · Nginx 入口 3001 · 应用服务 3000 · 安全策略门开启</div>
       </div>
     </div>
     <div class="header-metrics" id="top_metrics"></div>

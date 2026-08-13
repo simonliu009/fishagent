@@ -60,7 +60,7 @@ class LLMConfig:
 @dataclass
 class AppConfig:
     host: str = "0.0.0.0"
-    port: int = 3008
+    port: int = 3000
     public_port: int = 3001
     database_url: str = ""
     redis_url: str = ""
@@ -85,7 +85,7 @@ class AppConfig:
     def from_env(cls) -> "AppConfig":
         return cls(
             host=os.environ.get("FISHAGENT_HOST", "0.0.0.0"),
-            port=int(os.environ.get("FISHAGENT_PORT", "3008")),
+            port=int(os.environ.get("FISHAGENT_PORT", "3000")),
             public_port=int(os.environ.get("FISHAGENT_PUBLIC_PORT", "3001")),
             database_url=os.environ.get("FISHAGENT_DATABASE_URL", ""),
             redis_url=os.environ.get("FISHAGENT_REDIS_URL", ""),
