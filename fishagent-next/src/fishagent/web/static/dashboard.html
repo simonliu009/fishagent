@@ -1,0 +1,1130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>智渔 Agent 2.0</title>
+  <link rel="icon" href="/static/fish.svg">
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      --bg: #f4f8f7;
+      --surface: #ffffff;
+      --surface-alt: #f8fbfa;
+      --ink: #15211e;
+      --muted: #65736f;
+      --line: #dbe5e1;
+      --line-strong: #c6d4cf;
+      --brand: #07966f;
+      --brand-dark: #087257;
+      --brand-soft: #e7f8f2;
+      --blue: #315adf;
+      --blue-soft: #eef2ff;
+      --violet: #5746d9;
+      --amber: #c47a08;
+      --amber-soft: #fff7df;
+      --red: #dc3434;
+      --red-soft: #fff0f0;
+      --shadow: 0 8px 22px rgba(24, 48, 42, .07);
+    }
+    body.dark {
+      --bg: #111917;
+      --surface: #18221f;
+      --surface-alt: #1d2925;
+      --ink: #edf7f3;
+      --muted: #9eb0aa;
+      --line: #30413b;
+      --line-strong: #42564f;
+      --brand-soft: #183c31;
+      --blue-soft: #252c4b;
+      --amber-soft: #40351d;
+      --red-soft: #412424;
+      --shadow: 0 8px 24px rgba(0, 0, 0, .18);
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+    }
+    button, input, select { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+    .app-header {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 10px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; min-width: 230px; }
+    .brand img { width: 40px; height: 40px; border-radius: 8px; }
+    .brand-name { font-size: 18px; font-weight: 800; line-height: 1.1; }
+    .brand-name b { color: var(--brand); }
+    .brand-subtitle { margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .header-actions { display: flex; align-items: center; gap: 6px; }
+    .icon-button {
+      width: 36px;
+      height: 36px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+    }
+    .icon-button:hover { background: var(--surface-alt); border-color: var(--line); }
+    .icon-button svg { width: 18px; height: 18px; }
+    .user-chip {
+      min-width: 46px;
+      height: 34px;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 17px;
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .primary-nav {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-button {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      background: transparent;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .nav-button:hover { color: var(--ink); background: var(--surface-alt); }
+    .nav-button.active { color: var(--brand-dark); border-color: var(--brand); }
+    .nav-button svg { width: 17px; height: 17px; }
+    .app-main { width: min(1500px, 100%); margin: 0 auto; padding: 22px; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .tool-panel, .patrol-panel, .metric-tile {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .patrol-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr);
+      gap: 18px;
+      padding: 20px;
+      border-color: #bdcafc;
+      background: var(--blue-soft);
+    }
+    .patrol-main { min-width: 0; padding-right: 18px; border-right: 1px solid #cdd5f4; }
+    .panel-heading, .section-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .heading-copy { display: flex; align-items: center; gap: 11px; min-width: 0; }
+    .heading-icon {
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      display: grid;
+      place-items: center;
+      color: var(--violet);
+      background: var(--surface);
+      border: 1px solid #c8d1ff;
+      border-radius: 50%;
+    }
+    .heading-icon svg { width: 20px; height: 20px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 16px; }
+    h3 { font-size: 13px; }
+    .eyebrow { color: var(--muted); font-size: 11px; margin-top: 4px; }
+    .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .button {
+      min-height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 7px 11px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: var(--brand);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .button svg { width: 15px; height: 15px; }
+    .button:hover { background: var(--brand-dark); }
+    .button.secondary { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
+    .button.danger { color: var(--red); background: var(--surface); border-color: #f2baba; }
+    .button.amber { color: #fff; background: var(--amber); }
+    .button.small { min-height: 28px; padding: 5px 8px; }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      color: var(--brand-dark);
+      background: var(--brand-soft);
+      font-size: 11px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .status-badge.warning { color: #925800; background: var(--amber-soft); }
+    .status-badge.danger { color: var(--red); background: var(--red-soft); }
+    .status-badge.info { color: var(--blue); background: #eaf0ff; }
+    .patrol-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .summary-block {
+      min-height: 78px;
+      padding: 11px;
+      border: 1px solid #d5dcf8;
+      border-radius: 7px;
+      background: var(--surface);
+    }
+    .summary-label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+    .summary-label svg { width: 14px; height: 14px; }
+    .summary-value { margin-top: 7px; font-size: 14px; font-weight: 800; }
+    .summary-note { margin-top: 5px; color: var(--muted); font-size: 10px; }
+    .patrol-detail {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid #d5dcf8;
+      border-radius: 7px;
+      background: var(--surface);
+    }
+    .detail-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; }
+    .patrol-pond-list { display: grid; gap: 4px; margin-top: 7px; }
+    .patrol-pond-row {
+      display: grid;
+      grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 32px;
+      padding: 5px 8px;
+      background: var(--surface-alt);
+      border-radius: 5px;
+      font-size: 11px;
+    }
+    .dot { width: 8px; height: 8px; display: inline-block; border-radius: 50%; background: var(--brand); }
+    .dot.warning { background: var(--amber); }
+    .dot.danger { background: var(--red); }
+    .countdown { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+    .countdown-title { display: flex; align-items: center; gap: 7px; color: var(--violet); font-size: 12px; font-weight: 800; }
+    .countdown-title svg { width: 17px; height: 17px; }
+    .countdown-time { margin-top: 8px; font-size: 16px; font-weight: 850; }
+    .countdown-box {
+      margin-top: 10px;
+      padding: 12px;
+      border: 1px solid #bdcafc;
+      border-radius: 7px;
+      background: var(--surface);
+    }
+    .countdown-number { margin-top: 5px; color: var(--violet); font-size: 23px; font-weight: 900; font-variant-numeric: tabular-nums; }
+    .countdown-note { margin-top: 9px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .metric-tile { min-height: 84px; display: flex; align-items: center; gap: 11px; padding: 14px; box-shadow: none; }
+    .metric-tile.alert { border-color: #efb5b5; }
+    .metric-icon {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      display: grid;
+      place-items: center;
+      color: var(--brand);
+      background: var(--brand-soft);
+      border-radius: 6px;
+    }
+    .metric-icon.red { color: var(--red); background: var(--red-soft); }
+    .metric-icon.amber { color: var(--amber); background: var(--amber-soft); }
+    .metric-icon.blue { color: var(--blue); background: var(--blue-soft); }
+    .metric-icon svg { width: 17px; height: 17px; }
+    .metric-copy { min-width: 0; flex: 1; }
+    .metric-label { color: var(--muted); font-size: 11px; }
+    .metric-number { margin-left: 5px; color: var(--brand-dark); font-size: 18px; font-weight: 900; }
+    .metric-note { margin-top: 6px; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dashboard-grid { display: grid; grid-template-columns: minmax(360px, .8fr) minmax(0, 1.2fr); gap: 14px; margin-top: 14px; }
+    .tool-panel { min-width: 0; padding: 16px; }
+    .section-heading { align-items: center; margin-bottom: 14px; }
+    .section-title { display: flex; align-items: center; gap: 8px; }
+    .section-title svg { width: 17px; height: 17px; color: var(--brand); }
+    .section-meta { color: var(--muted); font-size: 10px; }
+    .kanban { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; min-height: 200px; }
+    .kanban-column { min-width: 0; padding: 9px; border-radius: 7px; background: #fff9e8; }
+    .kanban-column.running { background: #eaf6fd; }
+    .kanban-column.done { background: #e9faf3; }
+    body.dark .kanban-column { background: #38321f; }
+    body.dark .kanban-column.running { background: #20333d; }
+    body.dark .kanban-column.done { background: #20382f; }
+    .kanban-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 11px; font-weight: 800; }
+    .kanban-count { min-width: 20px; padding: 2px 6px; border-radius: 10px; background: rgba(255,255,255,.75); text-align: center; }
+    .work-item { padding: 8px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .work-item:last-child { margin-bottom: 0; }
+    .work-item-title { font-size: 11px; font-weight: 750; line-height: 1.4; }
+    .work-item-meta { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .work-item-actions { display: flex; gap: 5px; margin-top: 7px; }
+    .empty { min-height: 70px; display: grid; place-items: center; color: var(--muted); font-size: 11px; text-align: center; }
+    .pond-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .pond-card { min-height: 112px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+    .pond-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .pond-name { min-width: 0; font-size: 11px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pond-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 9px; }
+    .pond-metric { min-height: 27px; padding: 6px; border-radius: 4px; color: var(--muted); background: var(--surface-alt); font-size: 9px; }
+    .pond-metric b { float: right; color: var(--ink); font-size: 10px; }
+    .pond-metric b.warning { color: var(--amber); }
+    .pond-metric b.danger { color: var(--red); }
+    .alert-list { display: grid; gap: 8px; max-height: 480px; overflow: auto; padding-right: 2px; }
+    .alert-item { padding: 11px; border: 1px solid #efb5b5; border-radius: 7px; background: var(--surface); }
+    .alert-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .alert-title { min-width: 0; font-size: 11px; font-weight: 800; }
+    .alert-time { flex: 0 0 auto; color: var(--muted); font-size: 9px; }
+    .alert-summary { margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .alert-cause { margin-top: 7px; padding: 7px; border-radius: 5px; background: var(--surface-alt); font-size: 9px; }
+    .flow-track { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 9px; color: var(--blue); font-size: 9px; text-align: center; }
+    .flow-step { position: relative; padding-top: 10px; }
+    .flow-step::before { content: ""; position: absolute; top: 3px; left: 0; right: 0; height: 2px; background: #c8dbff; }
+    .flow-step:first-child::before { left: 50%; }
+    .flow-step:last-child::before { right: 50%; }
+    .flow-step::after { content: ""; position: absolute; top: 0; left: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; background: var(--blue); }
+    .flow-step.failed { color: var(--red); }
+    .flow-step.failed::after { background: var(--red); }
+    .chart-wrap { position: relative; min-height: 310px; }
+    .trend-canvas { width: 100%; height: 280px; display: block; }
+    .chart-legend { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; min-height: 22px; margin-top: 6px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+    .legend-swatch { width: 8px; height: 8px; border-radius: 2px; }
+    .page-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 14px; }
+    .stack { display: grid; gap: 14px; align-content: start; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .field { display: grid; gap: 5px; min-width: 0; color: var(--muted); font-size: 10px; }
+    .field.wide { grid-column: 1 / -1; }
+    input, select {
+      width: 100%;
+      min-height: 36px;
+      padding: 7px 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--surface);
+      font-size: 12px;
+    }
+    .checkbox-field { display: flex; align-items: center; gap: 8px; min-height: 36px; color: var(--ink); font-size: 12px; }
+    .checkbox-field input { width: 16px; min-height: 16px; }
+    .message { min-height: 18px; margin-top: 8px; color: var(--muted); font-size: 10px; }
+    .run-list, .event-list { display: grid; gap: 7px; max-height: 520px; overflow: auto; }
+    .run-row, .event-row { padding: 10px; border-left: 3px solid var(--brand); background: var(--surface-alt); border-radius: 4px; }
+    .run-row-head, .event-row-head { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; font-weight: 750; }
+    .run-row-meta, .event-row-meta { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .run-steps { margin: 7px 0 0; padding-left: 18px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .asset-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .asset-stat { padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-alt); }
+    .asset-stat-label { color: var(--muted); font-size: 10px; }
+    .asset-stat-value { margin-top: 6px; font-size: 20px; font-weight: 900; }
+    .table-scroll { max-width: 100%; overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); background: var(--surface-alt); font-weight: 750; white-space: nowrap; }
+    td { min-width: 80px; }
+    .table-title { margin: 14px 0 7px; font-size: 12px; }
+    pre {
+      max-height: 520px;
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-radius: 6px;
+      color: #dce7e3;
+      background: #15201d;
+      font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .auth-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(11, 23, 19, .58);
+      backdrop-filter: blur(5px);
+    }
+    .auth-layer[hidden], .toast[hidden] { display: none; }
+    .auth-dialog {
+      width: min(390px, 100%);
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+    }
+    .modal-dialog { width: min(560px, 100%); }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+    .auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .auth-brand img { width: 44px; height: 44px; border-radius: 8px; }
+    .auth-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+    .toast {
+      position: fixed;
+      left: 18px;
+      bottom: 18px;
+      z-index: 60;
+      max-width: min(420px, calc(100vw - 36px));
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px 13px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      font-size: 11px;
+    }
+    .toast.error { color: var(--red); border-color: #efb5b5; background: var(--red-soft); }
+    .alert-capsule {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 40;
+      width: min(360px, calc(50vw - 18px));
+      max-width: calc(50vw - 18px);
+      min-height: 54px;
+      padding: 8px 12px;
+      border: 1px solid #e8a8a8;
+      border-radius: 999px;
+      color: var(--ink);
+      background: color-mix(in srgb, var(--red-soft) 92%, var(--surface));
+      box-shadow: 0 12px 32px rgba(130, 31, 31, .18);
+      text-align: left;
+      cursor: pointer;
+      transition: border-radius .18s ease, box-shadow .18s ease;
+    }
+    .alert-capsule[hidden] { display: none; }
+    .alert-capsule:hover, .alert-capsule:focus-within, .alert-capsule:focus {
+      width: min(var(--capsule-expanded-width, 360px), calc(50vw - 18px));
+      border-radius: 8px;
+      box-shadow: 0 16px 42px rgba(130, 31, 31, .24);
+    }
+    .alert-capsule-head {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) 18px;
+      align-items: center;
+      gap: 10px;
+    }
+    .alert-capsule-icon {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--red);
+    }
+    .alert-capsule-icon svg { width: 17px; height: 17px; }
+    .alert-capsule-copy { min-width: 0; }
+    .alert-capsule-copy b, .alert-capsule-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .alert-capsule-copy b { color: var(--red); font-size: 11px; }
+    .alert-capsule-copy span { margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .alert-capsule-head > svg { width: 16px; height: 16px; color: var(--red); }
+    .alert-capsule-list {
+      max-height: 0;
+      margin-top: 0;
+      overflow: hidden;
+      opacity: 0;
+      transition: max-height .2s ease, margin-top .2s ease, opacity .15s ease;
+    }
+    .alert-capsule:hover .alert-capsule-list, .alert-capsule:focus-within .alert-capsule-list, .alert-capsule:focus .alert-capsule-list {
+      max-height: min(320px, 42vh);
+      margin-top: 8px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      opacity: 1;
+    }
+    .capsule-alert {
+      padding: 8px 4px;
+      border-top: 1px solid color-mix(in srgb, var(--red) 18%, transparent);
+    }
+    .capsule-alert b, .capsule-alert span { display: block; }
+    .capsule-alert b { color: var(--ink); font-size: 10px; white-space: nowrap; }
+    .capsule-alert span { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+    .app-footer {
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 22px;
+      color: var(--muted);
+      background: var(--surface);
+      border-top: 1px solid var(--line);
+      font-size: 10px;
+    }
+    .system-ok { display: flex; align-items: center; gap: 6px; }
+    @media (max-width: 1080px) {
+      .patrol-panel, .dashboard-grid, .page-grid { grid-template-columns: 1fr; }
+      .patrol-main { padding-right: 0; padding-bottom: 16px; border-right: 0; border-bottom: 1px solid #cdd5f4; }
+      .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      .app-header { padding: 9px 12px; }
+      .brand-subtitle { display: none; }
+      .brand { min-width: 0; }
+      .brand-name { font-size: 16px; }
+      .primary-nav { overflow-x: auto; grid-template-columns: repeat(8, minmax(120px, 1fr)); }
+      .nav-button { min-height: 44px; }
+      .app-main { padding: 12px; }
+      .patrol-panel, .tool-panel { padding: 12px; }
+      .panel-heading { align-items: stretch; flex-direction: column; }
+      .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary { grid-template-columns: 1fr; }
+      .metric-tile { min-height: 68px; }
+      .patrol-pond-row { grid-template-columns: 1fr; gap: 3px; }
+      .chart-wrap { min-height: 250px; }
+      .trend-canvas { height: 220px; }
+      .app-footer { align-items: flex-start; flex-direction: column; }
+      .header-actions .icon-button:first-child { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <img src="/static/fish.svg" alt="智渔 Agent">
+      <div>
+        <div class="brand-name">智渔 Agent <b>2.0</b></div>
+        <div class="brand-subtitle">智能监控与闭环处置系统</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="icon-button" type="button" title="刷新数据" onclick="refresh()"><i data-lucide="refresh-cw"></i></button>
+      <button class="icon-button" type="button" title="模型配置" onclick="openLlmDialog()"><i data-lucide="settings"></i></button>
+      <button class="icon-button" type="button" title="切换主题" onclick="toggleTheme()"><i data-lucide="moon"></i></button>
+      <button id="user_chip" class="user-chip" type="button" title="退出登录" onclick="logout()">管理</button>
+    </div>
+  </header>
+
+  <nav class="primary-nav" aria-label="主导航">
+    <button class="nav-button active" type="button" data-view="monitor" onclick="switchView('monitor')"><i data-lucide="layout-dashboard"></i><span>监控总览</span></button>
+    <button class="nav-button" type="button" data-view="assistant" onclick="switchView('assistant')"><i data-lucide="bot"></i><span>AI 助手</span></button>
+    <button class="nav-button" type="button" data-view="management" onclick="switchView('management')"><i data-lucide="waves"></i><span>养殖管理</span></button>
+    <button class="nav-button" type="button" data-view="analytics" onclick="switchView('analytics')"><i data-lucide="chart-no-axes-combined"></i><span>数据分析</span></button>
+    <button class="nav-button" type="button" data-view="assets" onclick="switchView('assets')"><i data-lucide="square-plus"></i><span>资产录入</span></button>
+    <button class="nav-button" type="button" data-view="work" onclick="switchView('work')"><i data-lucide="clipboard-check"></i><span>审批任务</span></button>
+    <button class="nav-button" type="button" data-view="schedules" onclick="switchView('schedules')"><i data-lucide="calendar-clock"></i><span>调度中心</span></button>
+    <button class="nav-button" type="button" data-view="audit" onclick="switchView('audit')"><i data-lucide="scroll-text"></i><span>系统审计</span></button>
+  </nav>
+
+  <main class="app-main">
+    <section id="view_monitor" class="view active">
+      <section class="patrol-panel">
+        <div class="patrol-main">
+          <div class="panel-heading">
+            <div class="heading-copy">
+              <span class="heading-icon"><i data-lucide="scan-line"></i></span>
+              <div><h1>Agent 巡查总览</h1><p class="eyebrow">感知 → 决策 → 执行 → 复核，全程留痕</p></div>
+            </div>
+            <div class="actions">
+              <button class="button danger" type="button" onclick="runDemo('failure')"><i data-lucide="triangle-alert"></i>演示故障</button>
+              <button class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
+            </div>
+          </div>
+          <div id="patrol_summary" class="patrol-summary-grid"></div>
+          <div class="patrol-detail">
+            <div class="detail-head"><b>逐塘巡检明细</b><span id="patrol_scope">0 个池塘</span></div>
+            <div id="patrol_pond_list" class="patrol-pond-list"></div>
+          </div>
+        </div>
+        <aside class="countdown">
+          <div class="countdown-title"><i data-lucide="shield-check"></i>下次自动巡查</div>
+          <div id="next_patrol_time" class="countdown-time">--</div>
+          <div class="countdown-box">
+            <div class="eyebrow">距下次巡查还有</div>
+            <div id="countdown_number" class="countdown-number">-- 分 -- 秒</div>
+          </div>
+          <p class="countdown-note">调度到期后由 Worker 领取任务；异常事件进入审批、执行与复核闭环。</p>
+        </aside>
+      </section>
+
+      <div id="metric_grid" class="metric-grid"></div>
+
+      <div class="dashboard-grid">
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="bot"></i>Agent 执行中心</h2><span class="section-meta">审批 · 任务 · 运行</span></div>
+          <div id="execution_kanban" class="kanban"></div>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="droplets"></i>水质监控面板</h2><span id="water_meta" class="section-meta"></span></div>
+          <div id="pond_grid" class="pond-grid"></div>
+        </section>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="bell-ring"></i>告警列表</h2><span id="alert_meta" class="status-badge danger">0 条未关闭</span></div>
+          <div id="alert_list" class="alert-list"></div>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="chart-spline"></i>溶解氧趋势</h2><span class="section-meta">最新 200 条读数</span></div>
+          <div class="chart-wrap"><canvas id="monitor_chart" class="trend-canvas"></canvas><div id="monitor_legend" class="chart-legend"></div></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="view_assistant" class="view">
+      <div class="page-grid">
+        <div class="stack">
+          <section class="tool-panel">
+            <div class="section-heading"><h2 class="section-title"><i data-lucide="message-square-text"></i>Agent 任务台</h2><span class="status-badge info">CrewAI / LLM</span></div>
+            <div class="form-grid">
+              <label class="field wide">任务目标<input id="agent_goal" value="巡查全场" placeholder="例如：检查 B-01 溶氧并给出处置建议"></label>
+              <label class="field">指定池塘<input id="agent_pond_id" placeholder="B-01"></label>
+              <div class="field"><span>&nbsp;</span><button class="button" type="button" onclick="runAgentGoal()"><i data-lucide="send"></i>提交目标</button></div>
+            </div>
+            <div id="agent_message" class="message"></div>
+          </section>
+          <section class="tool-panel">
+            <div class="section-heading"><h2 class="section-title"><i data-lucide="workflow"></i>Agent 运行轨迹</h2><span id="run_meta" class="section-meta"></span></div>
+            <div id="run_list" class="run-list"></div>
+          </section>
+        </div>
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="radio"></i>实时事件</h2><span class="section-meta">Outbox / Redis</span></div>
+          <div id="assistant_events" class="event-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="view_management" class="view">
+      <div id="asset_summary" class="asset-summary"></div>
+      <section class="tool-panel" style="margin-top:14px">
+        <div class="section-heading"><h2 class="section-title"><i data-lucide="table-properties"></i>资产台账</h2><span class="section-meta">实时快照</span></div>
+        <div id="asset_tables" class="table-scroll"></div>
+      </section>
+    </section>
+
+    <section id="view_analytics" class="view">
+      <div class="page-grid">
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="chart-spline"></i>溶解氧数据分析</h2><span class="section-meta">按池塘分组</span></div>
+          <div class="chart-wrap"><canvas id="analytics_chart" class="trend-canvas"></canvas><div id="analytics_legend" class="chart-legend"></div></div>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="activity"></i>领域事件</h2><span id="event_meta" class="section-meta"></span></div>
+          <div id="analytics_events" class="event-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="view_assets" class="view">
+      <section class="tool-panel">
+        <div class="section-heading"><h2 class="section-title"><i data-lucide="square-plus"></i>资产录入</h2><span class="section-meta">养殖场 / 池塘 / 传感器 / 设备 / 摄像头</span></div>
+        <div class="form-grid">
+          <label class="field">资产类型<select id="asset_type" onchange="syncAssetForm()"><option value="farms">养殖场</option><option value="ponds">池塘</option><option value="sensors">传感器</option><option value="devices">设备</option><option value="cameras">摄像头</option></select></label>
+          <label class="field">名称<input id="asset_name" placeholder="例如：B-02 精养池"></label>
+          <label class="field">ID<input id="asset_id" placeholder="留空自动生成"></label>
+          <label id="asset_farm_wrap" class="field">所属养殖场<input id="asset_farm_id" value="farm-demo"></label>
+          <label id="asset_pond_wrap" class="field">所属池塘<input id="asset_pond_id" value="B-01"></label>
+          <label id="asset_species_wrap" class="field">养殖品种<input id="asset_species" placeholder="加州鲈"></label>
+          <label id="asset_metric_wrap" class="field">指标 / 能力<input id="asset_metric" placeholder="DO 或 aeration"></label>
+          <label id="asset_unit_wrap" class="field">单位 / 来源<input id="asset_unit" placeholder="mg/L 或 HTTP_SNAPSHOT"></label>
+          <label id="asset_source_wrap" class="field wide">来源地址<input id="asset_source_url" placeholder="http://... 或 rtsp://..."></label>
+          <label id="asset_state_wrap" class="field">状态<input id="asset_state" placeholder="ONLINE / off"></label>
+        </div>
+        <div class="actions"><button class="button" type="button" onclick="createAsset()"><i data-lucide="plus"></i>创建资产</button><button class="button secondary" type="button" onclick="initializeDemo()"><i data-lucide="database"></i>初始化演示资产</button></div>
+        <div id="asset_message" class="message"></div>
+      </section>
+    </section>
+
+    <section id="view_work" class="view">
+      <section class="tool-panel">
+        <div class="section-heading"><h2 class="section-title"><i data-lucide="clipboard-check"></i>审批与人工任务</h2><span class="section-meta">L2 审批 · L3 人工</span></div>
+        <div id="management_work"></div>
+      </section>
+    </section>
+
+    <section id="view_schedules" class="view">
+      <section class="tool-panel">
+        <div class="section-heading"><h2 class="section-title"><i data-lucide="calendar-clock"></i>调度中心</h2><span class="status-badge info">Worker / Beat</span></div>
+        <div class="form-grid">
+          <label class="field">调度名称<input id="schedule_name" value="全场巡查"></label>
+          <label class="field">周期（秒）<input id="schedule_interval" type="number" min="5" value="300"></label>
+        </div>
+        <div class="actions"><button class="button" type="button" onclick="createSchedule()"><i data-lucide="calendar-plus"></i>创建调度</button><button class="button secondary" type="button" onclick="dispatchJobs()"><i data-lucide="play"></i>处理到期作业</button></div>
+        <div id="schedule_list" class="message"></div>
+      </section>
+    </section>
+
+    <section id="view_audit" class="view">
+      <div class="page-grid">
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="scroll-text"></i>审计日志</h2><a class="button secondary small" href="/api/v1/audit-events/export?format=csv"><i data-lucide="download"></i>导出 CSV</a></div>
+          <div id="audit_table" class="table-scroll"></div>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="braces"></i>原始状态</h2><span class="section-meta">JSON</span></div>
+          <pre id="raw_state"></pre>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer"><span>© 2026 智渔 Agent 2.0 · 智能监控与闭环处置系统</span><span class="system-ok"><span class="dot"></span><span id="footer_status">系统运行正常</span></span></footer>
+
+  <div id="auth_layer" class="auth-layer" hidden>
+    <form class="auth-dialog" onsubmit="login(event)">
+      <div class="auth-brand"><img src="/static/fish.svg" alt=""><div><h2>登录智渔 Agent</h2><p class="eyebrow">运营控制台身份验证</p></div></div>
+      <div class="form-grid">
+        <label class="field wide">用户名<input id="auth_username" value="admin" autocomplete="username"></label>
+        <label class="field wide">密码<input id="auth_password" type="password" autocomplete="current-password"></label>
+      </div>
+      <div id="auth_message" class="message"></div>
+      <div class="auth-actions"><button class="button" type="submit"><i data-lucide="log-in"></i>登录</button></div>
+    </form>
+  </div>
+  <div id="llm_layer" class="auth-layer" hidden onclick="closeLlmDialog(event)">
+    <section class="auth-dialog modal-dialog" role="dialog" aria-modal="true" aria-labelledby="llm_dialog_title">
+      <div class="modal-head">
+        <div><h2 id="llm_dialog_title">大模型 API 配置</h2><p class="eyebrow">Agent 决策模型与连接参数</p></div>
+        <button class="icon-button" type="button" title="关闭" onclick="closeLlmDialog()"><i data-lucide="x"></i></button>
+      </div>
+      <div class="section-heading"><span class="section-meta">配置保存在服务端</span><span id="llm_badge" class="status-badge warning">未启用</span></div>
+      <div class="form-grid">
+        <label class="field">提供商<select id="llm_provider"><option value="zai">Z.ai</option><option value="openai">OpenAI</option><option value="compatible">OpenAI-compatible</option></select></label>
+        <label class="field">模型<input id="llm_model"></label>
+        <label class="field wide">Base URL<input id="llm_base_url"></label>
+        <label class="field wide">API Key<input id="llm_api_key" type="password" placeholder="留空保持当前密钥"></label>
+        <label class="checkbox-field wide"><input id="llm_enabled" type="checkbox">启用模型驱动决策</label>
+      </div>
+      <div id="llm_message" class="message"></div>
+      <div class="auth-actions"><button class="button secondary" type="button" onclick="testLlm()"><i data-lucide="plug-zap"></i>测试连接</button><button class="button" type="button" onclick="saveLlm()"><i data-lucide="save"></i>保存</button></div>
+    </section>
+  </div>
+  <aside id="alert_capsule" class="alert-capsule" hidden tabindex="0" role="button" onclick="switchView('monitor')" onkeydown="if(event.key === 'Enter') switchView('monitor')" title="悬停展开未关闭告警">
+    <div class="alert-capsule-head">
+      <span class="alert-capsule-icon"><i data-lucide="triangle-alert"></i></span>
+      <span class="alert-capsule-copy"><b id="alert_capsule_title">检测到异常</b><span id="alert_capsule_detail">悬停查看全部告警</span></span>
+      <i data-lucide="chevron-up"></i>
+    </div>
+    <div id="alert_capsule_list" class="alert-capsule-list" aria-label="未关闭告警列表"></div>
+  </aside>
+  <div id="toast" class="toast" hidden></div>
+
+  <script>
+    let csrfToken = sessionStorage.getItem('fishagent_csrf') || '';
+    let currentState = {};
+    let currentLlm = {};
+    let currentView = 'monitor';
+    let countdownTarget = null;
+    const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
+    const closedIncidents = new Set(['RESOLVED', 'DISMISSED']);
+
+    function iconRefresh() { if (window.lucide) window.lucide.createIcons({attrs: {'stroke-width': 1.8}}); }
+    function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
+    function fmtDate(value, withSeconds = true) {
+      if (!value) return '--';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '--';
+      return new Intl.DateTimeFormat('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:withSeconds ? '2-digit' : undefined, hour12:false}).format(date).replaceAll('/', '-');
+    }
+    function fmtNumber(value, digits = 1) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '--'; }
+    function statusTone(status) {
+      if (['ESCALATED','ACTION_FAILED','FAILED','DEAD_LETTER','MANUAL_REQUIRED'].includes(status)) return 'danger';
+      if (['WAITING_APPROVAL','PENDING','RETRY_WAIT','VERIFY_PENDING','NEEDS_ATTENTION'].includes(status)) return 'warning';
+      if (['RUNNING','EXECUTING','QUEUED','SENT','ACKNOWLEDGED'].includes(status)) return 'info';
+      return '';
+    }
+    function badge(status, label) { return `<span class="status-badge ${statusTone(status)}">${escapeHtml(label || status || '--')}</span>`; }
+    function showToast(message, error = false) {
+      const node = document.getElementById('toast');
+      node.textContent = message;
+      node.className = `toast${error ? ' error' : ''}`;
+      node.hidden = false;
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => { node.hidden = true; }, 4200);
+    }
+    async function api(path, options = {}) {
+      const request = {...options, headers: {...(options.headers || {})}};
+      if (csrfToken && request.method && request.method !== 'GET') request.headers['X-CSRF-Token'] = csrfToken;
+      const response = await fetch(path, request);
+      const text = await response.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { data = {detail: text}; }
+      if (!response.ok) {
+        const error = new Error(data.detail || data.title || `HTTP ${response.status}`);
+        error.status = response.status;
+        if (response.status === 401) document.getElementById('auth_layer').hidden = false;
+        throw error;
+      }
+      return data;
+    }
+    async function login(event) {
+      if (event) event.preventDefault();
+      try {
+        const result = await api('/api/v1/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:document.getElementById('auth_username').value, password:document.getElementById('auth_password').value})});
+        csrfToken = result.csrf_token;
+        sessionStorage.setItem('fishagent_csrf', csrfToken);
+        document.getElementById('auth_layer').hidden = true;
+        document.getElementById('auth_message').textContent = '';
+        await refresh();
+      } catch (error) { document.getElementById('auth_message').textContent = `登录失败：${error.message}`; }
+    }
+    async function logout() {
+      try { await api('/api/v1/auth/logout', {method:'POST'}); } catch (_) {}
+      csrfToken = '';
+      sessionStorage.removeItem('fishagent_csrf');
+      document.getElementById('auth_layer').hidden = false;
+    }
+    function toggleTheme() {
+      document.body.classList.toggle('dark');
+      localStorage.setItem('fishagent_theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+      drawCharts();
+    }
+    function openLlmDialog() {
+      const layer = document.getElementById('llm_layer');
+      layer.hidden = false;
+      iconRefresh();
+      requestAnimationFrame(() => document.getElementById('llm_provider').focus());
+    }
+    function closeLlmDialog(event) {
+      const layer = document.getElementById('llm_layer');
+      if (event && event.target !== layer) return;
+      layer.hidden = true;
+    }
+    function switchView(name) {
+      currentView = name;
+      document.querySelectorAll('.view').forEach(node => node.classList.toggle('active', node.id === `view_${name}`));
+      document.querySelectorAll('.nav-button').forEach(node => node.classList.toggle('active', node.dataset.view === name));
+      if (name === 'analytics' || name === 'monitor') requestAnimationFrame(drawCharts);
+      iconRefresh();
+    }
+    function latestReading(pondId) {
+      return [...(currentState.readings || [])].reverse().find(item => item.pond_id === pondId && item.metric === 'DO');
+    }
+    function activeIncident(pondId) {
+      return [...(currentState.incidents || [])].reverse().find(item => item.pond_id === pondId && !closedIncidents.has(item.status));
+    }
+    function pondCondition(pond) {
+      const reading = latestReading(pond.id);
+      const incident = activeIncident(pond.id);
+      if (incident && ['ESCALATED','ACTION_FAILED','MANUAL_REQUIRED'].includes(incident.status)) return {tone:'danger', label:'严重'};
+      if (incident || (reading && Number(reading.value) < Number(pond.dissolved_oxygen_min))) return {tone:'warning', label:'警告'};
+      return {tone:'', label:reading ? '正常' : '待接入'};
+    }
+    function renderPatrol() {
+      const runs = currentState.agent_runs || [];
+      const patrolRuns = runs.filter(run => String(run.goal).includes('巡查'));
+      const lastRun = patrolRuns.at(-1);
+      const findings = currentState.patrol_findings || [];
+      const abnormal = findings.filter(item => item.status !== 'NORMAL').length;
+      const commands = currentState.commands || [];
+      const confirmed = commands.filter(item => item.status === 'CONFIRMED').length;
+      document.getElementById('patrol_summary').innerHTML = [
+        ['clock-3','上次巡查', lastRun ? fmtDate(lastRun.steps?.at(-1)?.created_at) : '尚未执行', lastRun?.stop_reason || '等待自动触发'],
+        ['triangle-alert','巡查结果', abnormal ? `发现 ${abnormal} 处异常` : '未发现新异常', `已形成 ${findings.length} 条巡查结论`],
+        ['activity','执行情况', `${confirmed} 次自动处置`, `${commands.length - confirmed} 项待确认或失败`]
+      ].map(item => `<div class="summary-block"><div class="summary-label"><i data-lucide="${item[0]}"></i>${item[1]}</div><div class="summary-value">${escapeHtml(item[2])}</div><div class="summary-note">${escapeHtml(item[3])}</div></div>`).join('');
+      const ponds = currentState.ponds || [];
+      document.getElementById('patrol_scope').textContent = `${ponds.length} 个池塘 · 可滚动查看`;
+      document.getElementById('patrol_pond_list').innerHTML = ponds.length ? ponds.slice(0, 10).map(pond => {
+        const reading = latestReading(pond.id);
+        const condition = pondCondition(pond);
+        return `<div class="patrol-pond-row"><span><span class="dot ${condition.tone}"></span>　<b>${escapeHtml(pond.id)}</b> ${escapeHtml(pond.name)}</span><span>DO ${reading ? `${fmtNumber(reading.value)} ${escapeHtml(reading.unit)}` : '暂无读数'}</span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div>`;
+      }).join('') : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
+      const schedules = (currentState.schedules || []).filter(item => item.status === 'ACTIVE' && item.job_type === 'patrol');
+      const next = schedules.map(item => new Date(item.next_run_at)).filter(date => !Number.isNaN(date.getTime())).sort((a,b) => a-b)[0];
+      countdownTarget = next || new Date(Date.now() + 30 * 60 * 1000);
+      document.getElementById('next_patrol_time').textContent = fmtDate(countdownTarget);
+      updateCountdown();
+    }
+    function updateCountdown() {
+      if (!countdownTarget) return;
+      let seconds = Math.max(0, Math.floor((countdownTarget.getTime() - Date.now()) / 1000));
+      const hours = Math.floor(seconds / 3600);
+      seconds %= 3600;
+      const minutes = Math.floor(seconds / 60);
+      const tail = seconds % 60;
+      document.getElementById('countdown_number').textContent = hours ? `${hours} 时 ${String(minutes).padStart(2,'0')} 分` : `${String(minutes).padStart(2,'0')} 分 ${String(tail).padStart(2,'0')} 秒`;
+    }
+    function renderMetrics() {
+      const active = (currentState.incidents || []).filter(item => !closedIncidents.has(item.status));
+      const openTasks = (currentState.manual_tasks || []).filter(item => item.status === 'OPEN');
+      const pendingApprovals = (currentState.approvals || []).filter(item => item.status === 'PENDING');
+      const devices = currentState.devices || [];
+      const healthy = devices.filter(item => item.healthy).length;
+      const metrics = [
+        ['waves','养殖池', currentState.ponds?.length || 0, `${currentState.farms?.length || 0} 个养殖场`, ''],
+        ['triangle-alert','活跃告警', active.length, `${active.filter(item => item.status === 'ESCALATED').length} 条已升级`, active.length ? 'alert' : ''],
+        ['clipboard-list','今日任务', openTasks.length + pendingApprovals.length, `${pendingApprovals.length} 待批 · ${openTasks.length} 人工`, ''],
+        ['wifi','设备在线', devices.length ? `${Math.round(healthy / devices.length * 100)}%` : '--', `${healthy}/${devices.length} 台健康`, '']
+      ];
+      document.getElementById('metric_grid').innerHTML = metrics.map((item,index) => `<div class="metric-tile ${item[4]}"><span class="metric-icon ${index===1?'red':index===2?'amber':index===3?'blue':''}"><i data-lucide="${item[0]}"></i></span><div class="metric-copy"><div><span class="metric-label">${item[1]}</span><span class="metric-number">${item[2]}</span></div><div class="metric-note">${item[3]}</div></div></div>`).join('');
+    }
+    function taskItem(title, meta, actions = '') { return `<div class="work-item"><div class="work-item-title">${escapeHtml(title)}</div><div class="work-item-meta">${escapeHtml(meta)}</div>${actions ? `<div class="work-item-actions">${actions}</div>` : ''}</div>`; }
+    function renderExecution() {
+      const tasks = currentState.manual_tasks || [];
+      const approvals = currentState.approvals || [];
+      const proposals = currentState.action_proposals || [];
+      const runs = currentState.agent_runs || [];
+      const pendingItems = tasks.filter(item => item.status === 'OPEN').map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, `<button class="button small" onclick="completeTask('${item.id}')">完成</button>`));
+      approvals.filter(item => item.status === 'PENDING').forEach(item => {
+        const proposal = proposals.find(proposal => proposal.id === item.proposal_id) || {};
+        pendingItems.unshift(taskItem(proposal.rationale || '设备动作审批', `${proposal.pond_id || '--'} · 风险 ${proposal.risk || '--'}`, `<button class="button small" onclick="approveProposal('${proposal.id}')">批准</button><button class="button secondary small" onclick="rejectProposal('${proposal.id}')">拒绝</button>`));
+      });
+      const runningItems = runs.filter(item => ['RUNNING','WAITING_APPROVAL'].includes(item.status)).slice(-6).map(item => taskItem(item.goal, item.stop_reason || item.status));
+      const completedItems = runs.filter(item => ['COMPLETED','FAILED','CANCELLED'].includes(item.status)).slice(-6).reverse().map(item => taskItem(item.goal, item.stop_reason || item.status));
+      const columns = [
+        ['待处理','',pendingItems], ['进行中','running',runningItems], ['已完成','done',completedItems]
+      ];
+      document.getElementById('execution_kanban').innerHTML = columns.map(column => `<div class="kanban-column ${column[1]}"><div class="kanban-head"><span>${column[0]}</span><span class="kanban-count">${column[2].length}</span></div>${column[2].join('') || '<div class="empty">暂无任务</div>'}</div>`).join('');
+      document.getElementById('management_work').innerHTML = pendingItems.join('') || '<div class="empty">当前没有待审批或人工任务</div>';
+    }
+    function renderWater() {
+      const ponds = currentState.ponds || [];
+      document.getElementById('water_meta').textContent = `${ponds.length} 个养殖单元`;
+      document.getElementById('pond_grid').innerHTML = ponds.length ? ponds.map(pond => {
+        const reading = latestReading(pond.id);
+        const condition = pondCondition(pond);
+        const sensor = (currentState.sensors || []).find(item => item.pond_id === pond.id && item.metric === 'DO');
+        const health = (currentState.sensor_health || []).find(item => item.sensor_id === sensor?.id);
+        const device = (currentState.devices || []).find(item => item.pond_id === pond.id);
+        const doTone = reading && Number(reading.value) < Number(pond.dissolved_oxygen_min) ? 'danger' : '';
+        return `<article class="pond-card"><div class="pond-head"><span class="pond-name"><span class="dot ${condition.tone}"></span>　${escapeHtml(pond.id)}　<span style="font-weight:500;color:var(--muted)">${escapeHtml(pond.species || '')}</span></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div><div class="pond-metrics"><span class="pond-metric">DO <b class="${doTone}">${reading ? fmtNumber(reading.value) : '--'}</b></span><span class="pond-metric">安全线 <b>${fmtNumber(pond.dissolved_oxygen_min)}</b></span><span class="pond-metric">传感器 <b>${escapeHtml(health?.status || sensor?.status || '--')}</b></span><span class="pond-metric">设备 <b>${escapeHtml(device?.shadow_state || '--')}</b></span></div></article>`;
+      }).join('') : '<div class="empty">暂无水质监控对象</div>';
+    }
+    function renderAlerts() {
+      const incidents = (currentState.incidents || []).filter(item => !closedIncidents.has(item.status)).reverse();
+      const commands = currentState.commands || [];
+      document.getElementById('alert_meta').textContent = `${incidents.length} 条未关闭`;
+      const capsule = document.getElementById('alert_capsule');
+      capsule.hidden = incidents.length === 0;
+      if (incidents.length) {
+        const latest = incidents[0];
+        const longestAlert = Math.max(...incidents.map(item => `${item.pond_id || ''}${item.title || ''}${item.evidence?.at(-1)?.summary || ''}`.length));
+        capsule.style.setProperty('--capsule-expanded-width', `${Math.max(360, 96 + longestAlert * 11)}px`);
+        document.getElementById('alert_capsule_title').textContent = `${incidents.length} 条告警待处置 · ${latest.pond_id || '未知池塘'}`;
+        document.getElementById('alert_capsule_detail').textContent = latest.title || '悬停查看全部告警';
+        document.getElementById('alert_capsule_list').innerHTML = incidents.map(item => {
+          const evidence = item.evidence?.at(-1);
+          return `<article class="capsule-alert"><b>${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(evidence?.summary || item.status || '等待处置')}</span></article>`;
+        }).join('');
+      }
+      document.getElementById('alert_list').innerHTML = incidents.length ? incidents.map(item => {
+        const evidence = item.evidence?.at(-1);
+        const command = [...commands].reverse().find(command => command.pond_id === item.pond_id);
+        return `<article class="alert-item"><div class="alert-head"><div class="alert-title">${badge(item.status, item.risk)}　${escapeHtml(item.title)}</div><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span></div><div class="alert-summary">${escapeHtml(evidence?.summary || '等待证据')}</div><div class="alert-cause"><b>触发原因：</b>${escapeHtml(evidence?.refs?.join(', ') || '--')}${command ? `　<b>设备命令：</b>${escapeHtml(command.status)}` : ''}</div><div class="flow-track"><span class="flow-step">待处置</span><span class="flow-step">Agent 研判</span><span class="flow-step">执行/审批</span><span class="flow-step ${['ESCALATED','ACTION_FAILED'].includes(item.status)?'failed':''}">复核闭环</span></div></article>`;
+      }).join('') : '<div class="empty">当前没有未关闭告警</div>';
+    }
+    function renderRuns() {
+      const runs = [...(currentState.agent_runs || [])].reverse();
+      document.getElementById('run_meta').textContent = `${runs.length} 次运行`;
+      document.getElementById('run_list').innerHTML = runs.length ? runs.map(run => `<article class="run-row"><div class="run-row-head"><span>${escapeHtml(run.goal)}</span>${badge(run.status)}</div><div class="run-row-meta">停止原因：${escapeHtml(run.stop_reason || '--')} · 委派：${escapeHtml((run.delegated_agents || []).join(' → ') || '--')}</div>${run.steps?.length ? `<ol class="run-steps">${run.steps.slice(-5).map(step => `<li>${escapeHtml(step.agent)} / ${escapeHtml(step.action)}：${escapeHtml(step.summary)}</li>`).join('')}</ol>` : ''}</article>`).join('') : '<div class="empty">尚无 Agent 运行记录</div>';
+    }
+    function eventRows(limit = 30) {
+      return [...(currentState.events || [])].reverse().slice(0, limit).map(item => `<article class="event-row"><div class="event-row-head"><span>#${item.sequence} ${escapeHtml(item.event_type)}</span><span>${fmtDate(item.occurred_at, false)}</span></div><div class="event-row-meta">${escapeHtml(item.summary)}</div></article>`).join('') || '<div class="empty">暂无事件</div>';
+    }
+    function renderAssistant() {
+      renderRuns();
+      document.getElementById('assistant_events').innerHTML = eventRows(24);
+      document.getElementById('llm_provider').value = currentLlm.provider || 'zai';
+      document.getElementById('llm_model').value = currentLlm.model || '';
+      document.getElementById('llm_base_url').value = currentLlm.base_url || '';
+      document.getElementById('llm_enabled').checked = Boolean(currentLlm.enabled);
+      const badgeNode = document.getElementById('llm_badge');
+      badgeNode.className = `status-badge ${currentLlm.enabled ? '' : 'warning'}`;
+      badgeNode.textContent = currentLlm.enabled ? '已启用' : '未启用';
+      document.getElementById('llm_message').textContent = currentLlm.api_key_configured ? `密钥已配置：${currentLlm.api_key_preview}` : '尚未配置 API Key';
+    }
+    function syncAssetForm() {
+      const type = document.getElementById('asset_type').value;
+      document.getElementById('asset_farm_wrap').hidden = type !== 'ponds';
+      document.getElementById('asset_pond_wrap').hidden = !['sensors','devices','cameras'].includes(type);
+      document.getElementById('asset_species_wrap').hidden = type !== 'ponds';
+      document.getElementById('asset_metric_wrap').hidden = !['ponds','sensors','devices'].includes(type);
+      document.getElementById('asset_unit_wrap').hidden = !['sensors','cameras'].includes(type);
+      document.getElementById('asset_source_wrap').hidden = type !== 'cameras';
+      document.getElementById('asset_state_wrap').hidden = !['farms','sensors','devices','cameras'].includes(type);
+    }
+    function table(title, rows, columns) {
+      const heading = title ? `<h3 class="table-title">${title}</h3>` : '';
+      if (!rows.length) return `${heading}<div class="empty">暂无数据</div>`;
+      return `${heading}<table><thead><tr>${columns.map(column => `<th>${column[1]}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(column => `<td>${escapeHtml(row[column[0]] ?? '--')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    }
+    function renderManagement() {
+      const groups = [['养殖场','farms'],['池塘','ponds'],['传感器','sensors'],['设备','devices'],['摄像头','cameras']];
+      document.getElementById('asset_summary').innerHTML = groups.map(item => `<div class="asset-stat"><div class="asset-stat-label">${item[0]}</div><div class="asset-stat-value">${currentState[item[1]]?.length || 0}</div></div>`).join('');
+      const schedules = currentState.schedules || [];
+      const jobs = currentState.scheduled_jobs || [];
+      document.getElementById('schedule_list').innerHTML = schedules.length ? `${schedules.map(item => `<div class="work-item"><div class="work-item-title">${escapeHtml(item.name)} ${badge(item.status)}</div><div class="work-item-meta">每 ${item.interval_seconds} 秒 · 下次 ${fmtDate(item.next_run_at)}</div></div>`).join('')}<div class="message">最近作业 ${jobs.length} 条</div>` : '<div class="empty">暂无调度定义</div>';
+      document.getElementById('asset_tables').innerHTML = [
+        table('养殖场', currentState.farms || [], [['id','ID'],['name','名称'],['location','位置']]),
+        table('池塘', currentState.ponds || [], [['id','ID'],['farm_id','养殖场'],['name','名称'],['species','品种'],['dissolved_oxygen_min','DO 下限']]),
+        table('传感器', currentState.sensors || [], [['id','ID'],['pond_id','池塘'],['name','名称'],['metric','指标'],['status','状态']]),
+        table('设备', currentState.devices || [], [['id','ID'],['pond_id','池塘'],['name','名称'],['capability','能力'],['shadow_state','状态']]),
+        table('摄像头', currentState.cameras || [], [['id','ID'],['pond_id','池塘'],['name','名称'],['source_type','来源'],['status','状态']])
+      ].join('');
+      renderExecution();
+    }
+    function renderAnalytics() {
+      const audits = [...(currentState.audit_events || [])].reverse().slice(0, 60);
+      document.getElementById('audit_table').innerHTML = table('', audits, [['created_at','时间'],['actor_id','操作者'],['action','动作'],['resource_type','资源'],['resource_id','资源 ID']]);
+      document.getElementById('analytics_events').innerHTML = eventRows(40);
+      document.getElementById('event_meta').textContent = `${currentState.events?.length || 0} 条事件`;
+      document.getElementById('raw_state').textContent = JSON.stringify(currentState, null, 2);
+    }
+    function drawChart(canvasId, legendId) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas || canvas.offsetWidth < 40) return;
+      const readings = (currentState.readings || []).filter(item => item.metric === 'DO');
+      const grouped = {};
+      readings.forEach(item => { (grouped[item.pond_id] ||= []).push(item); });
+      const series = Object.entries(grouped).filter(item => item[1].length);
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.offsetWidth;
+      const height = canvas.offsetHeight;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      const context = canvas.getContext('2d');
+      context.scale(ratio, ratio);
+      context.clearRect(0, 0, width, height);
+      const style = getComputedStyle(document.body);
+      const muted = style.getPropertyValue('--muted').trim();
+      const line = style.getPropertyValue('--line').trim();
+      const surface = style.getPropertyValue('--surface').trim();
+      context.fillStyle = surface;
+      context.fillRect(0,0,width,height);
+      const pad = {left:36,right:14,top:12,bottom:30};
+      const chartWidth = width - pad.left - pad.right;
+      const chartHeight = height - pad.top - pad.bottom;
+      context.font = '10px system-ui';
+      context.strokeStyle = line;
+      context.fillStyle = muted;
+      context.lineWidth = 1;
+      for (let value = 0; value <= 8; value += 2) {
+        const y = pad.top + chartHeight - value / 8 * chartHeight;
+        context.beginPath(); context.moveTo(pad.left,y); context.lineTo(width-pad.right,y); context.stroke();
+        context.fillText(String(value), 17, y + 3);
+      }
+      if (!series.length) {
+        context.fillText('暂无溶解氧读数', Math.max(pad.left, width / 2 - 40), height / 2);
+        document.getElementById(legendId).innerHTML = '';
+        return;
+      }
+      const maxPoints = Math.max(...series.map(item => item[1].length), 2);
+      series.forEach((entry, index) => {
+        context.strokeStyle = colors[index % colors.length];
+        context.lineWidth = 2;
+        context.beginPath();
+        entry[1].forEach((reading, pointIndex) => {
+          const x = pad.left + pointIndex / Math.max(maxPoints - 1, 1) * chartWidth;
+          const y = pad.top + chartHeight - Math.min(8, Math.max(0, Number(reading.value))) / 8 * chartHeight;
+          pointIndex ? context.lineTo(x,y) : context.moveTo(x,y);
+        });
+        context.stroke();
+      });
+      const ticks = Math.min(6, maxPoints);
+      for (let index = 0; index < ticks; index += 1) {
+        const x = pad.left + index / Math.max(ticks - 1,1) * chartWidth;
+        const sample = series[0][1][Math.round(index / Math.max(ticks - 1,1) * (series[0][1].length - 1))];
+        context.fillStyle = muted;
+        context.fillText(sample ? fmtDate(sample.sampled_at, false).slice(-5) : '--', x - 13, height - 9);
+      }
+      document.getElementById(legendId).innerHTML = series.map((entry,index) => `<span class="legend-item"><span class="legend-swatch" style="background:${colors[index%colors.length]}"></span>${escapeHtml(entry[0])}</span>`).join('');
+    }
+    function drawCharts() { drawChart('monitor_chart','monitor_legend'); drawChart('analytics_chart','analytics_legend'); }
+    function renderAll() {
+      renderPatrol(); renderMetrics(); renderExecution(); renderWater(); renderAlerts(); renderAssistant(); renderManagement(); renderAnalytics();
+      document.getElementById('footer_status').textContent = '系统运行正常';
+      requestAnimationFrame(drawCharts);
+      iconRefresh();
+    }
+    async function refresh() {
+      try {
+        const [state, config, user] = await Promise.all([api('/api/v1/state'), api('/api/v1/config/llm'), api('/api/v1/me')]);
+        currentState = state;
+        currentLlm = config.llm || {};
+        document.getElementById('user_chip').textContent = user.role === 'admin' ? '管理' : escapeHtml(user.role);
+        renderAll();
+      } catch (error) {
+        if (error.status !== 401) { document.getElementById('footer_status').textContent = '数据刷新异常'; showToast(`刷新失败：${error.message}`, true); }
+      }
+    }
+    async function mutate(action, success) {
+      try { await action(); showToast(success); await refresh(); }
+      catch (error) { showToast(error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message, true); if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false; }
+    }
+    function initializeDemo() { return mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化'); }
+    function runDemo(mode) { return mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), '故障闭环演示已触发'); }
+    function runPatrol() { return mutate(() => api('/api/v1/patrol-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}), '巡查任务已完成'); }
+    function runAgentGoal() {
+      const goal = document.getElementById('agent_goal').value;
+      const pondId = document.getElementById('agent_pond_id').value.trim();
+      document.getElementById('agent_message').textContent = '任务提交中...';
+      return mutate(() => api('/api/v1/agent-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({goal,pond_id:pondId||null})}), 'Agent 任务已提交').finally(() => { document.getElementById('agent_message').textContent = ''; });
+    }
+    function saveLlm() {
+      const payload = {provider:document.getElementById('llm_provider').value,model:document.getElementById('llm_model').value,base_url:document.getElementById('llm_base_url').value,api_key:document.getElementById('llm_api_key').value,enabled:document.getElementById('llm_enabled').checked};
+      return mutate(() => api('/api/v1/config/llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}), '模型配置已保存');
+    }
+    async function testLlm() { try { const result = await api('/api/v1/config/llm/test',{method:'POST'}); showToast(`模型连接成功：HTTP ${result.status_code}`); } catch (error) { showToast(`模型连接失败：${error.message}`, true); } }
+    function createAsset() {
+      const type = document.getElementById('asset_type').value;
+      const payload = {id:document.getElementById('asset_id').value,name:document.getElementById('asset_name').value};
+      const metric = document.getElementById('asset_metric').value;
+      const state = document.getElementById('asset_state').value;
+      if (type === 'farms') payload.location = state;
+      if (type === 'ponds') Object.assign(payload,{farm_id:document.getElementById('asset_farm_id').value,species:document.getElementById('asset_species').value,dissolved_oxygen_min:Number(metric||4)});
+      if (type === 'sensors') Object.assign(payload,{pond_id:document.getElementById('asset_pond_id').value,metric:metric||'DO',unit:document.getElementById('asset_unit').value||'mg/L',status:state||'ONLINE'});
+      if (type === 'devices') Object.assign(payload,{pond_id:document.getElementById('asset_pond_id').value,capability:metric||'aeration',shadow_state:state||'off'});
+      if (type === 'cameras') Object.assign(payload,{pond_id:document.getElementById('asset_pond_id').value,source_type:document.getElementById('asset_unit').value||'HTTP_SNAPSHOT',source_url:document.getElementById('asset_source_url').value,status:state||'UNAVAILABLE'});
+      return mutate(() => api(`/api/v1/${type}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}), '资产已创建');
+    }
+    function approveProposal(id) { return mutate(() => api(`/api/v1/action-proposals/${id}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approver:'现场负责人',reason:'控制台批准'})}), '动作已批准'); }
+    function rejectProposal(id) { return mutate(() => api(`/api/v1/action-proposals/${id}/reject`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approver:'现场负责人',reason:'控制台拒绝'})}), '动作已拒绝'); }
+    function completeTask(id) { return mutate(() => api(`/api/v1/manual-tasks/${id}/complete`,{method:'POST'}), '人工任务已完成'); }
+    function createSchedule() { return mutate(() => api('/api/v1/schedules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('schedule_name').value,interval_seconds:Number(document.getElementById('schedule_interval').value),job_type:'patrol'})}), '巡查调度已创建'); }
+    function dispatchJobs() { return mutate(() => api('/api/v1/scheduled-jobs:dispatch',{method:'POST'}), '到期作业已处理'); }
+
+    if (localStorage.getItem('fishagent_theme') === 'dark') document.body.classList.add('dark');
+    syncAssetForm();
+    iconRefresh();
+    api('/api/v1/auth/config').then(config => { document.getElementById('auth_layer').hidden = !config.enabled; return refresh(); }).catch(() => { document.getElementById('auth_layer').hidden = false; });
+    setInterval(updateCountdown, 1000);
+    setInterval(refresh, 15000);
+    window.addEventListener('resize', () => requestAnimationFrame(drawCharts));
+    window.addEventListener('keydown', event => { if (event.key === 'Escape') closeLlmDialog(); });
+  </script>
+</body>
+</html>

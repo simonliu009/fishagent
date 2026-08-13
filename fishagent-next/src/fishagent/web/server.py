@@ -173,7 +173,7 @@ def test_llm_connection(config: Optional[LLMConfig] = None) -> dict:
         return {"ok": False, "status_code": 0, "endpoint": url, "detail": "无法连接模型服务：%s" % exc.reason}
 
 
-def page() -> str:
+def _legacy_page() -> str:
     return """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -595,6 +595,10 @@ setInterval(refresh, 5000);
 </script>
 </body>
 </html>"""
+
+
+def page() -> str:
+    return (STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
 
 
 class Handler(BaseHTTPRequestHandler):

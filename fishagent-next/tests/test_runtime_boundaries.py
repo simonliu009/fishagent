@@ -11,6 +11,20 @@ from fishagent.web.app import app
 
 
 class RuntimeBoundaryTests(unittest.TestCase):
+    def test_console_keeps_core_views_and_adds_operational_views(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        for view in ("monitor", "assistant", "management", "analytics"):
+            self.assertIn(f'id="view_{view}"', response.text)
+        for view in ("assets", "work", "schedules", "audit"):
+            self.assertIn(f'id="view_{view}"', response.text)
+        self.assertIn('onclick="openLlmDialog()"', response.text)
+        self.assertIn('id="llm_layer"', response.text)
+        self.assertIn('id="alert_capsule"', response.text)
+        self.assertIn('id="alert_capsule_list"', response.text)
+
     def test_fastapi_openapi_and_websocket_replay(self) -> None:
         with TestClient(app) as client:
             self.assertEqual(client.get("/health/live").status_code, 200)
