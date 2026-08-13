@@ -415,27 +415,29 @@
     }
     .toast.error { color: var(--red); border-color: #efb5b5; background: var(--red-soft); }
     .alert-capsule {
+      --capsule-collapsed-width: 56px;
       position: fixed;
-      right: 18px;
+      left: 0;
       bottom: 18px;
       z-index: 40;
-      width: min(360px, calc(50vw - 18px));
+      width: var(--capsule-collapsed-width);
       max-width: calc(50vw - 18px);
       min-height: 54px;
-      padding: 8px 12px;
+      padding: 9px 10px;
+      overflow: hidden;
       border: 1px solid #e8a8a8;
-      border-radius: 999px;
+      border-left: 0;
+      border-radius: 0 999px 999px 0;
       color: var(--ink);
       background: color-mix(in srgb, var(--red-soft) 92%, var(--surface));
       box-shadow: 0 12px 32px rgba(130, 31, 31, .18);
       text-align: left;
-      cursor: pointer;
-      transition: border-radius .18s ease, box-shadow .18s ease;
+      transition: width .2s ease, border-radius .18s ease, box-shadow .18s ease;
     }
     .alert-capsule[hidden] { display: none; }
-    .alert-capsule:hover, .alert-capsule:focus-within, .alert-capsule:focus {
-      width: min(var(--capsule-expanded-width, 360px), calc(50vw - 18px));
-      border-radius: 8px;
+    .alert-capsule:hover:not(.is-collapsed), .alert-capsule.is-pinned {
+      width: min(calc(var(--capsule-collapsed-width) * 4), calc(50vw - 18px));
+      border-radius: 0 8px 8px 0;
       box-shadow: 0 16px 42px rgba(130, 31, 31, .24);
     }
     .alert-capsule-head {
@@ -449,16 +451,34 @@
       height: 34px;
       display: grid;
       place-items: center;
+      padding: 0;
+      border: 0;
       border-radius: 50%;
       color: #fff;
       background: var(--red);
+      cursor: pointer;
     }
     .alert-capsule-icon svg { width: 17px; height: 17px; }
-    .alert-capsule-copy { min-width: 0; }
+    .alert-capsule-copy {
+      min-width: 0;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      color: inherit;
+      background: transparent;
+      text-align: left;
+      opacity: 0;
+      pointer-events: none;
+      cursor: pointer;
+      transition: opacity .12s ease;
+    }
+    .alert-capsule:hover:not(.is-collapsed) .alert-capsule-copy, .alert-capsule.is-pinned .alert-capsule-copy { opacity: 1; pointer-events: auto; }
     .alert-capsule-copy b, .alert-capsule-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .alert-capsule-copy b { color: var(--red); font-size: 11px; }
     .alert-capsule-copy span { margin-top: 2px; color: var(--muted); font-size: 10px; }
-    .alert-capsule-head > svg { width: 16px; height: 16px; color: var(--red); }
+    .alert-capsule-chevron { width: 16px; height: 16px; color: var(--red); opacity: 0; transition: opacity .12s ease, transform .18s ease; }
+    .alert-capsule:hover:not(.is-collapsed) .alert-capsule-chevron, .alert-capsule.is-pinned .alert-capsule-chevron { opacity: 1; }
+    .alert-capsule.is-pinned .alert-capsule-chevron { transform: rotate(90deg); }
     .alert-capsule-list {
       max-height: 0;
       margin-top: 0;
@@ -466,7 +486,7 @@
       opacity: 0;
       transition: max-height .2s ease, margin-top .2s ease, opacity .15s ease;
     }
-    .alert-capsule:hover .alert-capsule-list, .alert-capsule:focus-within .alert-capsule-list, .alert-capsule:focus .alert-capsule-list {
+    .alert-capsule:hover:not(.is-collapsed) .alert-capsule-list, .alert-capsule.is-pinned .alert-capsule-list {
       max-height: min(320px, 42vh);
       margin-top: 8px;
       overflow-y: auto;
@@ -474,9 +494,18 @@
       opacity: 1;
     }
     .capsule-alert {
+      width: 100%;
       padding: 8px 4px;
       border-top: 1px solid color-mix(in srgb, var(--red) 18%, transparent);
+      border-right: 0;
+      border-bottom: 0;
+      border-left: 0;
+      color: inherit;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
     }
+    .capsule-alert:hover { background: color-mix(in srgb, var(--red) 7%, transparent); }
     .capsule-alert b, .capsule-alert span { display: block; }
     .capsule-alert b { color: var(--ink); font-size: 10px; white-space: nowrap; }
     .capsule-alert span { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
@@ -592,7 +621,7 @@
       </div>
 
       <div class="dashboard-grid">
-        <section class="tool-panel">
+        <section id="alert_panel" class="tool-panel" tabindex="-1">
           <div class="section-heading"><h2 class="section-title"><i data-lucide="bell-ring"></i>告警列表</h2><span id="alert_meta" class="status-badge danger">0 条未关闭</span></div>
           <div id="alert_list" class="alert-list"></div>
         </section>
@@ -732,11 +761,11 @@
       <div class="auth-actions"><button class="button secondary" type="button" onclick="testLlm()"><i data-lucide="plug-zap"></i>测试连接</button><button class="button" type="button" onclick="saveLlm()"><i data-lucide="save"></i>保存</button></div>
     </section>
   </div>
-  <aside id="alert_capsule" class="alert-capsule" hidden tabindex="0" role="button" onclick="switchView('monitor')" onkeydown="if(event.key === 'Enter') switchView('monitor')" title="悬停展开未关闭告警">
+  <aside id="alert_capsule" class="alert-capsule" hidden aria-label="未关闭告警" onmouseleave="releaseAlertCapsuleHover()">
     <div class="alert-capsule-head">
-      <span class="alert-capsule-icon"><i data-lucide="triangle-alert"></i></span>
-      <span class="alert-capsule-copy"><b id="alert_capsule_title">检测到异常</b><span id="alert_capsule_detail">悬停查看全部告警</span></span>
-      <i data-lucide="chevron-up"></i>
+      <button id="alert_capsule_toggle" class="alert-capsule-icon" type="button" aria-expanded="false" title="固定展开告警" onclick="toggleAlertCapsule(event)"><i data-lucide="bell-ring"></i></button>
+      <button class="alert-capsule-copy" type="button" onclick="openAlertView(event)"><b id="alert_capsule_title">检测到异常</b><span id="alert_capsule_detail">点击查看告警信息</span></button>
+      <i class="alert-capsule-chevron" data-lucide="chevron-right"></i>
     </div>
     <div id="alert_capsule_list" class="alert-capsule-list" aria-label="未关闭告警列表"></div>
   </aside>
@@ -822,6 +851,28 @@
       const layer = document.getElementById('llm_layer');
       if (event && event.target !== layer) return;
       layer.hidden = true;
+    }
+    function toggleAlertCapsule(event) {
+      event.stopPropagation();
+      const capsule = document.getElementById('alert_capsule');
+      const expanded = !capsule.classList.contains('is-pinned');
+      capsule.classList.toggle('is-pinned', expanded);
+      capsule.classList.toggle('is-collapsed', !expanded);
+      const toggle = document.getElementById('alert_capsule_toggle');
+      toggle.setAttribute('aria-expanded', String(expanded));
+      toggle.title = expanded ? '收起告警' : '固定展开告警';
+    }
+    function releaseAlertCapsuleHover() {
+      document.getElementById('alert_capsule').classList.remove('is-collapsed');
+    }
+    function openAlertView(event) {
+      event.stopPropagation();
+      switchView('monitor');
+      requestAnimationFrame(() => {
+        const panel = document.getElementById('alert_panel');
+        panel.scrollIntoView({behavior:'smooth', block:'center'});
+        panel.focus({preventScroll:true});
+      });
     }
     function switchView(name) {
       currentView = name;
@@ -930,15 +981,17 @@
       document.getElementById('alert_meta').textContent = `${incidents.length} 条未关闭`;
       const capsule = document.getElementById('alert_capsule');
       capsule.hidden = incidents.length === 0;
+      if (!incidents.length) {
+        capsule.classList.remove('is-pinned', 'is-collapsed');
+        document.getElementById('alert_capsule_toggle').setAttribute('aria-expanded', 'false');
+      }
       if (incidents.length) {
         const latest = incidents[0];
-        const longestAlert = Math.max(...incidents.map(item => `${item.pond_id || ''}${item.title || ''}${item.evidence?.at(-1)?.summary || ''}`.length));
-        capsule.style.setProperty('--capsule-expanded-width', `${Math.max(360, 96 + longestAlert * 11)}px`);
         document.getElementById('alert_capsule_title').textContent = `${incidents.length} 条告警待处置 · ${latest.pond_id || '未知池塘'}`;
-        document.getElementById('alert_capsule_detail').textContent = latest.title || '悬停查看全部告警';
+        document.getElementById('alert_capsule_detail').textContent = latest.title || '点击查看告警信息';
         document.getElementById('alert_capsule_list').innerHTML = incidents.map(item => {
           const evidence = item.evidence?.at(-1);
-          return `<article class="capsule-alert"><b>${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(evidence?.summary || item.status || '等待处置')}</span></article>`;
+          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(evidence?.summary || item.status || '等待处置')}</span></button>`;
         }).join('');
       }
       document.getElementById('alert_list').innerHTML = incidents.length ? incidents.map(item => {

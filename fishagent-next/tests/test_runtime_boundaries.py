@@ -23,7 +23,11 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('onclick="openLlmDialog()"', response.text)
         self.assertIn('id="llm_layer"', response.text)
         self.assertIn('id="alert_capsule"', response.text)
+        self.assertIn('id="alert_capsule_toggle"', response.text)
         self.assertIn('id="alert_capsule_list"', response.text)
+        self.assertIn('id="alert_panel"', response.text)
+        self.assertIn('onclick="toggleAlertCapsule(event)"', response.text)
+        self.assertIn('onclick="openAlertView(event)"', response.text)
 
     def test_fastapi_openapi_and_websocket_replay(self) -> None:
         with TestClient(app) as client:
