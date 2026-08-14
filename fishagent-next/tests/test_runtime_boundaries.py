@@ -160,6 +160,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('onclick="newLlmProvider()"', response.text)
         self.assertIn("id:'preset:volcengine'", response.text)
         self.assertIn("name:'火山引擎'", response.text)
+        self.assertIn("base_url:'https://ark.cn-beijing.volces.com/api/plan/v3'", response.text)
+        self.assertIn("model:'ark-code-latest'", response.text)
         self.assertNotIn('id="monitor_chart"', response.text)
         self.assertIn('position: sticky', response.text)
         self.assertIn('id="llm_layer"', response.text)
