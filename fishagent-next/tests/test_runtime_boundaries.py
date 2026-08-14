@@ -176,7 +176,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn("采样 ${fmtDate(sampledAt)}", response.text)
         self.assertIn('id="assistant_chat"', response.text)
         self.assertIn('id="assistant_chat_input"', response.text)
-        self.assertIn("api('/api/v1/agent-chat'", response.text)
+        self.assertIn("/api/v1/agent-chat/stream", response.text)
         self.assertIn("全场设备 · 在线率", response.text)
         self.assertIn("<b>处理结果：</b>", response.text)
         self.assertIn("waterMetrics.map", response.text)
@@ -213,6 +213,33 @@ class RuntimeBoundaryTests(unittest.TestCase):
             [{"role": "user", "content": "先看传感器"}],
             "B-02",
         )
+
+    def test_agent_chat_endpoint_falls_back_when_snapshot_lags_run(self) -> None:
+        run = AgentRun(id="run-chat-fallback", goal="对话：检查 B-02", status="COMPLETED", stop_reason="CREW_CHAT_COMPLETED")
+        with (
+            patch.object(SYSTEM, "run_chat", return_value=(run, "B-02 水质总体稳定。")),
+            patch.object(SYSTEM, "snapshot", return_value={"agent_runs": []}),
+            TestClient(app) as client,
+        ):
+            response = client.post("/api/v1/agent-chat", json={"message": "检查 B-02", "history": []})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["run"]["id"], run.id)
+
+    def test_agent_chat_stream_emits_progressive_events(self) -> None:
+        run = AgentRun(id="run-chat-stream", goal="对话：检查 B-02", status="COMPLETED", stop_reason="CREW_CHAT_COMPLETED")
+        with (
+            patch.object(SYSTEM, "run_chat", return_value=(run, "B-02 水质总体稳定。")),
+            patch.object(SYSTEM, "snapshot", return_value={"agent_runs": []}),
+            TestClient(app) as client,
+        ):
+            response = client.post("/api/v1/agent-chat/stream", json={"message": "检查 B-02", "history": []})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: start", response.text)
+        self.assertIn("event: delta", response.text)
+        self.assertIn("event: done", response.text)
+        self.assertIn("B-02 水质总体稳定。", response.text)
 
     def test_patrol_endpoint_persists_run_before_building_response(self) -> None:
         run = AgentRun(id="run-patrol-test", goal="执行全场巡查", status="COMPLETED", stop_reason="PATROL_COMPLETED")

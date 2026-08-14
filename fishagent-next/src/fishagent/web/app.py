@@ -7,6 +7,7 @@ this module owns typed HTTP, WebSocket and NiceGUI process boundaries.
 import asyncio
 import csv
 import io
+import json
 import time
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
@@ -875,6 +876,36 @@ async def create_agent_run(request: Request, payload: JsonPayload) -> Any:
     return encoded_response(202, {"run": next(item for item in state["agent_runs"] if item["id"] == run.id), "state": state})
 
 
+def agent_run_payload(run: Any) -> dict[str, Any]:
+    """Serialize the in-memory run when a concurrent snapshot has not caught up yet."""
+    return {
+        "id": run.id,
+        "goal": run.goal,
+        "incident_id": run.incident_id,
+        "status": run.status,
+        "stop_reason": run.stop_reason,
+        "delegated_agents": list(run.delegated_agents),
+        "steps": [
+            {
+                "agent": step.agent,
+                "action": step.action,
+                "summary": step.summary,
+                "created_at": step.created_at.isoformat(),
+            }
+            for step in run.steps
+        ],
+        "budget": dict(run.budget),
+    }
+
+
+def sse_event(event: str, payload: dict[str, Any]) -> str:
+    return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False, default=str))
+
+
+def chat_run_data(run: Any, state: dict[str, Any]) -> dict[str, Any]:
+    return next((item for item in state.get("agent_runs", []) if item["id"] == run.id), agent_run_payload(run))
+
+
 @app.post("/api/v1/agent-chat")
 async def agent_chat(request: Request, payload: AgentChatPayload) -> Any:
     authenticate(request, request.url.path, write=True)
@@ -885,17 +916,66 @@ async def agent_chat(request: Request, payload: AgentChatPayload) -> Any:
             [turn.model_dump() for turn in payload.history],
             payload.pond_id,
         )
+        # A read-only snapshot can restore an older durable state while the model is running.
+        # Re-register the completed object before taking the response snapshot.
+        SYSTEM.store.agent_runs[run.id] = run
         return run, reply, SYSTEM.snapshot()
 
     try:
         run, reply, state = await asyncio.to_thread(execute_turn)
     except ValueError as exc:
         return problem(400, "Invalid chat message", str(exc))
-    run_data = next(item for item in state["agent_runs"] if item["id"] == run.id)
+    run_data = chat_run_data(run, state)
     response = {"reply": reply, "run": run_data}
     if run.status != "COMPLETED":
         return encoded_response(503, {**response, "detail": reply})
     return response
+
+
+@app.post("/api/v1/agent-chat/stream")
+async def agent_chat_stream(request: Request, payload: AgentChatPayload) -> StreamingResponse:
+    authenticate(request, request.url.path, write=True)
+
+    def execute_turn() -> tuple[Any, str, dict]:
+        run, reply = SYSTEM.run_chat(
+            payload.message,
+            [turn.model_dump() for turn in payload.history],
+            payload.pond_id,
+        )
+        SYSTEM.store.agent_runs[run.id] = run
+        return run, reply, SYSTEM.snapshot()
+
+    async def event_stream():
+        turn_task = asyncio.create_task(asyncio.to_thread(execute_turn))
+        yield sse_event("start", {})
+        try:
+            while True:
+                try:
+                    run, reply, state = await asyncio.wait_for(asyncio.shield(turn_task), timeout=8)
+                    break
+                except asyncio.TimeoutError:
+                    # Keep reverse proxies and browsers aware that the model turn is still alive.
+                    yield sse_event("progress", {"message": "智渔AI 正在调用 Agent 和只读工具..."})
+            run_data = chat_run_data(run, state)
+            if run.status != "COMPLETED":
+                yield sse_event("error", {"status": 503, "detail": reply, "run": run_data})
+                return
+            # CrewAI currently exposes an audited final answer rather than token callbacks.
+            # Keep the HTTP contract streaming and release that final answer progressively.
+            for index in range(0, len(reply), 24):
+                yield sse_event("delta", {"text": reply[index : index + 24]})
+                await asyncio.sleep(0.015)
+            yield sse_event("done", {"reply": reply, "run": run_data})
+        except ValueError as exc:
+            yield sse_event("error", {"status": 400, "detail": str(exc)})
+        except Exception as exc:  # pragma: no cover - protects the already-open SSE connection
+            yield sse_event("error", {"status": 500, "detail": str(exc)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/v1/{collection}")
