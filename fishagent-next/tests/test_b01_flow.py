@@ -431,7 +431,21 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(len(state["weather_observations"]), 4)
         self.assertGreaterEqual(len(state["disease_knowledge"]), 3)
         self.assertEqual(len(state["analysis_cases"]), 4)
-        self.assertEqual(len(state["camera_observations"]), 4)
+        self.assertEqual(len(state["camera_observations"]), 8)
+        self.assertEqual(
+            {(item["pond_id"], item["camera_role"]) for item in state["camera_observations"]},
+            {
+                ("B-01", "SURFACE"),
+                ("B-01", "UNDERWATER"),
+                ("B-02", "SURFACE"),
+                ("B-02", "UNDERWATER"),
+                ("B-03", "SURFACE"),
+                ("B-03", "UNDERWATER"),
+                ("B-04", "SURFACE"),
+                ("B-04", "UNDERWATER"),
+            },
+        )
+        self.assertTrue(all(item["image_url"].startswith("/static/camera-images/") for item in state["camera_observations"]))
 
     def test_multimodal_cases_use_device_policy_and_manual_boundaries(self) -> None:
         class MultimodalOrchestrator:
@@ -514,6 +528,9 @@ class B01FlowTest(unittest.TestCase):
         self.assertIn("device.command_result", actions)
         self.assertEqual(details_by_action["llm.request"]["message"]["from"], "supervisor-agent")
         self.assertEqual(details_by_action["llm.request"]["message"]["context"]["analysis_case"]["id"], "case-floating-head-weather")
+        attachments = details_by_action["llm.request"]["message"]["image_attachments"]
+        self.assertEqual({item["camera_role"] for item in attachments}, {"SURFACE", "UNDERWATER"})
+        self.assertTrue(all(item["attached"] for item in attachments))
         self.assertEqual(details_by_action["llm.response"]["decision"]["action"], "EXECUTE")
         self.assertTrue(details_by_action["device.command_result"]["success"])
 

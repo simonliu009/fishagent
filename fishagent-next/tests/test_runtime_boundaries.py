@@ -1,13 +1,19 @@
 import json
 import threading
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from fishagent.agent_runtime.contracts import IncidentDecision
-from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator, CrewRunResult, IncidentDecisionOutput
+from fishagent.agent_runtime.crewai_runtime import (
+    CrewAIOrchestrator,
+    CrewRunResult,
+    IncidentDecisionOutput,
+    _MultimodalCrewLLM,
+)
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import LLMConfig
 from fishagent.domain.models import AgentRun, Device
@@ -19,6 +25,28 @@ from fishagent.web.server import test_llm_connection as check_llm_connection
 
 
 class RuntimeBoundaryTests(unittest.TestCase):
+    def test_multimodal_proxy_attaches_camera_image_as_vision_content(self) -> None:
+        class FakeLLM:
+            stop = None
+
+            def supports_stop_words(self):
+                return True
+
+            def call(self, messages, **kwargs):
+                del kwargs
+                self.messages = messages
+                return "ok"
+
+        base = FakeLLM()
+        image_path = Path(__file__).parents[1] / "src/fishagent/web/static/camera-images/b01-surface.png"
+        proxy = _MultimodalCrewLLM(base, [image_path])
+
+        self.assertEqual(proxy.call([{"role": "user", "content": "请查看图片"}]), "ok")
+        content = base.messages[-1]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "请查看图片"})
+        self.assertEqual(content[1]["type"], "image_url")
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+
     def test_crewai_uses_litellm_openrouter_model_prefix(self) -> None:
         orchestrator = object.__new__(CrewAIOrchestrator)
         orchestrator.available = True

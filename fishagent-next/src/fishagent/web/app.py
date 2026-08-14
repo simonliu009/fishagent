@@ -16,7 +16,7 @@ from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
@@ -298,6 +298,17 @@ async def console() -> str:
 @app.get("/static/fish.svg", include_in_schema=False)
 async def fish_icon() -> Response:
     return Response((STATIC_DIR / "fish.svg").read_text(encoding="utf-8"), media_type="image/svg+xml")
+
+
+@app.get("/static/camera-images/{filename}", include_in_schema=False)
+async def camera_image(filename: str) -> FileResponse:
+    """Serve the fixed demo camera frames without exposing other static files."""
+    if Path(filename).name != filename or Path(filename).suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=404, detail="Camera image not found")
+    image_path = STATIC_DIR / "camera-images" / filename
+    if not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Camera image not found")
+    return FileResponse(image_path)
 
 
 @app.get("/health/live")

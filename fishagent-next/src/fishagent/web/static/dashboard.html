@@ -499,9 +499,11 @@
     .camera-observation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .camera-observation { padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
     .camera-observation-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .camera-observation-image { display: block; width: 100%; aspect-ratio: 16 / 9; margin-top: 8px; object-fit: cover; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
     .camera-observation p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
     .camera-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
     .camera-tag { padding: 3px 6px; border-radius: 999px; color: var(--brand-dark); background: var(--green-soft); font-size: 9px; }
+    .case-evidence-image { display: block; width: 100%; aspect-ratio: 16 / 9; margin-top: 7px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); }
     .patrol-summary-grid .summary-block:first-child { min-width: 0; }
     .summary-inline-next { display: flex; align-items: center; gap: 5px; margin-top: 6px; color: var(--brand-dark); font-size: 10px; font-weight: 750; }
     .summary-inline-next svg { flex: 0 0 auto; width: 14px; height: 14px; }
@@ -832,7 +834,7 @@
           <div id="knowledge_grid" class="knowledge-grid"></div>
         </section>
         <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="camera"></i>水面 / 水下摄像头 Mock</h2><span id="camera_meta" class="section-meta"></span></div>
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="camera"></i>水面 / 水下摄像头</h2><span id="camera_meta" class="section-meta"></span></div>
           <div id="camera_observation_grid" class="camera-observation-grid"></div>
         </section>
       </div>
@@ -1818,7 +1820,10 @@
         const articles = (currentState.disease_knowledge || []).filter(item => selected.evidence_refs?.includes(item.id));
         const evidence = [];
         if (weather && selected.evidence_refs?.includes(weather.id)) evidence.push(`<div class="case-evidence-item"><b>天气上下文 · ${escapeHtml(weather.condition)}</b><span>${escapeHtml(weather.forecast)}，风速 ${fmtNumber(weather.wind_speed_mps,1)} m/s，降雨概率 ${weather.rain_probability_pct}%</span></div>`);
-        observations.filter(item => selected.evidence_refs?.includes(item.id)).forEach(item => evidence.push(`<div class="case-evidence-item"><b>${escapeHtml(item.camera_role === 'UNDERWATER' ? '水下' : '水面')}摄像头 · 置信度 ${Math.round(item.confidence * 100)}%</b><span>${escapeHtml(item.summary)}</span></div>`));
+        observations.filter(item => selected.evidence_refs?.includes(item.id)).forEach(item => {
+          const image = item.image_url ? `<img class="case-evidence-image" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.pond_id)} ${item.camera_role === 'UNDERWATER' ? '水下' : '水面'}摄像头现场画面" loading="lazy">` : '';
+          evidence.push(`<div class="case-evidence-item"><b>${escapeHtml(item.camera_role === 'UNDERWATER' ? '水下' : '水面')}摄像头 · 置信度 ${Math.round(item.confidence * 100)}%</b>${image}<span>${escapeHtml(item.summary)}</span></div>`);
+        });
         articles.forEach(item => evidence.push(`<div class="case-evidence-item"><b>病害知识库 · ${escapeHtml(item.name)}</b><span>${escapeHtml(item.signs)}；${escapeHtml(item.recommended_actions.join('、'))}</span></div>`));
         document.getElementById('case_evidence_list').innerHTML = evidence.join('') || '<div class="empty">等待案例证据</div>';
       }
@@ -1826,8 +1831,13 @@
       document.getElementById('knowledge_meta').textContent = `${(currentState.disease_knowledge || []).length} 篇参考条目`;
       document.getElementById('knowledge_grid').innerHTML = (currentState.disease_knowledge || []).map(item => `<article class="knowledge-card"><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.species)} · ${escapeHtml(item.signs)}</p><p>可检索特征：${escapeHtml(item.visual_cues.join('、'))}</p></article>`).join('') || '<div class="empty">暂无知识条目</div>';
       const observations = currentState.camera_observations || [];
-      document.getElementById('camera_meta').textContent = `${(currentState.cameras || []).length} 路摄像头 · ${observations.length} 条 Mock 观察`;
-      document.getElementById('camera_observation_grid').innerHTML = observations.map(item => `<article class="camera-observation"><div class="camera-observation-head"><b>${escapeHtml(item.pond_id)} · ${escapeHtml(item.camera_role === 'UNDERWATER' ? '水下' : '水面')}</b>${badge('NORMAL', `${Math.round(item.confidence * 100)}%`)}</div><p>${escapeHtml(item.summary)}</p><div class="camera-tags">${item.labels.map(label => `<span class="camera-tag">${escapeHtml(label)}</span>`).join('')}</div></article>`).join('') || '<div class="empty">暂无摄像头观察</div>';
+      document.getElementById('camera_meta').textContent = `${(currentState.cameras || []).length} 路摄像头 · ${observations.length} 条视觉观察`;
+      const orderedObservations = [...observations].sort((a, b) => `${a.pond_id}-${a.camera_role}`.localeCompare(`${b.pond_id}-${b.camera_role}`));
+      document.getElementById('camera_observation_grid').innerHTML = orderedObservations.map(item => {
+        const roleLabel = item.camera_role === 'UNDERWATER' ? '水下' : '水面';
+        const image = item.image_url ? `<img class="camera-observation-image" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.pond_id)} ${roleLabel}摄像头现场画面" loading="lazy">` : '';
+        return `<article class="camera-observation"><div class="camera-observation-head"><b>${escapeHtml(item.pond_id)} · ${roleLabel}</b>${badge('NORMAL', `${Math.round(item.confidence * 100)}%`)}</div>${image}<p>${escapeHtml(item.summary)}</p><div class="camera-tags">${item.labels.map(label => `<span class="camera-tag">${escapeHtml(label)}</span>`).join('')}</div></article>`;
+      }).join('') || '<div class="empty">暂无摄像头观察</div>';
       document.getElementById('case_sequence_meta').textContent = cases.length ? `传感器触发 1 个 · 多模态 ${cases.length} 个 · 案例运行后按真实 AgentRun 显示数据流` : '';
     }
     function selectAnalysisCase(caseId) { selectedCaseId = caseId; renderCases(); iconRefresh(); }

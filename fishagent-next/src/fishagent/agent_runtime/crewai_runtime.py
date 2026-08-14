@@ -4,6 +4,7 @@ CrewAI can investigate and propose; it never receives a direct device-write
 tool. The application service remains the only policy and execution boundary.
 """
 
+import base64
 import io
 import json
 import os
@@ -11,6 +12,7 @@ import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -32,6 +34,87 @@ class CrewRunResult:
 
 class CrewAIUnavailable(RuntimeError):
     pass
+
+
+class _MultimodalCrewLLM:
+    """Add local camera frames to CrewAI's final user message as image parts."""
+
+    def __init__(self, base_llm: Any, image_paths: list[Path]) -> None:
+        self._base_llm = base_llm
+        self._image_parts: list[dict[str, Any]] = []
+        for image_path in image_paths:
+            try:
+                data = base64.b64encode(image_path.read_bytes()).decode("ascii")
+            except OSError:
+                continue
+            mime_type = {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+            }.get(image_path.suffix.lower(), "image/png")
+            self._image_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:%s;base64,%s" % (mime_type, data),
+                        "detail": "low",
+                    },
+                }
+            )
+
+    @property
+    def stop(self) -> Any:
+        return self._base_llm.stop
+
+    @stop.setter
+    def stop(self, value: Any) -> None:
+        self._base_llm.stop = value
+
+    def supports_stop_words(self) -> bool:
+        return self._base_llm.supports_stop_words()
+
+    def _with_images(self, messages: str | list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+        if not self._image_parts:
+            return messages
+        if isinstance(messages, str):
+            normalized: list[dict[str, Any]] = [{"role": "user", "content": messages}]
+        else:
+            normalized = [dict(message) for message in messages]
+        user_index = next(
+            (index for index in range(len(normalized) - 1, -1, -1) if normalized[index].get("role") == "user"),
+            None,
+        )
+        if user_index is None:
+            normalized.append({"role": "user", "content": "请结合附带的摄像头图片完成研判。"})
+            user_index = len(normalized) - 1
+        message = normalized[user_index]
+        content = message.get("content", "")
+        parts = list(content) if isinstance(content, list) else [{"type": "text", "text": str(content)}]
+        if not any(isinstance(part, dict) and part.get("type") == "image_url" for part in parts):
+            parts.extend(self._image_parts)
+        message["content"] = parts
+        return normalized
+
+    def call(
+        self,
+        messages: str | list[dict[str, Any]],
+        tools: list[dict] | None = None,
+        callbacks: list[Any] | None = None,
+        available_functions: dict[str, Any] | None = None,
+        from_task: Any | None = None,
+        from_agent: Any | None = None,
+    ) -> Any:
+        return self._base_llm.call(
+            self._with_images(messages),
+            tools=tools,
+            callbacks=callbacks,
+            available_functions=available_functions,
+            from_task=from_task,
+            from_agent=from_agent,
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base_llm, name)
 
 
 class IncidentDecisionOutput(BaseModel):
@@ -251,6 +334,24 @@ class CrewAIOrchestrator:
             propose_action,
         ]
 
+    @staticmethod
+    def _camera_image_paths(context: Optional[dict]) -> list[Path]:
+        """Resolve only the paired images belonging to a multimodal demo case."""
+        if not context or not context.get("analysis_case"):
+            return []
+        static_root = Path(__file__).resolve().parent.parent / "web" / "static"
+        paths: list[Path] = []
+        seen: set[Path] = set()
+        for observation in context.get("camera_observations") or []:
+            image_url = str(observation.get("image_url") or "")
+            if not image_url.startswith("/static/camera-images/"):
+                continue
+            image_path = static_root / "camera-images" / Path(image_url).name
+            if image_path.is_file() and image_path not in seen:
+                paths.append(image_path)
+                seen.add(image_path)
+        return sorted(paths)
+
     def _kickoff_crew(
         self,
         goal: str,
@@ -261,6 +362,9 @@ class CrewAIOrchestrator:
         trace: Optional[list[dict[str, Any]]] = None,
     ) -> Any:
         llm = self._llm()
+        image_paths = self._camera_image_paths(context)
+        if image_paths:
+            llm = _MultimodalCrewLLM(llm, image_paths)
         tools = self._tools(pond_id, trace)
         decision_mode = response_mode == "decision"
         manager_iterations = 4 if decision_mode else 3

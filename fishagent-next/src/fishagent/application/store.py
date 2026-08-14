@@ -122,6 +122,7 @@ class InMemoryStore:
         self.audit_events.clear()
         self.events.clear()
         self.executed_idempotency_keys.clear()
+
         self.farms["farm-demo"] = Farm(id="farm-demo", name="青湾智慧渔场", location="浙江湖州")
         self.zones["zone-east"] = Zone(id="zone-east", farm_id="farm-demo", name="东区")
         self.zones["zone-west"] = Zone(id="zone-west", farm_id="farm-demo", name="西区")
@@ -179,29 +180,29 @@ class InMemoryStore:
                 id="camera-surface-%s" % pond_slug,
                 pond_id=pond_id,
                 name="%s 水面摄像头" % pond_id,
-                source_type="MOCK_SURFACE",
+                source_type="STATIC_IMAGE",
                 camera_role="SURFACE",
                 status="ONLINE",
-                source_url="mock://surface/%s" % pond_id,
+                source_url="/static/camera-images/%s-surface.png" % pond_slug,
                 last_frame_at=utcnow(),
                 last_frame_id="frame-surface-%s" % pond_slug,
-                last_frame_hash="mock-surface-%s" % pond_slug,
-                last_frame_width=1920,
-                last_frame_height=1080,
+                last_frame_hash="generated-surface-%s" % pond_slug,
+                last_frame_width=1672,
+                last_frame_height=941,
             )
             self.cameras["camera-underwater-%s" % pond_slug] = CameraSource(
                 id="camera-underwater-%s" % pond_slug,
                 pond_id=pond_id,
                 name="%s 水下摄像头" % pond_id,
-                source_type="MOCK_UNDERWATER",
+                source_type="STATIC_IMAGE",
                 camera_role="UNDERWATER",
                 status="ONLINE",
-                source_url="mock://underwater/%s" % pond_id,
+                source_url="/static/camera-images/%s-underwater.png" % pond_slug,
                 last_frame_at=utcnow(),
                 last_frame_id="frame-underwater-%s" % pond_slug,
-                last_frame_hash="mock-underwater-%s" % pond_slug,
-                last_frame_width=1280,
-                last_frame_height=720,
+                last_frame_hash="generated-underwater-%s" % pond_slug,
+                last_frame_width=1672,
+                last_frame_height=941,
             )
         for pond_id, weather in DEMO_WEATHER.items():
             weather_data = cast(dict[str, Any], weather)
@@ -253,10 +254,10 @@ class InMemoryStore:
                 camera_id=camera.id,
                 source_url=camera.source_url,
                 object_name=str(observation_data["observation_type"]),
-                content_type="application/mock-vision",
-                sha256="mock-%s" % observation["id"],
-                width=camera.last_frame_width or 1280,
-                height=camera.last_frame_height or 720,
+                content_type="image/png",
+                sha256="generated-%s" % observation["id"],
+                width=camera.last_frame_width or 1672,
+                height=camera.last_frame_height or 941,
                 captured_at=captured_at,
             )
         for case in DEMO_ANALYSIS_CASES:
@@ -294,6 +295,78 @@ class InMemoryStore:
                 "analysis_case_count": len(self.analysis_cases),
             },
         )
+
+    def _upgrade_demo_camera_assets(self) -> bool:
+        """Backfill generated camera frames into snapshots created before image assets existed."""
+        expected_camera_ids = {str(item["camera_id"]) for item in DEMO_CAMERA_OBSERVATIONS}
+        if not expected_camera_ids.issubset(self.cameras):
+            return False
+        changed = False
+        for camera in self.cameras.values():
+            if camera.id not in expected_camera_ids:
+                continue
+            pond_slug = camera.pond_id.lower().replace("-", "")
+            role_slug = "underwater" if camera.camera_role == "UNDERWATER" else "surface"
+            source_url = "/static/camera-images/%s-%s.png" % (pond_slug, role_slug)
+            if camera.source_type != "STATIC_IMAGE":
+                camera.source_type = "STATIC_IMAGE"
+                changed = True
+            if camera.source_url != source_url:
+                camera.source_url = source_url
+                changed = True
+            if camera.last_frame_hash != "generated-%s-%s" % (role_slug, pond_slug):
+                camera.last_frame_hash = "generated-%s-%s" % (role_slug, pond_slug)
+                changed = True
+            if camera.last_frame_width != 1672 or camera.last_frame_height != 941:
+                camera.last_frame_width = 1672
+                camera.last_frame_height = 941
+                changed = True
+
+        for observation_data in DEMO_CAMERA_OBSERVATIONS:
+            observation_id = str(observation_data["id"])
+            camera_id = str(observation_data["camera_id"])
+            camera = self.cameras[camera_id]
+            observation = self.camera_observations.get(observation_id)
+            captured_at = observation.captured_at if observation else camera.last_frame_at or utcnow()
+            if observation is None:
+                self.camera_observations[observation_id] = CameraObservation(
+                    id=observation_id,
+                    camera_id=camera_id,
+                    pond_id=str(observation_data["pond_id"]),
+                    camera_role=str(observation_data["camera_role"]),
+                    observation_type=str(observation_data["observation_type"]),
+                    status=str(observation_data["status"]),
+                    summary=str(observation_data["summary"]),
+                    labels=list(observation_data["labels"]),
+                    confidence=float(observation_data["confidence"]),
+                    captured_at=captured_at,
+                    evidence_refs=[observation_id],
+                )
+                observation = self.camera_observations[observation_id]
+                changed = True
+            frame_id = "frame-%s" % observation_id
+            frame = self.vision_frames.get(frame_id)
+            if frame is None:
+                self.vision_frames[frame_id] = VisionFrame(
+                    id=frame_id,
+                    camera_id=camera_id,
+                    source_url=camera.source_url,
+                    object_name=str(observation_data["observation_type"]),
+                    content_type="image/png",
+                    sha256="generated-%s" % observation_id,
+                    width=1672,
+                    height=941,
+                    captured_at=captured_at,
+                )
+                changed = True
+            elif frame.source_url != camera.source_url or frame.content_type != "image/png":
+                frame.source_url = camera.source_url
+                frame.content_type = "image/png"
+                frame.sha256 = "generated-%s" % observation_id
+                frame.width = 1672
+                frame.height = 941
+                changed = True
+        return changed
 
     def emit(
         self,
@@ -669,6 +742,7 @@ class InMemoryStore:
         self.events = payload.get("events", [])
         self._event_sequence = int(payload.get("event_sequence", max((event.get("sequence", 0) for event in self.events), default=0)))
         self.executed_idempotency_keys = payload.get("executed_idempotency_keys", {})
+        self._upgrade_demo_camera_assets()
 
     def mark_sensor_health(
         self,

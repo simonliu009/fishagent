@@ -85,7 +85,14 @@ class FishAgentSystem:
         if self.repository:
             persisted = self.repository.load()
             if persisted:
+                persisted_camera_urls = [str(item.get("source_url") or "") for item in persisted.get("cameras", [])]
+                persisted_observation_count = len(persisted.get("camera_observations", []))
                 self.store.restore_snapshot(persisted)
+                if (
+                    len(self.store.camera_observations) > persisted_observation_count
+                    or any(url.startswith("mock://") for url in persisted_camera_urls)
+                ):
+                    self.snapshot()
 
     def initialize_demo(self) -> dict:
         self._cancel_analysis_case_sequence()
@@ -1133,7 +1140,16 @@ class FishAgentSystem:
             "camera_observations": [
                 {
                     key: item.get(key)
-                    for key in ("id", "camera_role", "observation_type", "summary", "labels", "confidence", "captured_at")
+                    for key in (
+                        "id",
+                        "camera_role",
+                        "observation_type",
+                        "summary",
+                        "labels",
+                        "confidence",
+                        "captured_at",
+                        "image_url",
+                    )
                     if item.get(key) is not None
                 }
                 for item in context.get("camera_observations") or []
@@ -1244,11 +1260,21 @@ class FishAgentSystem:
                     "from": "supervisor-agent",
                     "to": "大模型",
                     "content": (
-                        "请处理事件 %s。根据下面的巡塘现场上下文和多模态证据，动态委派必要的 Agent，"
+                        "请处理事件 %s。根据下面的巡塘现场上下文、多模态文字观察和图片附件，动态委派必要的 Agent，"
                         "最终只返回 action、device_id、target_state、risk、rationale、"
                         "verification_delay_seconds、evidence_refs 组成的 JSON；禁止输出思考过程，"
                         "禁止直接调用设备写接口。"
                     ) % context.get("incident", {}).get("id", "unknown"),
+                    "image_attachments": [
+                        {
+                            "observation_id": item.get("id"),
+                            "camera_role": item.get("camera_role"),
+                            "image_url": item.get("image_url"),
+                            "attached": bool(item.get("image_url")),
+                        }
+                        for item in context.get("camera_observations") or []
+                        if item.get("image_url")
+                    ],
                     "context": self._llm_trace_context(context),
                 },
             },
@@ -2130,6 +2156,9 @@ class FishAgentSystem:
                     "confidence": observation.confidence,
                     "captured_at": observation.captured_at.isoformat(),
                     "evidence_refs": observation.evidence_refs,
+                    "image_url": self.store.cameras[observation.camera_id].source_url
+                    if observation.camera_id in self.store.cameras
+                    else "",
                 }
                 for observation in self.store.camera_observations.values()
             ],
