@@ -885,12 +885,12 @@
         <button class="button secondary" type="button" onclick="newLlmProvider()"><i data-lucide="plus"></i>添加供应商</button>
       </div>
       <div class="form-grid">
-        <label class="field wide">供应商名称<input id="llm_name" placeholder="例如：DeepSeek 生产环境"><span class="field-hint">自定义名称仅用于管理显示；接口协议、Endpoint 和模型单独配置。</span></label>
-        <label class="field">提供商<select id="llm_provider" onchange="applyLlmProviderPreset()"><option value="zai">Z.ai</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="compatible">OpenAI-compatible</option></select></label>
-        <label class="field">模型<input id="llm_model"></label>
-        <label class="field wide">Base URL<input id="llm_base_url"></label>
-        <label class="field wide">API Key<input id="llm_api_key" type="password" placeholder="留空保持当前密钥"></label>
-        <label class="checkbox-field wide"><input id="llm_enabled" type="checkbox">启用模型驱动决策</label>
+        <label class="field wide">供应商名称<input id="llm_name" placeholder="例如：DeepSeek 生产环境" oninput="markLlmFormDirty()"><span class="field-hint">自定义名称仅用于管理显示；接口协议、Endpoint 和模型单独配置。</span></label>
+        <label class="field">提供商<select id="llm_provider" onchange="markLlmFormDirty(); applyLlmProviderPreset()"><option value="zai">Z.ai</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="compatible">OpenAI-compatible</option></select></label>
+        <label class="field">模型<input id="llm_model" oninput="markLlmFormDirty()"></label>
+        <label class="field wide">Base URL<input id="llm_base_url" oninput="markLlmFormDirty()"></label>
+        <label class="field wide">API Key<input id="llm_api_key" type="password" placeholder="留空保持当前密钥" oninput="markLlmFormDirty()"></label>
+        <label class="checkbox-field wide"><input id="llm_enabled" type="checkbox" onchange="markLlmFormDirty()">启用模型驱动决策</label>
       </div>
       <div id="llm_message" class="message"></div>
       <div class="auth-actions"><button class="button secondary" type="button" onclick="testLlm()"><i data-lucide="plug-zap"></i>测试连接</button><button class="button" type="button" onclick="saveLlm()"><i data-lucide="save"></i>保存</button></div>
@@ -910,6 +910,7 @@
     let currentState = {};
     let currentLlm = {};
     let llmProfiles = [];
+    let llmDialogDirty = false;
     let currentView = 'monitor';
     let countdownTarget = null;
     let countdownIntervalSeconds = 0;
@@ -931,6 +932,7 @@
       {id:'preset:zai', name:'Z.ai', provider:'zai', base_url:'https://api.z.ai/api/paas/v4', model:'glm-4.5'},
       {id:'preset:openai', name:'OpenAI', provider:'openai', base_url:'https://api.openai.com/v1', model:'gpt-4o-mini'},
       {id:'preset:openrouter', name:'OpenRouter', provider:'openrouter', base_url:'https://openrouter.ai/api/v1', model:'openrouter/free'},
+      {id:'preset:volcengine', name:'火山引擎', provider:'compatible', base_url:'https://ark.cn-beijing.volces.com/api/v3', model:'doubao-seed-1-6-250615'},
       {id:'preset:compatible', name:'OpenAI-compatible', provider:'compatible', base_url:'', model:''}
     ];
     const closedIncidents = new Set(['RESOLVED', 'DISMISSED']);
@@ -998,6 +1000,7 @@
     }
     function openLlmDialog() {
       const layer = document.getElementById('llm_layer');
+      llmDialogDirty = false;
       layer.hidden = false;
       iconRefresh();
       requestAnimationFrame(() => document.getElementById('llm_profile').focus());
@@ -1024,6 +1027,7 @@
       document.getElementById('llm_enabled').checked = Boolean(config.enabled);
     }
     function selectLlmProfile(profileId) {
+      llmDialogDirty = true;
       if (profileId === '__new__') {
         newLlmProvider(false);
         return;
@@ -1035,12 +1039,14 @@
       document.getElementById('llm_message').textContent = profile ? (profile.api_key_configured ? `密钥已配置：${profile.api_key_preview}` : '尚未配置 API Key') : '预置配置；保存后仅切换当前活动配置';
     }
     function newLlmProvider(focus = true) {
+      llmDialogDirty = true;
       const select = document.getElementById('llm_profile');
       if (select) select.value = '__new__';
       applyLlmForm({provider:'compatible', model:'', base_url:'', enabled:true});
       document.getElementById('llm_message').textContent = '填写供应商名称后保存，即可加入自定义供应商列表';
       if (focus) requestAnimationFrame(() => document.getElementById('llm_name').focus());
     }
+    function markLlmFormDirty() { llmDialogDirty = true; }
     function applyLlmProviderPreset() {
       if (document.getElementById('llm_provider').value !== 'openrouter') return;
       document.getElementById('llm_model').value = 'openrouter/free';
@@ -1050,6 +1056,7 @@
       const layer = document.getElementById('llm_layer');
       if (event && event.target !== layer) return;
       layer.hidden = true;
+      llmDialogDirty = false;
     }
     function toggleAlertCapsule(event) {
       event.stopPropagation();
@@ -1331,12 +1338,17 @@
     function renderAssistant() {
       renderRuns();
       document.getElementById('assistant_events').innerHTML = eventRows(24);
-      renderLlmProfiles();
-      applyLlmForm(currentLlm);
+      const llmDialogOpen = !document.getElementById('llm_layer').hidden;
+      if (!llmDialogOpen || !llmDialogDirty) {
+        renderLlmProfiles();
+        applyLlmForm(currentLlm);
+      }
       const badgeNode = document.getElementById('llm_badge');
       badgeNode.className = `status-badge ${currentLlm.enabled ? '' : 'warning'}`;
       badgeNode.textContent = currentLlm.enabled ? '已启用' : '未启用';
-      document.getElementById('llm_message').textContent = currentLlm.api_key_configured ? `密钥已配置：${currentLlm.api_key_preview}` : '尚未配置 API Key';
+      if (!llmDialogOpen || !llmDialogDirty) {
+        document.getElementById('llm_message').textContent = currentLlm.api_key_configured ? `密钥已配置：${currentLlm.api_key_preview}` : '尚未配置 API Key';
+      }
       const chatBadge = document.getElementById('assistant_model_badge');
       const modelReady = Boolean(currentLlm.enabled && currentLlm.api_key_configured);
       chatBadge.className = `status-badge ${modelReady ? '' : 'warning'}`;
@@ -1674,6 +1686,7 @@
         api_key:document.getElementById('llm_api_key').value,
         enabled:document.getElementById('llm_enabled').checked
       };
+      llmDialogDirty = false;
       return mutate(() => api('/api/v1/config/llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}), saveAsProfile ? '自定义供应商已保存并启用' : '模型配置已保存');
     }
     async function testLlm() { try { const result = await api('/api/v1/config/llm/test',{method:'POST'}); showToast(`模型连接成功：HTTP ${result.status_code}`); } catch (error) { showToast(`模型连接失败：${error.message}`, true); } }
@@ -1700,7 +1713,6 @@
     iconRefresh();
     api('/api/v1/auth/config').then(config => { document.getElementById('auth_layer').hidden = !config.enabled; return refresh(); }).catch(() => { document.getElementById('auth_layer').hidden = false; });
     setInterval(updateCountdown, 1000);
-    setInterval(refresh, 15000);
     window.addEventListener('resize', () => requestAnimationFrame(drawCharts));
     window.addEventListener('keydown', event => { if (event.key === 'Escape') closeLlmDialog(); });
   </script>

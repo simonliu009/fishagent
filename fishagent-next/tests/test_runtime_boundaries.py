@@ -137,6 +137,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
             self.assertIn(f'id="sensor_chart_{metric}"', response.text)
         self.assertIn('id="llm_profile"', response.text)
         self.assertIn('onclick="newLlmProvider()"', response.text)
+        self.assertIn("id:'preset:volcengine'", response.text)
+        self.assertIn("name:'火山引擎'", response.text)
         self.assertNotIn('id="monitor_chart"', response.text)
         self.assertIn('position: sticky', response.text)
         self.assertIn('id="llm_layer"', response.text)
