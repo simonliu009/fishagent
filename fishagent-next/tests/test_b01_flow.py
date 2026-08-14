@@ -77,6 +77,33 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_TIMEOUT")
         self.assertEqual(len(state["manual_tasks"]), 1)
 
+    def test_invalid_llm_action_reports_value_and_creates_manual_task(self) -> None:
+        class FakeOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return CrewRunResult(
+                    summary="模型返回非法 action TURN_ON；允许值：EXECUTE、REQUEST_APPROVAL、MANUAL_REQUIRED、NO_ACTION、REFRESH_EVIDENCE",
+                    stop_reason="LLM_DECISION_INVALID",
+                    steps=[
+                        (
+                            "supervisor-agent",
+                            "incident.invalid",
+                            "unsupported LLM decision action: TURN_ON",
+                        )
+                    ],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=FakeOrchestrator())
+        system.initialize_demo()
+        incident = system.ingest_do("B-01", 2.0, source_event_id="llm-invalid-action")
+        self.assertIsNotNone(incident)
+        state = system.snapshot()
+        self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_DECISION_INVALID")
+        self.assertIn("TURN_ON", state["manual_tasks"][0]["description"])
+        self.assertIn("允许值", state["manual_tasks"][0]["description"])
+
     def test_llm_policy_rejection_stops_without_waiting_for_missing_approval(self) -> None:
         class FakeOrchestrator:
             available = True

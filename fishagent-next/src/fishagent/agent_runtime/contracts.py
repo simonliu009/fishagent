@@ -30,7 +30,12 @@ class IncidentDecision:
             raise ValueError("LLM decision must be a JSON object")
         action = str(payload.get("action") or "").upper().strip()
         if action not in DECISION_ACTIONS:
-            raise ValueError("unsupported LLM decision action")
+            actual_action = action or "<empty>"
+            allowed_actions = ", ".join(sorted(DECISION_ACTIONS))
+            raise ValueError(
+                "unsupported LLM decision action: %s; allowed actions: %s"
+                % (actual_action, allowed_actions)
+            )
         risk = str(payload.get("risk") or "L3").upper().strip()
         if risk not in RISK_LEVELS:
             raise ValueError("unsupported LLM risk level")

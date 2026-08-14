@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from fishagent.agent_runtime.contracts import IncidentDecision
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
 from fishagent.core import LLMConfig
 from fishagent.domain.models import AgentRun, Device
@@ -94,6 +95,19 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIsNone(result.decision)
         self.assertEqual(result.stop_reason, "LLM_DECISION_INVALID")
 
+    def test_invalid_llm_action_reports_actual_and_allowed_actions(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            r"unsupported LLM decision action: TURN_ON; allowed actions: .*EXECUTE.*",
+        ):
+            IncidentDecision.from_payload(
+                {
+                    "action": "TURN_ON",
+                    "risk": "L1",
+                    "rationale": "test",
+                }
+            )
+
     def test_crewai_decision_rate_limit_is_not_reported_as_invalid(self) -> None:
         orchestrator = object.__new__(CrewAIOrchestrator)
         orchestrator.available = True
@@ -119,6 +133,9 @@ class RuntimeBoundaryTests(unittest.TestCase):
             self.assertIn(f'id="view_{view}"', response.text)
         self.assertIn('onclick="openLlmDialog()"', response.text)
         self.assertIn('<option value="openrouter">OpenRouter</option>', response.text)
+        self.assertIn('id="sensor_trend_chart"', response.text)
+        self.assertIn('id="sensor_trend_legend"', response.text)
+        self.assertIn('position: sticky', response.text)
         self.assertIn('id="llm_layer"', response.text)
         self.assertIn('id="alert_capsule"', response.text)
         self.assertIn('id="alert_capsule_toggle"', response.text)

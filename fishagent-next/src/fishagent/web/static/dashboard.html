@@ -351,6 +351,7 @@
     .legend-item { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
     .legend-swatch { width: 8px; height: 8px; border-radius: 2px; }
     .page-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 14px; }
+    .analytics-events-panel { margin-top: 14px; }
     .assistant-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(330px, .75fr); gap: 14px; }
     .stack { display: grid; gap: 14px; align-content: start; }
     .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -375,9 +376,9 @@
     .run-row-head, .event-row-head { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; font-weight: 750; }
     .run-row-meta, .event-row-meta { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.5; }
     .run-steps { margin: 7px 0 0; padding-left: 18px; color: var(--muted); font-size: 9px; line-height: 1.5; }
-    .chat-panel { min-height: 620px; display: grid; grid-template-rows: auto minmax(380px, 1fr) auto; padding: 0; overflow: hidden; }
+    .chat-panel { position: sticky; top: 132px; height: calc(100vh - 142px); min-height: 0; max-height: calc(100vh - 142px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 0; overflow: hidden; }
     .chat-head { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-    .chat-log { min-height: 0; max-height: 610px; padding: 18px; overflow-y: auto; overscroll-behavior: contain; }
+    .chat-log { min-height: 0; max-height: none; padding: 18px; overflow-y: auto; overscroll-behavior: contain; }
     .chat-empty { min-height: 300px; display: grid; place-items: center; align-content: center; gap: 9px; color: var(--muted); text-align: center; font-size: 11px; }
     .chat-empty svg { width: 30px; height: 30px; color: var(--brand); }
     .chat-empty strong { color: var(--ink); font-size: 13px; }
@@ -609,7 +610,7 @@
       .metric-tile { min-height: 68px; }
       .patrol-pond-row { grid-template-columns: 1fr auto; gap: 6px; }
       .patrol-sensor-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .chat-panel { min-height: 560px; }
+      .chat-panel { top: 120px; height: calc(100vh - 132px); max-height: calc(100vh - 132px); }
       .chat-message { width: 94%; }
       .chat-compose-row { grid-template-columns: minmax(0, 1fr) 38px; }
       .chat-compose-row select { grid-column: 1 / -1; }
@@ -786,14 +787,18 @@
     <section id="view_analytics" class="view">
       <div class="page-grid">
         <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="chart-spline"></i>溶解氧数据分析</h2><span class="section-meta">按池塘分组</span></div>
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="chart-spline"></i>溶解氧趋势</h2><span class="section-meta">按池塘分组</span></div>
           <div class="chart-wrap"><canvas id="analytics_chart" class="trend-canvas"></canvas><div id="analytics_legend" class="chart-legend"></div></div>
         </section>
         <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="activity"></i>领域事件</h2><span id="event_meta" class="section-meta"></span></div>
-          <div id="analytics_events" class="event-list"></div>
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="activity"></i>其他传感器趋势</h2><span class="section-meta">按各自量程归一化</span></div>
+          <div class="chart-wrap"><canvas id="sensor_trend_chart" class="trend-canvas"></canvas><div id="sensor_trend_legend" class="chart-legend"></div></div>
         </section>
       </div>
+      <section class="tool-panel analytics-events-panel">
+        <div class="section-heading"><h2 class="section-title"><i data-lucide="calendar-clock"></i>领域事件</h2><span id="event_meta" class="section-meta"></span></div>
+        <div id="analytics_events" class="event-list"></div>
+      </section>
     </section>
 
     <section id="view_assets" class="view">
@@ -1446,7 +1451,84 @@
       }
       document.getElementById(legendId).innerHTML = series.map((entry,index) => `<span class="legend-item"><span class="legend-swatch" style="background:${colors[index%colors.length]}"></span>${escapeHtml(entry[0])}</span>`).join('');
     }
-    function drawCharts() { drawChart('monitor_chart','monitor_legend'); drawChart('analytics_chart','analytics_legend'); }
+    function drawNormalizedSensorChart(canvasId, legendId) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas || canvas.offsetWidth < 40) return;
+      const metrics = Object.fromEntries(waterMetrics.map(item => [item.metric, item]));
+      const grouped = {};
+      (currentState.readings || []).forEach(item => {
+        if (item.metric === 'DO' || !metrics[item.metric]) return;
+        (grouped[item.metric] ||= []).push(item);
+      });
+      const series = waterMetrics
+        .filter(item => item.metric !== 'DO' && grouped[item.metric]?.length)
+        .map(item => [item.metric, [...grouped[item.metric]].sort((a, b) => String(a.sampled_at).localeCompare(String(b.sampled_at))) ]);
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.offsetWidth;
+      const height = canvas.offsetHeight;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      const context = canvas.getContext('2d');
+      context.scale(ratio, ratio);
+      context.clearRect(0, 0, width, height);
+      const style = getComputedStyle(document.body);
+      const muted = style.getPropertyValue('--muted').trim();
+      const line = style.getPropertyValue('--line').trim();
+      const surface = style.getPropertyValue('--surface').trim();
+      context.fillStyle = surface;
+      context.fillRect(0, 0, width, height);
+      const pad = {left: 42, right: 14, top: 12, bottom: 30};
+      const chartWidth = width - pad.left - pad.right;
+      const chartHeight = height - pad.top - pad.bottom;
+      context.font = '10px system-ui';
+      context.strokeStyle = line;
+      context.fillStyle = muted;
+      context.lineWidth = 1;
+      for (let value = 0; value <= 100; value += 25) {
+        const y = pad.top + chartHeight - value / 100 * chartHeight;
+        context.beginPath(); context.moveTo(pad.left, y); context.lineTo(width - pad.right, y); context.stroke();
+        context.fillText(`${value}%`, 9, y + 3);
+      }
+      if (!series.length) {
+        context.fillText('暂无其他传感器读数', Math.max(pad.left, width / 2 - 50), height / 2);
+        document.getElementById(legendId).innerHTML = '';
+        return;
+      }
+      const maxPoints = Math.max(...series.map(item => item[1].length), 2);
+      series.forEach((entry, index) => {
+        const metric = metrics[entry[0]];
+        const values = entry[1].map(reading => Number(reading.value)).filter(Number.isFinite);
+        const lower = metric.min !== undefined ? metric.min : Math.min(...values);
+        const upper = metric.max !== undefined ? metric.max : Math.max(...values);
+        const range = Math.max(upper - lower, 0.0001);
+        context.strokeStyle = colors[index % colors.length];
+        context.lineWidth = 2;
+        context.beginPath();
+        entry[1].forEach((reading, pointIndex) => {
+          const normalized = Math.min(1, Math.max(0, (Number(reading.value) - lower) / range));
+          const x = pad.left + pointIndex / Math.max(maxPoints - 1, 1) * chartWidth;
+          const y = pad.top + chartHeight - normalized * chartHeight;
+          pointIndex ? context.lineTo(x, y) : context.moveTo(x, y);
+        });
+        context.stroke();
+      });
+      const ticks = Math.min(6, maxPoints);
+      for (let index = 0; index < ticks; index += 1) {
+        const x = pad.left + index / Math.max(ticks - 1, 1) * chartWidth;
+        const sample = series[0][1][Math.round(index / Math.max(ticks - 1, 1) * (series[0][1].length - 1))];
+        context.fillStyle = muted;
+        context.fillText(sample ? fmtDate(sample.sampled_at, false).slice(-5) : '--', x - 13, height - 9);
+      }
+      document.getElementById(legendId).innerHTML = series.map((entry, index) => {
+        const metric = metrics[entry[0]];
+        return `<span class="legend-item"><span class="legend-swatch" style="background:${colors[index % colors.length]}"></span>${escapeHtml(metric.label)}</span>`;
+      }).join('');
+    }
+    function drawCharts() {
+      drawChart('monitor_chart', 'monitor_legend');
+      drawChart('analytics_chart', 'analytics_legend');
+      drawNormalizedSensorChart('sensor_trend_chart', 'sensor_trend_legend');
+    }
     function renderAll() {
       renderPatrol(); renderMetrics(); renderExecution(); renderWater(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics();
       document.getElementById('footer_status').textContent = '系统运行正常';
