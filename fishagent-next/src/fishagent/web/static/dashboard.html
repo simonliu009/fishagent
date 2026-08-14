@@ -395,7 +395,12 @@
     .chat-avatar svg { width: 15px; height: 15px; }
     .chat-bubble { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
     .chat-message.user .chat-bubble { grid-column: 1; grid-row: 1; border-color: #b8d9ce; background: var(--brand-soft); }
-    .chat-message.pending .chat-bubble { color: var(--muted); }
+    .chat-message.pending .chat-bubble { display: flex; align-items: center; min-height: 36px; color: var(--muted); }
+    .chat-typing { display: inline-flex; align-items: center; gap: 4px; height: 16px; }
+    .chat-typing i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: chat-dot-bounce 1.2s infinite ease-in-out; }
+    .chat-typing i:nth-child(2) { animation-delay: .16s; }
+    .chat-typing i:nth-child(3) { animation-delay: .32s; }
+    @keyframes chat-dot-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-4px); opacity: 1; } }
     .chat-composer { padding: 12px 14px; border-top: 1px solid var(--line); background: var(--surface-alt); }
     .chat-compose-row { display: grid; grid-template-columns: 118px minmax(0, 1fr) 38px; gap: 8px; align-items: end; }
     .chat-compose-row textarea { height: 64px; min-height: 64px; max-height: 160px; resize: none; background: var(--surface); }
@@ -1000,7 +1005,7 @@
       const decoder = new TextDecoder();
       let buffer = '';
       let result = null;
-      const consume = block => {
+      const consume = async block => {
         let event = 'message';
         const dataLines = [];
         block.split(/\r?\n/).forEach(line => {
@@ -1009,7 +1014,11 @@
         });
         if (!dataLines.length) return;
         const data = JSON.parse(dataLines.join('\n'));
-        if (event === 'delta') onDelta(data.text || '');
+        if (event === 'delta') {
+          onDelta(data.text || '');
+          // Let the browser paint each delta before consuming the next buffered event.
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
         if (event === 'done') result = data;
         if (event === 'error') {
           const error = new Error(data.detail || '流式对话失败');
@@ -1024,11 +1033,11 @@
         while ((separator = buffer.indexOf('\n\n')) >= 0) {
           const block = buffer.slice(0, separator);
           buffer = buffer.slice(separator + 2);
-          consume(block);
+          await consume(block);
         }
         if (done) break;
       }
-      if (buffer.trim()) consume(buffer);
+      if (buffer.trim()) await consume(buffer);
       return result || {reply:''};
     }
     async function login(event) {
@@ -1403,7 +1412,7 @@
       }
       const messages = assistantChatHistory.map(item => `<div class="chat-message ${item.role}"><span class="chat-avatar"><i data-lucide="${item.role === 'user' ? 'user-round' : 'bot'}"></i></span><div class="chat-bubble">${escapeHtml(item.content)}</div></div>`);
       const lastMessage = assistantChatHistory[assistantChatHistory.length - 1];
-      if (assistantChatBusy && (!lastMessage || lastMessage.role !== 'assistant')) messages.push('<div class="chat-message assistant pending"><span class="chat-avatar"><i data-lucide="bot"></i></span><div class="chat-bubble">智渔AI 正在调用 Agent 和只读工具...</div></div>');
+      if (assistantChatBusy && (!lastMessage || lastMessage.role !== 'assistant')) messages.push('<div class="chat-message assistant pending"><span class="chat-avatar"><i data-lucide="bot"></i></span><div class="chat-bubble"><span class="chat-typing" role="status" aria-label="智渔AI 正在回复"><i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i></span></div></div>');
       log.innerHTML = messages.join('');
       requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; iconRefresh(); });
     }
