@@ -132,6 +132,59 @@ class FishAgentSystem:
         missing = len(expected_ids - {item.source_event_id for item in self.store.readings})
         raise RuntimeError("%d MQTT mock telemetry readings were not consumed before timeout" % missing)
 
+    def _request_sensor_reports(self, run: AgentRun) -> None:
+        """Actively request a fresh report from every sensor before inspection."""
+        sensors = list(self.store.sensors.values())
+        if not sensors:
+            run.step("sensor-monitor-agent", "sensor_report.skipped", "没有可请求的传感器")
+            return
+        requester = getattr(self.telemetry_publisher, "request_sensor_report", None)
+        if self.telemetry_publisher is None or not callable(requester):
+            run.step("sensor-monitor-agent", "sensor_report.fallback", "未接入 MQTT 请求端点，使用当前传感器快照")
+            return
+
+        expected_ids: set[str] = set()
+        requested = 0
+        for sensor in sensors:
+            latest = self.store.latest_reading(sensor.pond_id, sensor.metric)
+            if latest is None:
+                continue
+            request_id = "%s-%s" % (run.id, sensor.id)
+            source_event_id = "patrol-report-%s-%s" % (run.id, sensor.id)
+            if requester(
+                pond_id=sensor.pond_id,
+                sensor_id=sensor.id,
+                metric=sensor.metric,
+                unit=sensor.unit,
+                value=latest.value,
+                request_id=request_id,
+                source_event_id=source_event_id,
+                quality=latest.quality,
+                auto_run=False,
+                defer_persist=False,
+            ):
+                requested += 1
+                expected_ids.add(source_event_id)
+        run.step(
+            "sensor-monitor-agent",
+            "sensor_report.requested",
+            "已通过 MQTT 向 %s 个传感器主动请求即时上报" % requested,
+        )
+        deadline = time.monotonic() + 30
+        while expected_ids and time.monotonic() < deadline:
+            received_ids = {item.source_event_id for item in self.store.readings}
+            if expected_ids.issubset(received_ids):
+                run.step("sensor-monitor-agent", "sensor_report.received", "本轮传感器上报已全部通过 MQTT 入库")
+                return
+            time.sleep(0.02)
+        received_ids = {item.source_event_id for item in self.store.readings}
+        missing = expected_ids - received_ids
+        run.step(
+            "sensor-monitor-agent",
+            "sensor_report.timeout" if missing else "sensor_report.received",
+            "MQTT 传感器上报完成：收到 %s/%s，缺少 %s" % (len(received_ids & expected_ids), len(expected_ids), len(missing)),
+        )
+
     def _demo_reading(
         self,
         pond_id: str,
@@ -482,7 +535,8 @@ class FishAgentSystem:
     def run_patrol(self) -> AgentRun:
         run = AgentRun(id=new_id("run"), goal="执行全场巡查", status="RUNNING")
         self.store.agent_runs[run.id] = run
-        run.step("supervisor-agent", "start_patrol", "读取全场养殖单元和活动事件")
+        run.step("supervisor-agent", "start_patrol", "主动请求全场传感器即时上报后再开始巡查")
+        self._request_sensor_reports(run)
         incidents_to_decide: list[str] = []
         for pond in self.store.ponds.values():
             latest_readings = [self.store.latest_reading(pond.id, spec["metric"]) for spec in DEMO_SENSOR_SPECS]

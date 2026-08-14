@@ -108,6 +108,10 @@ MQTT 主题格式为 `farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`，消
 {"metric":"AMMONIA","unit":"mg/L","value":0.18,"source_event_id":"mqtt-001"}
 ```
 
+点击“立即巡查”或执行周期巡查时，系统会先向每个传感器的
+`farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}/commands` 发布
+`{"action":"REPORT_NOW",...}`，再等待传感器通过标准读数主题回传本轮数据；巡查分析只使用这批主动请求产生的最新读数。演示环境中的模拟传感器也通过本地 MQTT Broker 完成请求和回传。
+
 实时事件可通过 `WS /events?after={sequence}` 断线续传；HTTP 事件补齐接口为 `GET /api/v1/events?after={sequence}`。
 
 ## 演示接口

@@ -105,7 +105,7 @@ class MqttTelemetryAdapter:
 
 
 class MqttTelemetryPublisher:
-    """Publish mock and integration telemetry through the local MQTT broker."""
+    """Publish mock telemetry and sensor report responses through MQTT."""
 
     def __init__(self, host: str, port: int, farm_id: str = "farm-demo") -> None:
         self.host = host
@@ -127,6 +127,17 @@ class MqttTelemetryPublisher:
             self.client.connect(self.host, self.port, keepalive=30)
             self.client.loop_start()
             return self.client
+
+    def _publish(self, topic: str, payload: str) -> None:
+        result = self._ensure_client().publish(topic, payload, qos=1, retain=False)
+        if int(getattr(result, "rc", 0)) != 0:
+            raise RuntimeError("MQTT publish failed with rc=%s" % getattr(result, "rc", "unknown"))
+        wait_for_publish = getattr(result, "wait_for_publish", None)
+        if callable(wait_for_publish):
+            wait_for_publish(timeout=5)
+        is_published = getattr(result, "is_published", None)
+        if callable(is_published) and not is_published():
+            raise RuntimeError("MQTT publish acknowledgement timed out")
 
     def publish_reading(
         self,
@@ -157,14 +168,59 @@ class MqttTelemetryPublisher:
             ensure_ascii=False,
         )
         try:
-            result = self._ensure_client().publish(topic, payload, qos=1, retain=False)
-            if int(getattr(result, "rc", 0)) != 0:
-                raise RuntimeError("MQTT publish failed with rc=%s" % getattr(result, "rc", "unknown"))
+            self._publish(topic, payload)
             self.last_error = None
             return True
         except Exception as exc:
             self.last_error = str(exc)
             return False
+
+    def request_sensor_report(
+        self,
+        pond_id: str,
+        sensor_id: str,
+        metric: str,
+        unit: str,
+        value: float,
+        request_id: str,
+        source_event_id: str,
+        quality: str = "GOOD",
+        auto_run: bool = False,
+        defer_persist: bool = False,
+    ) -> bool:
+        """Request one sensor report, then publish the mock sensor response.
+
+        The request and response both cross the broker. The response path uses
+        the normal telemetry topic so the application cannot bypass MQTT.
+        """
+        command_topic = "farms/%s/ponds/%s/sensors/%s/commands" % (self.farm_id, pond_id, sensor_id)
+        command = json.dumps(
+            {
+                "action": "REPORT_NOW",
+                "request_id": request_id,
+                "sensor_id": sensor_id,
+                "requested_at": uuid.uuid1().time,
+                "source": "fishagent.patrol-agent",
+            },
+            ensure_ascii=False,
+        )
+        try:
+            self._publish(command_topic, command)
+        except Exception as exc:
+            self.last_error = str(exc)
+            return False
+        return self.publish_reading(
+            pond_id=pond_id,
+            sensor_id=sensor_id,
+            metric=metric,
+            unit=unit,
+            value=value,
+            source_event_id=source_event_id,
+            quality=quality,
+            seconds_old=0,
+            auto_run=auto_run,
+            defer_persist=defer_persist,
+        )
 
     def close(self) -> None:
         if self.client is not None:

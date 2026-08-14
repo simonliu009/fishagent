@@ -19,6 +19,7 @@
 - `GET /api/v1/sensors/{sensor_id}/health`
 - `POST /api/v1/telemetry/readings:batch`
 - MQTT 读数：`farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`
+- MQTT 传感器即时上报请求：`farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}/commands`，巡塘发布 `{"action":"REPORT_NOW",...}` 后等待传感器通过读数主题回传。
 - MQTT 设备指令：`fishagent/ponds/{pond_id}/devices/{device_id}/commands`
   - payload：`command=set_state`、`target_state`、`idempotency_key`、`source=fishagent.execution-agent`
 - `POST /api/v1/evidence`

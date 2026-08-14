@@ -577,6 +577,42 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
         self.assertEqual(len(state["manual_tasks"]), 1)
 
+    def test_patrol_requests_fresh_sensor_reports_before_inspection(self) -> None:
+        class LoopbackPublisher:
+            def __init__(self) -> None:
+                self.system = None
+                self.initial_reports = []
+                self.requests = []
+
+            def publish_reading(self, **payload):
+                self.initial_reports.append(payload.copy())
+                report = payload.copy()
+                report.pop("defer_persist", None)
+                self.system.ingest_reading(**report)
+                return True
+
+            def request_sensor_report(self, **payload):
+                self.requests.append(payload.copy())
+                report = payload.copy()
+                report.pop("request_id", None)
+                report.pop("defer_persist", None)
+                self.system.ingest_reading(**report)
+                return True
+
+        publisher = LoopbackPublisher()
+        system = FishAgentSystem(telemetry_publisher=publisher)
+        publisher.system = system
+        system.initialize_demo()
+        publisher.requests.clear()
+
+        patrol = system.run_patrol()
+
+        self.assertEqual(len(publisher.requests), 28)
+        self.assertTrue(all(item["auto_run"] is False for item in publisher.requests))
+        self.assertTrue(all(item["request_id"].startswith("run-") for item in publisher.requests))
+        self.assertTrue(any(step.action == "sensor_report.requested" for step in patrol.steps))
+        self.assertTrue(any(step.action == "sensor_report.received" for step in patrol.steps))
+
     def test_mixed_alert_demo_uses_do_and_ammonia_and_processes_both(self) -> None:
         class ManualOrchestrator:
             available = True

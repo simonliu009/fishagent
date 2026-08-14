@@ -12,7 +12,7 @@ from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import LLMConfig
 from fishagent.domain.models import AgentRun, Device
 from fishagent.infrastructure.gateways import SimulatorDeviceGateway
-from fishagent.infrastructure.mqtt import MqttTelemetryAdapter
+from fishagent.infrastructure.mqtt import MqttTelemetryAdapter, MqttTelemetryPublisher
 from fishagent.infrastructure.queue.celery_app import celery_app
 from fishagent.web.app import SYSTEM, app
 from fishagent.web.server import test_llm_connection as check_llm_connection
@@ -457,6 +457,39 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(received[0]["metric"], "AMMONIA")
         self.assertEqual(received[0]["unit"], "mg/L")
         self.assertEqual(received[0]["value"], 0.18)
+
+    def test_mqtt_sensor_report_publishes_request_and_response(self) -> None:
+        class FakeResult:
+            rc = 0
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.published = []
+
+            def publish(self, topic, payload, qos, retain):
+                self.published.append((topic, json.loads(payload), qos, retain))
+                return FakeResult()
+
+        publisher = MqttTelemetryPublisher("mqtt.test", 1883)
+        client = FakeClient()
+        publisher._ensure_client = lambda: client
+
+        self.assertTrue(
+            publisher.request_sensor_report(
+                pond_id="B-01",
+                sensor_id="do-b-01",
+                metric="DO",
+                unit="mg/L",
+                value=5.2,
+                request_id="patrol-request-1",
+                source_event_id="patrol-report-1",
+            )
+        )
+        self.assertEqual(client.published[0][0], "farms/farm-demo/ponds/B-01/sensors/do-b-01/commands")
+        self.assertEqual(client.published[0][1]["action"], "REPORT_NOW")
+        self.assertEqual(client.published[0][1]["request_id"], "patrol-request-1")
+        self.assertEqual(client.published[1][0], "farms/farm-demo/ponds/B-01/sensors/do-b-01")
+        self.assertEqual(client.published[1][1]["source_event_id"], "patrol-report-1")
 
     def test_mqtt_network_callback_queues_slow_ingest(self) -> None:
         ingest_started = threading.Event()
