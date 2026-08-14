@@ -1404,6 +1404,131 @@
         DISMISSED: '已手动消除',
       })[status] || status || '未知状态';
     }
+    function agentLabel(agent) {
+      return ({
+        'supervisor-agent': '总控智能体',
+        'sensor-monitor-agent': '传感器监测智能体',
+        'patrol-analysis-agent': '巡查分析智能体',
+        'action-planning-agent': '行动规划智能体',
+        'execution-agent': '执行智能体',
+        'verification-agent': '复核智能体',
+        crewai: '智渔AI',
+      })[agent] || String(agent || '智能体');
+    }
+    function actionLabel(action) {
+      return ({
+        'incident.started': '启动事件分析',
+        'incident.decided': '形成处置决策',
+        'validate_trigger': '核验告警触发源',
+        'validate_llm_decision': '校验模型决策',
+        'get_pond_snapshot': '读取池塘实时快照',
+        'get_device_capabilities': '检查设备能力',
+        'get_device_shadow_state': '读取设备当前状态',
+        propose_action: '提出设备动作建议',
+        route_action: '派发受控动作',
+        route_manual_task: '派发人工任务',
+        call_skill: '调用设备控制技能',
+        request_action_execution: '请求执行设备动作',
+        hold_current_state: '保持设备当前状态',
+        deduplicate_command: '抑制重复设备命令',
+        record_verification: '记录处置效果复核',
+        create_manual_task: '创建人工处理任务',
+        stop: '停止自动处置',
+      })[action] || String(action || '执行步骤');
+    }
+    function riskLabel(risk) {
+      return ({L0: '观察级', L1: '低风险', L2: '中风险', L3: '高风险'})[risk] || risk || '未标注风险';
+    }
+    function targetStateLabel(state) {
+      return ({on: '开启', off: '关闭'})[state] || state || '未指定';
+    }
+    function healthStatusLabel(status) {
+      return ({ONLINE: '在线', OFFLINE: '离线', DRIFTING: '漂移', ERROR: '错误'})[status] || status || '未知';
+    }
+    function taskStatusLabel(status) {
+      return ({OPEN: '待处理', IN_PROGRESS: '处理中', COMPLETED: '已完成', CANCELLED: '已取消'})[status] || status || '未知';
+    }
+    function approvalStatusLabel(status) {
+      return ({PENDING: '待审批', APPROVED: '已批准', REJECTED: '已拒绝', EXPIRED: '已过期'})[status] || status || '未知';
+    }
+    function proposalStatusLabel(status) {
+      return ({PROPOSED: '已提出', PENDING_APPROVAL: '等待审批', APPROVED: '已批准', REJECTED: '已拒绝', MANUAL_REQUIRED: '待人工处置', FAILED: '失败'})[status] || status || '未知';
+    }
+    function commandStatusLabel(status) {
+      return ({PROPOSED: '已提出', AUTHORIZED: '已授权', QUEUED: '排队中', SENT: '已发送', ACKNOWLEDGED: '设备已接收', CONFIRMED: '执行成功', REJECTED: '已拒绝', CANCELLED: '已取消', FAILED: '执行失败', TIMED_OUT: '执行超时'})[status] || status || '未知';
+    }
+    function verificationOutcomeLabel(outcome) {
+      return ({PASSED: '复核通过', FAILED: '复核未通过'})[outcome] || outcome || '等待复核';
+    }
+    function runStatusLabel(status) {
+      return ({QUEUED: '排队中', RUNNING: '运行中', WAITING_APPROVAL: '等待审批', COMPLETED: '已完成', FAILED: '失败', TIMED_OUT: '超时', CANCELLED: '已取消'})[status] || status || '未知';
+    }
+    function stopReasonLabel(reason) {
+      return ({ACTION_EXECUTED: '设备动作已执行，等待复核', LLM_ACTION_EXECUTED: '模型动作已执行，等待复核', RESOLVED: '复核通过，告警已关闭', ALREADY_SATISFIED: '设备已处于目标状态，等待复核', ESCALATED: '复核未通过，已升级人工', ACTION_FAILED: '设备动作执行失败', LLM_MANUAL_REQUIRED: '模型建议转人工处置', WAITING_APPROVAL: '等待人工审批', PATROL_COMPLETED: '巡查已完成'})[reason] || reason || '等待结果';
+    }
+    function deviceAssetLabel(deviceId) {
+      const device = (currentState.devices || []).find(item => item.id === deviceId);
+      if (!device) return deviceId || '未指定设备';
+      const capability = ({aeration: '增氧', valve: '阀门'})[device.capability] || device.capability || '未标注能力';
+      return `${device.name}（${device.id}，能力：${capability}）`;
+    }
+    function sensorAssetDetails(pondId) {
+      const sensors = (currentState.sensors || []).filter(item => item.pond_id === pondId);
+      const sensorIds = new Set(sensors.map(item => item.id));
+      const health = new Map((currentState.sensor_health || []).filter(item => sensorIds.has(item.sensor_id)).map(item => [item.sensor_id, item]));
+      return sensors.filter(sensor => sensor.status !== 'ONLINE' || health.get(sensor.id)?.status !== 'ONLINE').map(sensor => {
+        const state = health.get(sensor.id);
+        const metric = (waterMetrics.find(item => item.metric === sensor.metric)?.label || sensor.metric || '未知指标');
+        const note = state?.message ? `，说明：${state.message}` : '';
+        return `${sensor.name}（${sensor.id}，指标：${metric}，状态：${healthStatusLabel(state?.status || sensor.status)}${note}）`;
+      });
+    }
+    function offlineDeviceDetails(pondId) {
+      return (currentState.devices || []).filter(item => item.pond_id === pondId && !item.healthy).map(item => deviceAssetLabel(item.id) + '，状态：离线');
+    }
+    function alertCauseSummary(item, evidence) {
+      const pond = (currentState.ponds || []).find(candidate => candidate.id === item.pond_id);
+      const summary = evidence?.summary || item.title || '等待告警证据';
+      const details = [];
+      if (pond) details.push(`池塘资产：${pond.id} ${pond.name}（品种：${pond.species || '未标注'}）`);
+      details.push(summary);
+      const sensors = sensorAssetDetails(item.pond_id);
+      const devices = offlineDeviceDetails(item.pond_id);
+      if (sensors.length && !summary.includes('传感器异常：')) details.push(`传感器异常：${sensors.join('、')}`);
+      if (devices.length && !summary.includes('设备离线：')) details.push(`设备离线：${devices.join('、')}`);
+      return details.join('；');
+    }
+    function extractJsonObject(text) {
+      const source = String(text || '');
+      const start = source.indexOf('{');
+      if (start < 0) return null;
+      for (let end = start + 2; end <= source.length; end += 1) {
+        try {
+          const candidate = JSON.parse(source.slice(start, end));
+          if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) return candidate;
+        } catch (_) {}
+      }
+      return null;
+    }
+    function localizedStepSummary(step) {
+      const raw = String(step?.summary || '').trim();
+      if (step?.action === 'incident.decided') {
+        const decision = extractJsonObject(raw);
+        if (decision) {
+          const details = [`动作：${({EXECUTE: '自动执行', REQUEST_APPROVAL: '提交人工审批', MANUAL_REQUIRED: '转人工处置', NO_ACTION: '无需设备动作', REFRESH_EVIDENCE: '刷新证据'})[decision.action] || decision.action || '未指定'}`, `风险：${riskLabel(decision.risk)}`];
+          if (decision.device_id) details.push(`设备：${deviceAssetLabel(decision.device_id)}`);
+          if (decision.target_state) details.push(`目标：${targetStateLabel(decision.target_state)}`);
+          if (decision.rationale) details.push(`依据：${decision.rationale}`);
+          return details.join('；');
+        }
+        if (/thought\s*:/i.test(raw)) return '已完成多维证据分析，形成结构化处置建议。';
+        return '已形成结构化处置决策。';
+      }
+      if (step?.action === 'validate_llm_decision') return '结构化处置决策已通过安全校验。';
+      if (step?.action === 'request_action_execution') return `设备动作已提交安全策略门：${raw || '等待设备返回结果'}`;
+      if (step?.action === 'incident.failed' || step?.action === 'incident.invalid' || step?.action === 'incident.timeout') return '模型决策未能完成，已转人工处理。';
+      return raw || actionLabel(step?.action);
+    }
     function renderAlerts() {
       const incidents = (currentState.incidents || [])
         .filter(item => {
@@ -1453,36 +1578,36 @@
         const terminalCommand = command && ['CONFIRMED','REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
         const commandSucceeded = command?.status === 'CONFIRMED';
         const commandFailed = command && ['REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
-        const flowNode = (label, agent, summary, state = 'done') => `<div class="alert-flow-node ${state}"><i class="alert-flow-check" data-lucide="${state === 'done' ? 'check-circle-2' : state === 'failed' ? 'circle-x' : 'circle'}"></i><div class="alert-flow-label">${escapeHtml(label)}</div><div class="alert-flow-agent">${escapeHtml(agent)}</div><div class="alert-flow-summary">${escapeHtml(summary)}</div></div>`;
+        const flowNode = (label, agent, summary, state = 'done') => `<div class="alert-flow-node ${state}"><i class="alert-flow-check" data-lucide="${state === 'done' ? 'check-circle-2' : state === 'failed' ? 'circle-x' : 'circle'}"></i><div class="alert-flow-label">${escapeHtml(label)}</div><div class="alert-flow-agent">${escapeHtml(agentLabel(agent))}</div><div class="alert-flow-summary">${escapeHtml(summary)}</div></div>`;
         const flow = [
-          flowNode('告警原因', evidence?.type === 'sensor_snapshot' ? '传感器监测 Agent' : '事件证据', evidence?.summary || item.title),
+          flowNode('告警原因', evidence?.type === 'sensor_snapshot' ? 'sensor-monitor-agent' : '事件证据', alertCauseSummary(item, evidence)),
         ];
         if (decisionStep) {
           const decisionState = ['incident.failed','incident.invalid','incident.timeout'].includes(decisionStep.action) ? 'failed' : 'done';
-          flow.push(flowNode('Agent 决策', decisionStep.agent, decisionStep.summary || decisionRun.stop_reason || decisionRun.status, decisionState));
+          flow.push(flowNode('智能体决策', decisionStep.agent, localizedStepSummary(decisionStep) || alertStatusLabel(decisionRun.stop_reason || decisionRun.status), decisionState));
         }
         if (executionStep || command || proposal || task) {
           const executionSummary = command
-            ? `发布设备动作：${command.device_id} → ${command.target_state}`
+            ? `发布设备动作：${deviceAssetLabel(command.device_id)} → ${targetStateLabel(command.target_state)}`
             : task
-              ? `提交人工任务：${task.title} · ${task.status}`
+              ? `提交人工任务：${task.title} · ${taskStatusLabel(task.status)} · ${task.assignee || '现场操作员'}`
               : proposal
-                ? `提交受控动作：${proposal.device_id} → ${proposal.target_state} · ${approval?.status || proposal.status}`
-                : executionStep.summary;
+                ? `提交受控动作：${deviceAssetLabel(proposal.device_id)} → ${targetStateLabel(proposal.target_state)} · ${approval ? approvalStatusLabel(approval.status) : proposalStatusLabel(proposal.status)}`
+                : localizedStepSummary(executionStep);
           flow.push(flowNode('执行动作', executionStep?.agent || 'execution-agent', executionSummary, executionStep || command || proposal || task ? 'done' : 'active'));
         }
         if (verificationResult || verificationRun) {
           const resultFailed = verificationResult?.outcome === 'FAILED' || verificationRun?.status === 'FAILED';
           const resultSummary = verificationResult
-            ? `复核结果：${verificationResult.outcome}${verificationResult.observed_value == null ? '' : ` · DO ${verificationResult.observed_value}`}`
-            : verificationStep?.summary || verificationRun.stop_reason || verificationRun.status;
+            ? `${verificationOutcomeLabel(verificationResult.outcome)}${verificationResult.observed_value == null ? '' : `；溶解氧：${verificationResult.observed_value} mg/L`}`
+            : localizedStepSummary(verificationStep) || alertStatusLabel(verificationRun.stop_reason || verificationRun.status);
           flow.push(flowNode('执行结果', verificationStep?.agent || 'verification-agent', resultSummary, resultFailed ? 'failed' : verificationResult || verificationRun.status === 'COMPLETED' ? 'done' : 'active'));
         } else if (command) {
           const resultSummary = commandSucceeded
-            ? '设备返回确认，动作执行成功'
+            ? `设备返回确认，${commandStatusLabel(command.status)}`
             : commandFailed
-              ? `设备返回失败：${command.status}`
-              : `等待设备返回：${command.status}`;
+              ? `设备返回：${commandStatusLabel(command.status)}`
+              : `等待设备返回：${commandStatusLabel(command.status)}`;
           flow.push(flowNode('执行结果', executionStep?.agent || 'execution-agent', resultSummary, commandFailed ? 'failed' : terminalCommand ? 'done' : 'active'));
         }
         const dismissAction = closed ? '' : `<button class="button secondary small alert-dismiss" type="button" onclick="dismissIncident('${escapeHtml(item.id)}')"><i data-lucide="check"></i>手动消除</button>`;
@@ -1493,7 +1618,7 @@
     function renderRuns() {
       const runs = [...(currentState.agent_runs || [])].reverse();
       document.getElementById('run_meta').textContent = `${runs.length} 次运行`;
-      document.getElementById('run_list').innerHTML = runs.length ? runs.map(run => `<article class="run-row"><div class="run-row-head"><span>${assistantText(run.goal)}</span>${badge(run.status)}</div><div class="run-row-meta">停止原因：${assistantText(run.stop_reason || '--')} · 委派：${assistantText((run.delegated_agents || []).join(' → ') || '--')}</div>${run.steps?.length ? `<ol class="run-steps">${run.steps.slice(-5).map(step => `<li>${assistantText(step.agent)} / ${assistantText(step.action)}：${assistantText(step.summary)}</li>`).join('')}</ol>` : ''}</article>`).join('') : '<div class="empty">尚无 Agent 运行记录</div>';
+      document.getElementById('run_list').innerHTML = runs.length ? runs.map(run => `<article class="run-row"><div class="run-row-head"><span>${assistantText(run.goal)}</span>${badge(run.status, runStatusLabel(run.status))}</div><div class="run-row-meta">停止原因：${escapeHtml(stopReasonLabel(run.stop_reason))} · 委派：${escapeHtml((run.delegated_agents || []).map(agentLabel).join(' → ') || '--')}</div>${run.steps?.length ? `<ol class="run-steps">${run.steps.slice(-5).map(step => `<li>${escapeHtml(agentLabel(step.agent))} / ${escapeHtml(actionLabel(step.action))}：${escapeHtml(localizedStepSummary(step))}</li>`).join('')}</ol>` : ''}</article>`).join('') : '<div class="empty">尚无智能体运行记录</div>';
     }
     function assistantText(value) { return escapeHtml(value).replace(/crewai/gi, '智渔AI'); }
     function eventRows(limit = 30, branded = false) {

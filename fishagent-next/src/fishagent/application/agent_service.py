@@ -555,6 +555,34 @@ class FishAgentSystem:
             unhealthy_devices = [
                 device for device in self.store.devices.values() if device.pond_id == pond.id and not device.healthy
             ]
+            unhealthy_sensor_details = []
+            for health in unhealthy_sensors:
+                sensor = self.store.sensors.get(health.sensor_id)
+                health_label = {
+                    HealthStatus.OFFLINE: "离线",
+                    HealthStatus.DRIFTING: "漂移",
+                    HealthStatus.ERROR: "错误",
+                }.get(health.status, health.status.value)
+                if sensor is None:
+                    unhealthy_sensor_details.append("传感器 %s（状态：%s）" % (health.sensor_id, health_label))
+                    continue
+                detail = "%s（%s，指标：%s，状态：%s" % (
+                    sensor.name,
+                    sensor.id,
+                    DEMO_SENSOR_BY_METRIC.get(sensor.metric, {"name": sensor.metric}).get("name", sensor.metric),
+                    health_label,
+                )
+                if health.message:
+                    detail += "，说明：%s" % health.message
+                unhealthy_sensor_details.append(detail + "）")
+            unhealthy_device_details = [
+                "%s（%s，能力：%s，状态：离线）" % (
+                    device.name,
+                    device.id,
+                    {"aeration": "增氧", "valve": "阀门"}.get(device.capability, device.capability),
+                )
+                for device in unhealthy_devices
+            ]
             latest_do = next((reading for reading in available if reading.metric == "DO"), None)
             reasons = []
             if len(available) < len(DEMO_SENSOR_SPECS):
@@ -571,9 +599,9 @@ class FishAgentSystem:
                 elif safe_range is not None and not safe_range[0] <= reading.value <= safe_range[1]:
                     reasons.append("%s超出安全范围" % spec["name"])
             if unhealthy_sensors:
-                reasons.append("%d 个传感器异常" % len(unhealthy_sensors))
+                reasons.append("传感器异常：%s" % "、".join(unhealthy_sensor_details))
             if unhealthy_devices:
-                reasons.append("%d 台设备离线" % len(unhealthy_devices))
+                reasons.append("设备离线：%s" % "、".join(unhealthy_device_details))
             active = self.store.active_incident_for_pond(pond.id)
             if active and not reasons:
                 reasons.append("存在未关闭异常事件")
@@ -584,7 +612,12 @@ class FishAgentSystem:
                 patrol_run_id=run.id,
                 pond_id=pond.id,
                 status=status,
-                summary="%s%s" % (summary, "；异常：%s" % "、".join(reasons) if reasons else ""),
+                summary="池塘 %s %s；%s%s" % (
+                    pond.id,
+                    pond.name,
+                    summary,
+                    "；异常：%s" % "、".join(reasons) if reasons else "",
+                ),
                 evidence_refs=[reading.source_event_id for reading in available],
             )
             self.store.patrol_findings[finding.id] = finding
