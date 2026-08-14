@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 
@@ -453,6 +453,7 @@ class AgentStep:
     action: str
     summary: str
     created_at: datetime = field(default_factory=utcnow)
+    details: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -466,7 +467,7 @@ class AgentRun:
     delegated_agents: List[str] = field(default_factory=list)
     budget: Dict[str, int] = field(default_factory=lambda: {"delegations": 8, "tool_calls": 20, "seconds": 300})
 
-    def step(self, agent: str, action: str, summary: str) -> None:
+    def step(self, agent: str, action: str, summary: str, details: Optional[Dict[str, Any]] = None) -> None:
         if agent not in self.delegated_agents:
             self.delegated_agents.append(agent)
-        self.steps.append(AgentStep(agent=agent, action=action, summary=summary))
+        self.steps.append(AgentStep(agent=agent, action=action, summary=summary, details=dict(details or {})))

@@ -27,6 +27,7 @@ class CrewRunResult:
     delegated_agents: list[str] = field(default_factory=list)
     steps: list[tuple[str, str, str]] = field(default_factory=list)
     decision: Optional[IncidentDecision] = None
+    trace: list[dict[str, Any]] = field(default_factory=list)
 
 
 class CrewAIUnavailable(RuntimeError):
@@ -131,42 +132,77 @@ class CrewAIOrchestrator:
             num_retries=0,
         )
 
-    def _tools(self, pond_id: Optional[str]):
+    @staticmethod
+    def _record_tool_trace(trace: Optional[list[dict[str, Any]]], agent: str, tool_name: str, inputs: dict, output: str) -> None:
+        if trace is None:
+            return
+        try:
+            parsed_output: Any = json.loads(output)
+        except (TypeError, json.JSONDecodeError):
+            parsed_output = str(output)[:12000]
+        serialized = json.dumps(parsed_output, ensure_ascii=False, default=str)
+        if len(serialized) > 12000:
+            parsed_output = {"truncated": True, "preview": serialized[:12000]}
+        trace.append(
+            {
+                "agent": agent,
+                "action": "tool.%s" % tool_name,
+                "summary": "Agent 调用只读工具 %s 并取得返回数据" % tool_name,
+                "details": {
+                    "kind": "tool_call",
+                    "tool": tool_name,
+                    "inputs": inputs,
+                    "output": parsed_output,
+                },
+            }
+        )
+
+    def _tools(self, pond_id: Optional[str], trace: Optional[list[dict[str, Any]]] = None):
         @self._tool("get_pond_snapshot")
         def get_pond_snapshot(pond: str = pond_id or "") -> str:
             """读取池塘最新水质和资产快照，只读工具。"""
             snapshot = self.system.snapshot()
             ponds = [item for item in snapshot["ponds"] if not pond or item["id"] == pond]
             readings = [item for item in snapshot["readings"] if not pond or item["pond_id"] == pond][-80:]
-            return json.dumps({"pond": ponds, "readings": readings}, ensure_ascii=False)
+            result = json.dumps({"pond": ponds, "readings": readings}, ensure_ascii=False)
+            self._record_tool_trace(trace, "sensor-monitor-agent", "get_pond_snapshot", {"pond": pond}, result)
+            return result
 
         @self._tool("get_device_shadow_state")
         def get_device_shadow_state(pond: str = pond_id or "") -> str:
             """读取设备能力和影子状态，只读工具。"""
             snapshot = self.system.snapshot()
             devices = [item for item in snapshot["devices"] if not pond or item["pond_id"] == pond]
-            return json.dumps(devices, ensure_ascii=False)
+            result = json.dumps(devices, ensure_ascii=False)
+            self._record_tool_trace(trace, "patrol-analysis-agent", "get_device_shadow_state", {"pond": pond}, result)
+            return result
 
         @self._tool("list_active_incidents")
         def list_active_incidents() -> str:
             """读取当前未关闭事件，只读工具。"""
             snapshot = self.system.snapshot()
             active = [item for item in snapshot["incidents"] if item["status"] not in {"RESOLVED", "DISMISSED"}]
-            return json.dumps(active, ensure_ascii=False)
+            result = json.dumps(active, ensure_ascii=False)
+            self._record_tool_trace(trace, "patrol-analysis-agent", "list_active_incidents", {}, result)
+            return result
 
         @self._tool("get_weather_context")
         def get_weather_context(pond: str = pond_id or "") -> str:
             """读取指定池塘天气和短时预报，只读工具。"""
             snapshot = self.system.snapshot()
             weather = [item for item in snapshot.get("weather_observations", []) if not pond or item["pond_id"] == pond]
-            return json.dumps(weather, ensure_ascii=False)
+            result = json.dumps(weather, ensure_ascii=False)
+            self._record_tool_trace(trace, "patrol-analysis-agent", "get_weather_context", {"pond": pond}, result)
+            return result
 
         @self._tool("get_camera_observations")
         def get_camera_observations(pond: str = pond_id or "") -> str:
             """读取水面和水下摄像头的结构化观察结果，只读工具。"""
             snapshot = self.system.snapshot()
             observations = [item for item in snapshot.get("camera_observations", []) if not pond or item["pond_id"] == pond]
-            return json.dumps(observations, ensure_ascii=False)
+            result = json.dumps(observations, ensure_ascii=False)
+            self._record_tool_trace(trace, "vision-analysis-agent", "get_camera_observations", {"pond": pond}, result)
+            return result
 
         @self._tool("search_disease_knowledge")
         def search_disease_knowledge(query: str = "") -> str:
@@ -180,12 +216,14 @@ class CrewAIOrchestrator:
                     for article in articles
                     if any(term in json.dumps(article, ensure_ascii=False).lower() for term in terms)
                 ]
-            return json.dumps(articles, ensure_ascii=False)
+            result = json.dumps(articles, ensure_ascii=False)
+            self._record_tool_trace(trace, "vision-analysis-agent", "search_disease_knowledge", {"query": query}, result)
+            return result
 
         @self._tool("propose_action")
         def propose_action(device_id: str, target_state: str, rationale: str) -> str:
             """形成动作建议；不会直接发送设备命令。"""
-            return json.dumps(
+            result = json.dumps(
                 {
                     "device_id": device_id,
                     "target_state": target_state,
@@ -194,6 +232,14 @@ class CrewAIOrchestrator:
                 },
                 ensure_ascii=False,
             )
+            self._record_tool_trace(
+                trace,
+                "action-planning-agent",
+                "propose_action",
+                {"device_id": device_id, "target_state": target_state, "rationale": rationale},
+                result,
+            )
+            return result
 
         return [
             get_pond_snapshot,
@@ -212,9 +258,10 @@ class CrewAIOrchestrator:
         steps: list[tuple[str, str, str]],
         context: Optional[dict] = None,
         response_mode: str = "decision",
+        trace: Optional[list[dict[str, Any]]] = None,
     ) -> Any:
         llm = self._llm()
-        tools = self._tools(pond_id)
+        tools = self._tools(pond_id, trace)
         decision_mode = response_mode == "decision"
         manager_iterations = 4 if decision_mode else 3
         member_iterations = 2 if decision_mode else 1
@@ -459,6 +506,7 @@ class CrewAIOrchestrator:
             raise CrewAIUnavailable(self.last_error or "CrewAI 未配置")
         incident = context.get("incident", {})
         pond_id = str(incident.get("pond_id") or "") or None
+        trace: list[dict[str, Any]] = []
         steps: list[tuple[str, str, str]] = [
             ("supervisor-agent", "incident.started", "读取事件上下文并委派证据调查 Agent"),
         ]
@@ -473,7 +521,7 @@ class CrewAIOrchestrator:
         )
         try:
             with self._service_execution_context():
-                output = self._kickoff_crew(goal, pond_id, steps, context=context)
+                output = self._kickoff_crew(goal, pond_id, steps, context=context, trace=trace)
         except Exception as exc:
             self.last_error = str(exc)
             reason = self._decision_failure_reason(exc)
@@ -488,10 +536,23 @@ class CrewAIOrchestrator:
                 summary=summary,
                 stop_reason=reason,
                 steps=steps,
+                trace=trace + [
+                    {
+                        "agent": "supervisor-agent",
+                        "action": "llm.error",
+                        "summary": summary,
+                        "details": {
+                            "kind": "llm_error",
+                            "error_code": reason,
+                            "error": str(exc),
+                        },
+                    }
+                ],
             )
         raw = str(getattr(output, "raw", output))
         try:
-            decision = IncidentDecision.from_payload(self._extract_decision_payload(output))
+            payload = self._extract_decision_payload(output)
+            decision = IncidentDecision.from_payload(payload)
         except (TypeError, ValueError) as exc:
             self.last_error = str(exc)
             steps.append(("supervisor-agent", "incident.invalid", "模型未返回可执行的结构化决策：%s" % exc))
@@ -499,6 +560,19 @@ class CrewAIOrchestrator:
                 summary="模型返回的结构化决策无效：%s" % exc,
                 stop_reason="LLM_DECISION_INVALID",
                 steps=steps,
+                trace=trace + [
+                    {
+                        "agent": "supervisor-agent",
+                        "action": "llm.response",
+                        "summary": "模型返回无法通过结构化协议校验",
+                        "details": {
+                            "kind": "llm_response",
+                            "valid": False,
+                            "error": str(exc),
+                            "raw_preview": raw[:4000],
+                        },
+                    }
+                ],
             )
         steps.append(("supervisor-agent", "incident.decided", raw[:800]))
         delegated = [agent for agent, _, _ in steps if agent not in {"supervisor-agent", "crewai"}]
@@ -508,6 +582,27 @@ class CrewAIOrchestrator:
             delegated_agents=sorted(set(delegated)),
             steps=steps,
             decision=decision,
+            trace=trace + [
+                {
+                    "agent": "supervisor-agent",
+                    "action": "llm.response",
+                    "summary": "模型返回结构化处置决策",
+                    "details": {
+                        "kind": "llm_response",
+                        "valid": True,
+                        "raw_response": raw[:4000],
+                        "decision": {
+                            "action": decision.action,
+                            "device_id": decision.device_id,
+                            "target_state": decision.target_state,
+                            "risk": decision.risk,
+                            "rationale": decision.rationale,
+                            "verification_delay_seconds": decision.verification_delay_seconds,
+                            "evidence_refs": decision.evidence_refs,
+                        },
+                    },
+                }
+            ],
         )
 
     def run(self, goal: str, pond_id: Optional[str] = None) -> CrewRunResult:

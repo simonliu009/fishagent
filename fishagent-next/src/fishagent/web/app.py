@@ -892,6 +892,7 @@ def agent_run_payload(run: Any) -> dict[str, Any]:
                 "action": step.action,
                 "summary": step.summary,
                 "created_at": step.created_at.isoformat(),
+                "details": step.details,
             }
             for step in run.steps
         ],

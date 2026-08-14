@@ -138,15 +138,31 @@ class FishAgentSystem:
         missing = len(expected_ids - {item.source_event_id for item in self.store.readings})
         raise RuntimeError("%d MQTT mock telemetry readings were not consumed before timeout" % missing)
 
-    def _request_sensor_reports(self, run: AgentRun) -> None:
-        """Actively request a fresh report from every sensor before inspection."""
-        sensors = list(self.store.sensors.values())
+    def _request_sensor_reports(self, run: AgentRun, pond_id: Optional[str] = None) -> None:
+        """Actively request fresh MQTT reports before inspection or case analysis."""
+        sensors = [item for item in self.store.sensors.values() if pond_id is None or item.pond_id == pond_id]
         if not sensors:
-            run.step("sensor-monitor-agent", "sensor_report.skipped", "没有可请求的传感器")
+            run.step(
+                "sensor-monitor-agent",
+                "sensor_report.skipped",
+                "没有可请求的传感器",
+                details={"kind": "mqtt_sensor_report", "pond_id": pond_id, "requested": 0},
+            )
             return
         requester = getattr(self.telemetry_publisher, "request_sensor_report", None)
         if self.telemetry_publisher is None or not callable(requester):
-            run.step("sensor-monitor-agent", "sensor_report.fallback", "未接入 MQTT 请求端点，使用当前传感器快照")
+            run.step(
+                "sensor-monitor-agent",
+                "sensor_report.fallback",
+                "未接入 MQTT 请求端点，使用当前传感器快照",
+                details={
+                    "kind": "mqtt_sensor_report",
+                    "pond_id": pond_id,
+                    "requested": len(sensors),
+                    "received": len(sensors),
+                    "transport": "snapshot_fallback",
+                },
+            )
             return
 
         expected_ids: set[str] = set()
@@ -191,12 +207,30 @@ class FishAgentSystem:
             "sensor-monitor-agent",
             "sensor_report.requested",
             "已通过 MQTT 向 %s 个传感器主动请求即时上报" % requested,
+            details={
+                "kind": "mqtt_sensor_report",
+                "pond_id": pond_id,
+                "requested": requested,
+                "expected_source_event_ids": sorted(expected_ids),
+                "transport": "mqtt",
+            },
         )
         deadline = time.monotonic() + 30
         while expected_ids and time.monotonic() < deadline:
             received_ids = {item.source_event_id for item in self.store.readings}
             if expected_ids.issubset(received_ids):
-                run.step("sensor-monitor-agent", "sensor_report.received", "本轮传感器上报已全部通过 MQTT 入库")
+                run.step(
+                    "sensor-monitor-agent",
+                    "sensor_report.received",
+                    "本轮传感器上报已全部通过 MQTT 入库",
+                    details={
+                        "kind": "mqtt_sensor_report",
+                        "pond_id": pond_id,
+                        "requested": len(expected_ids),
+                        "received": len(expected_ids),
+                        "transport": "mqtt",
+                    },
+                )
                 return
             time.sleep(0.02)
         received_ids = {item.source_event_id for item in self.store.readings}
@@ -205,6 +239,14 @@ class FishAgentSystem:
             "sensor-monitor-agent",
             "sensor_report.timeout" if missing else "sensor_report.received",
             "MQTT 传感器上报完成：收到 %s/%s，缺少 %s" % (len(received_ids & expected_ids), len(expected_ids), len(missing)),
+            details={
+                "kind": "mqtt_sensor_report",
+                "pond_id": pond_id,
+                "requested": len(expected_ids),
+                "received": len(received_ids & expected_ids),
+                "missing_source_event_ids": sorted(missing),
+                "transport": "mqtt",
+            },
         )
 
     def _demo_reading(
@@ -429,6 +471,13 @@ class FishAgentSystem:
                 incident.transition(IncidentStatus.INVESTIGATING)
                 run = AgentRun(id=new_id("run"), goal="分析案例：%s" % case.title, incident_id=incident.id, status="RUNNING")
                 self.store.agent_runs[run.id] = run
+                run.step(
+                    "supervisor-agent",
+                    "patrol_sop.entered",
+                    "多模态案例已纳入巡塘 SOP，先获取池塘现场数据再进入模型研判",
+                    details={"kind": "patrol_sop", "stage": "entered", "case_id": case.id, "pond_id": case.pond_id},
+                )
+                self._request_sensor_reports(run, pond_id=case.pond_id)
                 run.step("supervisor-agent", "stop", "CrewAI 未配置，案例不使用硬编码动作替代模型决策")
                 self._llm_manual_stop(incident, run, "LLM_REQUIRED", "案例已转人工，等待配置 CrewAI")
             else:
@@ -725,13 +774,39 @@ class FishAgentSystem:
         if orchestrator is None or not orchestrator.available:
             run.status = "FAILED"
             run.stop_reason = "LLM_REQUIRED"
-            reply = "CrewAI 未启用或模型 API Key 未配置"
-            run.step("supervisor-agent", "chat.stop", reply)
+            reply = "智渔AI 未启用或模型 API Key 未配置"
+            run.step("supervisor-agent", "chat.stop", reply, details={"kind": "llm_error", "error_code": "LLM_REQUIRED"})
             self.store.emit("agent.chat.failed", reply, {"run_id": run.id}, correlation_id=run.id)
             return run, reply
+        run.step(
+            "supervisor-agent",
+            "chat.request",
+            "Agent 向大模型发送聊天消息",
+            details={
+                "kind": "llm_request",
+                "message": {
+                    "role": "user",
+                    "from": "智渔AI 助手",
+                    "to": "大模型",
+                    "content": normalized,
+                    "pond_id": effective_pond_id,
+                    "history": (history or [])[-12:],
+                },
+            },
+        )
         result = orchestrator.chat(normalized, (history or [])[-12:], effective_pond_id)
         for agent, action, summary in result.steps:
             run.step(agent, action, summary)
+        run.step(
+            "supervisor-agent",
+            "chat.response",
+            "大模型返回聊天答复",
+            details={
+                "kind": "llm_response",
+                "valid": result.stop_reason == "CREW_CHAT_COMPLETED",
+                "response": result.summary,
+            },
+        )
         run.delegated_agents = sorted(set(run.delegated_agents + result.delegated_agents))
         run.status = "COMPLETED" if result.stop_reason == "CREW_CHAT_COMPLETED" else "FAILED"
         run.stop_reason = result.stop_reason
@@ -1002,6 +1077,73 @@ class FishAgentSystem:
             "analysis_case": analysis_case,
         }
 
+    @staticmethod
+    def _llm_trace_context(context: dict) -> dict[str, Any]:
+        """Keep the operator-facing request trace useful while bounding its size."""
+        incident = context.get("incident") or {}
+        case = context.get("analysis_case") or {}
+        evidence = incident.get("evidence") or []
+        return {
+            "incident": {
+                key: incident.get(key)
+                for key in ("id", "title", "pond_id", "status", "risk")
+                if incident.get(key) is not None
+            },
+            "analysis_case": {
+                key: case.get(key)
+                for key in ("id", "title", "category", "trigger", "evidence_refs")
+                if case.get(key) is not None
+            },
+            "evidence": [
+                {"type": item.get("type"), "summary": item.get("summary"), "refs": item.get("refs", [])}
+                for item in evidence
+            ],
+            "readings": [
+                {
+                    key: reading.get(key)
+                    for key in ("pond_id", "metric", "unit", "value", "quality", "sampled_at", "source_event_id")
+                    if reading.get(key) is not None
+                }
+                for reading in (context.get("readings") or [])[-20:]
+            ],
+            "sensor_health": [
+                {
+                    key: item.get(key)
+                    for key in ("sensor_id", "status", "message", "last_seen_at")
+                    if item.get(key) is not None
+                }
+                for item in context.get("sensor_health") or []
+            ],
+            "devices": [
+                {
+                    key: item.get(key)
+                    for key in ("id", "name", "capability", "shadow_state", "healthy", "pond_id")
+                    if item.get(key) is not None
+                }
+                for item in context.get("devices") or []
+            ],
+            "weather": [
+                {
+                    key: item.get(key)
+                    for key in ("id", "condition", "forecast", "wind_speed_mps", "rain_probability_pct", "observed_at")
+                    if item.get(key) is not None
+                }
+                for item in context.get("weather_observations") or []
+            ],
+            "camera_observations": [
+                {
+                    key: item.get(key)
+                    for key in ("id", "camera_role", "observation_type", "summary", "labels", "confidence", "captured_at")
+                    if item.get(key) is not None
+                }
+                for item in context.get("camera_observations") or []
+            ],
+            "knowledge_refs": [
+                {"id": item.get("id"), "name": item.get("name")}
+                for item in context.get("disease_knowledge") or []
+            ],
+        }
+
     def _llm_manual_stop(self, incident: Incident, run: AgentRun, reason: str, summary: str) -> AgentRun:
         if incident.status == IncidentStatus.INVESTIGATING:
             incident.transition(IncidentStatus.ACTION_PROPOSED)
@@ -1012,12 +1154,22 @@ class FishAgentSystem:
         if len(detail) > 600:
             detail = detail[:600] + "..."
         manual_description = "错误码：%s；原因：%s" % (reason, detail)
-        self.create_manual_task(
+        task = self.create_manual_task(
             title="模型驱动处置待人工确认：%s" % incident.title,
             description=manual_description,
             incident_id=incident.id,
         )
-        run.step("execution-agent", "route_manual_task", manual_description)
+        run.step(
+            "execution-agent",
+            "route_manual_task",
+            manual_description,
+            details={
+                "kind": "manual_task",
+                "task_id": task.id,
+                "status": task.status.value,
+                "reason_code": reason,
+            },
+        )
         run.status = "COMPLETED"
         run.stop_reason = reason
         self.store.emit("agent.run.completed", summary, {"run_id": run.id, "reason": reason}, correlation_id=run.id)
@@ -1050,10 +1202,61 @@ class FishAgentSystem:
         self.store.emit("agent.run.started", run.goal, {"run_id": run.id, "mode": "llm"}, correlation_id=run.id)
         incident.transition(IncidentStatus.INVESTIGATING)
         orchestrator = cast(Any, self.agent_orchestrator)
+        analysis_case = next(
+            (item for item in self.store.analysis_cases.values() if item.incident_id == incident.id),
+            None,
+        )
+        if analysis_case is not None:
+            run.step(
+                "supervisor-agent",
+                "patrol_sop.entered",
+                "多模态案例已纳入巡塘 SOP，先主动请求现场传感器上报",
+                details={
+                    "kind": "patrol_sop",
+                    "stage": "entered",
+                    "case_id": analysis_case.id,
+                    "pond_id": incident.pond_id,
+                    "case_category": analysis_case.category,
+                },
+            )
+            self._request_sensor_reports(run, pond_id=incident.pond_id)
+            run.step(
+                "patrol-analysis-agent",
+                "patrol_sop.evidence_ready",
+                "巡塘 SOP 已完成现场数据采集，进入摄像头、天气和知识库交叉研判",
+                details={
+                    "kind": "patrol_sop",
+                    "stage": "evidence_ready",
+                    "case_id": analysis_case.id,
+                    "evidence_refs": list(analysis_case.evidence_refs),
+                },
+            )
+        context = self._incident_llm_context(incident_id)
+        run.step(
+            "supervisor-agent",
+            "llm.request",
+            "向模型提交事件、现场传感器和多模态证据上下文",
+            details={
+                "kind": "llm_request",
+                "timeout_seconds": run.budget.get("seconds", self.agent_decision_timeout_seconds),
+                "message": {
+                    "role": "user",
+                    "from": "supervisor-agent",
+                    "to": "大模型",
+                    "content": (
+                        "请处理事件 %s。根据下面的巡塘现场上下文和多模态证据，动态委派必要的 Agent，"
+                        "最终只返回 action、device_id、target_state、risk、rationale、"
+                        "verification_delay_seconds、evidence_refs 组成的 JSON；禁止输出思考过程，"
+                        "禁止直接调用设备写接口。"
+                    ) % context.get("incident", {}).get("id", "unknown"),
+                    "context": self._llm_trace_context(context),
+                },
+            },
+        )
         try:
             result = self._decide_incident_with_timeout(
                 orchestrator,
-                self._incident_llm_context(incident_id),
+                context,
                 run.budget.get("seconds", self.agent_decision_timeout_seconds),
             )
         except TimeoutError:
@@ -1061,20 +1264,74 @@ class FishAgentSystem:
                 "supervisor-agent",
                 "incident.timeout",
                 "CrewAI 超过 %s 秒运行预算，迟到结果已作废" % run.budget.get("seconds", self.agent_decision_timeout_seconds),
+                details={
+                    "kind": "llm_error",
+                    "error_code": "LLM_TIMEOUT",
+                    "timeout_seconds": run.budget.get("seconds", self.agent_decision_timeout_seconds),
+                },
             )
             return self._llm_manual_stop(incident, run, "LLM_TIMEOUT", "模型决策超时，已转人工确认")
         except Exception as exc:
-            run.step("supervisor-agent", "incident.failed", "模型调用失败：%s" % exc)
+            run.step(
+                "supervisor-agent",
+                "incident.failed",
+                "模型调用失败：%s" % exc,
+                details={"kind": "llm_error", "error_code": "LLM_UNAVAILABLE", "error": str(exc)},
+            )
             return self._llm_manual_stop(incident, run, "LLM_UNAVAILABLE", "模型不可用，已转人工确认")
         for agent, action, summary in result.steps:
             run.step(agent, action, summary)
+        for trace in getattr(result, "trace", []) or []:
+            if not isinstance(trace, dict):
+                continue
+            run.step(
+                str(trace.get("agent") or "supervisor-agent"),
+                str(trace.get("action") or "llm.trace"),
+                str(trace.get("summary") or "模型数据流事件"),
+                details=trace.get("details") if isinstance(trace.get("details"), dict) else {},
+            )
         run.delegated_agents = sorted(set(run.delegated_agents + result.delegated_agents))
         decision: Optional[IncidentDecision] = result.decision
         if decision is None:
             reason = result.stop_reason if result.stop_reason.startswith("LLM_") else "LLM_MODEL_OR_TOOL_FAILURE"
             return self._llm_manual_stop(incident, run, reason, result.summary)
 
-        run.step("execution-agent", "validate_llm_decision", "结构化动作通过协议校验，提交安全策略门")
+        if not getattr(result, "trace", None):
+            run.step(
+                "supervisor-agent",
+                "llm.response",
+                "模型返回结构化处置决策",
+                details={
+                    "kind": "llm_response",
+                    "valid": True,
+                    "decision": {
+                        "action": decision.action,
+                        "device_id": decision.device_id,
+                        "target_state": decision.target_state,
+                        "risk": decision.risk,
+                        "rationale": decision.rationale,
+                        "verification_delay_seconds": decision.verification_delay_seconds,
+                        "evidence_refs": decision.evidence_refs,
+                    },
+                },
+            )
+
+        run.step(
+            "execution-agent",
+            "validate_llm_decision",
+            "结构化动作通过协议校验，提交安全策略门",
+            details={
+                "kind": "decision_validation",
+                "decision": {
+                    "action": decision.action,
+                    "device_id": decision.device_id,
+                    "target_state": decision.target_state,
+                    "risk": decision.risk,
+                    "verification_delay_seconds": decision.verification_delay_seconds,
+                    "evidence_refs": decision.evidence_refs,
+                },
+            },
+        )
         incident.transition(IncidentStatus.ACTION_PROPOSED)
         try:
             risk = RiskLevel(decision.risk)
@@ -1096,7 +1353,17 @@ class FishAgentSystem:
                         "LLM_POLICY_REJECTED",
                         "模型建议未通过设备策略门，已转人工确认",
                     )
-                run.step("execution-agent", "route_action", "模型建议已转为 %s 受控流程" % proposal_risk.value)
+                run.step(
+                    "execution-agent",
+                    "route_action",
+                    "模型建议已转为 %s 受控流程" % proposal_risk.value,
+                    details={
+                        "kind": "action_route",
+                        "proposal_id": proposal.id,
+                        "proposal_status": proposal.status,
+                        "risk": proposal_risk.value,
+                    },
+                )
                 run.status = "WAITING_APPROVAL" if proposal_risk == RiskLevel.L2 else "COMPLETED"
                 run.stop_reason = "WAITING_APPROVAL" if proposal_risk == RiskLevel.L2 else "MANUAL_REQUIRED"
                 return run
@@ -1377,7 +1644,18 @@ class FishAgentSystem:
         if existing:
             if existing.device_id != device_id or existing.pond_id != incident.pond_id or existing.target_state != target_state:
                 raise ValueError("idempotency key conflicts with an existing device command")
-            run.step("execution-agent", "deduplicate_command", "幂等键已存在，复用已有设备命令")
+            run.step(
+                "execution-agent",
+                "deduplicate_command",
+                "幂等键已存在，复用已有设备命令",
+                details={
+                    "kind": "command_deduplicated",
+                    "command_id": existing.id,
+                    "device_id": existing.device_id,
+                    "target_state": existing.target_state,
+                    "idempotency_key": idempotency_key,
+                },
+            )
             return existing
         policy = evaluate_action(
             actor="execution-agent",
@@ -1401,10 +1679,41 @@ class FishAgentSystem:
         )
         self.store.commands[command.id] = command
         incident.command_ids.append(command.id)
-        run.step("execution-agent", "request_action_execution", policy.reason)
+        run.step(
+            "execution-agent",
+            "request_action_execution",
+            policy.reason,
+            details={
+                "kind": "policy_gate",
+                "policy_status": policy.status,
+                "allowed": policy.allowed,
+                "reason": policy.reason,
+                "device_id": device.id,
+                "device_name": device.name,
+                "pond_id": incident.pond_id,
+                "target_state": target_state,
+                "risk": risk.value,
+                "multimodal_evidence": multimodal_evidence,
+            },
+        )
         self.store.emit("policy.evaluated", policy.reason, {"allowed": policy.allowed, "command_id": command.id}, correlation_id=run.id)
         if not policy.allowed:
             command.status = CommandStatus.REJECTED
+            run.step(
+                "execution-agent",
+                "device.command_result",
+                "设备动作被策略门拒绝：%s" % policy.reason,
+                details={
+                    "kind": "execution_result",
+                    "command_id": command.id,
+                    "status": command.status.value,
+                    "device_id": device.id,
+                    "target_state": target_state,
+                    "transport": "MQTT",
+                    "success": False,
+                    "reason": policy.reason,
+                },
+            )
             return command
 
         command.status = CommandStatus.AUTHORIZED
@@ -1415,6 +1724,21 @@ class FishAgentSystem:
             result = None
             command.status = CommandStatus.FAILED
             self.store.emit("device.command.failed", "设备网关调用失败：%s" % exc, {"command_id": command.id}, correlation_id=run.id)
+            run.step(
+                "execution-agent",
+                "device.command_result",
+                "设备网关调用失败：%s" % exc,
+                details={
+                    "kind": "execution_result",
+                    "command_id": command.id,
+                    "status": command.status.value,
+                    "device_id": device.id,
+                    "target_state": target_state,
+                    "transport": "MQTT",
+                    "success": False,
+                    "error": str(exc),
+                },
+            )
         if result:
             command.status = CommandStatus.SENT
             if result.acknowledged:
@@ -1427,6 +1751,24 @@ class FishAgentSystem:
             else:
                 command.status = CommandStatus.TIMED_OUT if result.acknowledged else CommandStatus.FAILED
                 self.store.emit("device.command.unconfirmed", result.detail or "设备命令未确认", {"command_id": command.id}, correlation_id=run.id)
+            run.step(
+                "execution-agent",
+                "device.command_result",
+                "设备命令%s：%s" % ("执行成功" if command.status == CommandStatus.CONFIRMED else "未确认", result.detail or "无返回说明"),
+                details={
+                    "kind": "execution_result",
+                    "command_id": command.id,
+                    "status": command.status.value,
+                    "device_id": device.id,
+                    "target_state": target_state,
+                    "transport": "MQTT" if "MQTT" in (result.detail or "") else "gateway",
+                    "accepted": result.accepted,
+                    "acknowledged": result.acknowledged,
+                    "confirmed": result.confirmed,
+                    "success": command.status == CommandStatus.CONFIRMED,
+                    "detail": result.detail,
+                },
+            )
         return command
 
     def verify_incident(self, incident_id: str, force_escalation: bool = False) -> Incident:
@@ -1676,7 +2018,11 @@ class FishAgentSystem:
 
     def read_snapshot(self) -> dict:
         """Refresh a read-only process view without overwriting newer writes."""
-        if self.repository:
+        local_run_in_progress = any(
+            run.status in {"QUEUED", "RUNNING"}
+            for run in self.store.agent_runs.values()
+        )
+        if self.repository and not local_run_in_progress:
             persisted = self.repository.load()
             if persisted:
                 self.store.restore_snapshot(persisted)
@@ -1970,6 +2316,7 @@ class FishAgentSystem:
                             "action": step.action,
                             "summary": step.summary,
                             "created_at": step.created_at.isoformat(),
+                            "details": step.details,
                         }
                         for step in run.steps
                     ],

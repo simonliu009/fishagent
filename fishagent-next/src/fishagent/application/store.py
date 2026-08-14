@@ -622,6 +622,7 @@ class InMemoryStore:
                     action=step["action"],
                     summary=step["summary"],
                     created_at=self._datetime(step.get("created_at")) or utcnow(),
+                    details=step.get("details", {}) if isinstance(step.get("details", {}), dict) else {},
                 )
                 for step in item.get("steps", [])
             ]

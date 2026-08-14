@@ -417,8 +417,10 @@
     .run-list, .event-list { display: grid; gap: 7px; max-height: 520px; overflow: auto; }
     .run-row, .event-row { padding: 10px; border-left: 3px solid var(--brand); background: var(--surface-alt); border-radius: 4px; }
     .run-row-head, .event-row-head { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; font-weight: 750; }
+    .run-row-time { margin-left: auto; color: var(--muted); font-size: 9px; font-weight: 600; white-space: nowrap; }
     .run-row-meta, .event-row-meta { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.5; }
     .run-steps { margin: 7px 0 0; padding-left: 18px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .run-trace-list { max-height: none; margin-top: 8px; }
     .chat-panel { position: sticky; top: 132px; height: calc(100vh - 142px); min-height: 0; max-height: calc(100vh - 142px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 0; overflow: hidden; }
     .chat-head { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
     .chat-log { min-height: 0; max-height: none; padding: 18px; overflow-y: auto; overscroll-behavior: contain; }
@@ -472,6 +474,24 @@
     .case-evidence-item { padding: 9px; border-left: 3px solid var(--brand); border-radius: 4px; background: var(--surface-alt); }
     .case-evidence-item b { display: block; color: var(--ink); font-size: 10px; }
     .case-evidence-item span { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .agent-data-stream { display: grid; gap: 7px; max-height: 410px; overflow: auto; padding: 2px 3px 2px 1px; }
+    .data-stream-item { position: relative; display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; padding: 8px 9px 9px 12px; border-left: 3px solid var(--line-strong); border-radius: 4px; background: var(--surface); }
+    .data-stream-item::before { content: ''; position: absolute; left: -6px; top: 12px; width: 7px; height: 7px; border: 2px solid var(--surface-alt); border-radius: 50%; background: var(--brand); }
+    .data-stream-item.is-error { border-left-color: var(--danger); }
+    .data-stream-item.is-error::before { background: var(--danger); }
+    .data-stream-time { color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; line-height: 1.4; }
+    .data-stream-main { min-width: 0; }
+    .data-stream-head { display: flex; align-items: baseline; justify-content: space-between; gap: 7px; }
+    .data-stream-agent { color: var(--brand-dark); font-size: 10px; font-weight: 850; }
+    .data-stream-action { color: var(--ink); font-size: 10px; font-weight: 750; }
+    .data-stream-summary { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+    .data-stream-message { margin-top: 6px; padding: 6px 7px; border-left: 2px solid var(--brand); color: var(--ink); background: var(--surface-alt); font-size: 9px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .data-stream-message strong { color: var(--brand-dark); }
+    .trace-kind { display: inline-block; padding: 2px 5px; border-radius: 3px; color: var(--brand-dark); background: var(--green-soft); font-size: 8px; font-weight: 800; }
+    .data-stream-details { margin-top: 6px; border-top: 1px solid var(--line); }
+    .data-stream-details summary { padding-top: 5px; color: var(--brand-dark); cursor: pointer; font-size: 9px; font-weight: 750; }
+    .data-stream-details pre { max-height: 220px; margin: 6px 0 0; padding: 7px; overflow: auto; border-radius: 4px; color: var(--ink); background: var(--surface-alt); font: 9px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .data-stream-empty { padding: 22px 10px; color: var(--muted); text-align: center; font-size: 10px; }
     .knowledge-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
     .knowledge-card { padding: 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
     .knowledge-card b { color: var(--ink); font-size: 11px; }
@@ -669,6 +689,9 @@
       .sensor-trend-current-head { align-items: flex-start; flex-direction: column; gap: 3px; }
       .alert-head { flex-direction: column; }
       .alert-head-actions { justify-content: space-between; width: 100%; }
+      .data-stream-item { grid-template-columns: 58px minmax(0, 1fr); }
+      .run-row-head { align-items: flex-start; flex-wrap: wrap; }
+      .run-row-time { margin-left: 0; }
       .app-footer { align-items: flex-start; flex-direction: column; }
       .header-actions .icon-button:first-child { display: none; }
     }
@@ -763,15 +786,6 @@
         </section>
         <div class="stack">
           <section class="tool-panel">
-            <div class="section-heading"><h2 class="section-title"><i data-lucide="message-square-text"></i>Agent 任务台</h2><span class="status-badge info">智渔AI / LLM</span></div>
-            <div class="form-grid">
-              <label class="field wide">任务目标<input id="agent_goal" value="巡查全场" placeholder="例如：检查 B-01 溶氧并给出处置建议"></label>
-              <label class="field">指定池塘<input id="agent_pond_id" placeholder="B-01"></label>
-              <div class="field"><span>&nbsp;</span><button class="button" type="button" onclick="runAgentGoal()"><i data-lucide="send"></i>提交目标</button></div>
-            </div>
-            <div id="agent_message" class="message"></div>
-          </section>
-          <section class="tool-panel">
             <div class="section-heading"><h2 class="section-title"><i data-lucide="workflow"></i>Agent 运行轨迹</h2><span id="run_meta" class="section-meta"></span></div>
             <div id="run_list" class="run-list"></div>
           </section>
@@ -787,8 +801,8 @@
       <section class="tool-panel">
         <div class="case-toolbar">
           <div>
-            <h2 class="section-title"><i data-lucide="route"></i>多模态 Agent 决策案例</h2>
-            <p class="eyebrow">水质阈值之外，依次观察天气、摄像头、知识库和设备反馈</p>
+            <h2 class="section-title"><i data-lucide="route"></i>Agent 案例演示</h2>
+            <p class="eyebrow">传感器触发与多模态证据统一进入真实 Agent 数据流</p>
           </div>
           <div class="actions">
             <button class="button secondary" type="button" onclick="initializeDemo()"><i data-lucide="rotate-ccw"></i>重置案例</button>
@@ -796,14 +810,15 @@
           </div>
         </div>
         <div id="case_sequence_meta" class="message"></div>
+        <div class="section-heading" style="margin-top:16px"><h3 class="section-title"><i data-lucide="radio-tower"></i>传感器触发演示</h3><span class="section-meta">保留核心闭环</span></div>
         <div id="demo_catalog" class="case-summary-grid"></div>
         <div class="section-heading" style="margin-top:16px"><h3 class="section-title"><i data-lucide="layers-3"></i>多模态案例</h3><span class="section-meta">可逐个运行</span></div>
         <div id="case_summary_grid" class="case-summary-grid"></div>
         <div class="case-flow-layout">
           <div class="case-flow">
-            <div class="section-heading"><h3 class="section-title"><i data-lucide="workflow"></i><span id="case_flow_title">选择一个案例查看 Agent 流程</span></h3><span id="case_flow_status" class="section-meta"></span></div>
+            <div class="section-heading"><h3 class="section-title"><i data-lucide="workflow"></i><span id="case_flow_title">选择一个案例查看实际数据流</span></h3><span id="case_flow_status" class="section-meta"></span></div>
             <div id="case_description" class="case-description"></div>
-            <div id="case_flow_track" class="flow-track"></div>
+            <div id="case_flow_track" class="case-data-stream"></div>
           </div>
           <div class="case-flow">
             <div class="section-heading"><h3 class="section-title"><i data-lucide="scan-search"></i>当前证据</h3><span class="section-meta">天气 · 视觉 · 知识库</span></div>
@@ -976,10 +991,6 @@
     const PATROL_REVEAL_INTERVAL_MS = 700;
     const demoCatalog = [
       ['success', '低溶氧处置中 · 待复核', '传感器阈值', '增氧机开启 → MQTT 确认 → 等待自动巡塘复核'],
-      ['failure', '设备执行失败升级', '传感器阈值', '网关失败 → 动作失败 → 升级人工'],
-      ['dedup', '增氧器已开启 · 待复核', '传感器阈值', 'DO 仍低 → 保持活跃告警 → 复核恢复后关闭'],
-      ['approval', '中风险审批', '传感器阈值', 'L2 动作建议 → 人工审批 → 受控执行'],
-      ['alerts', '混合异常', 'MQTT 多事件', '低溶氧 + 氨氮 → 分别决策 → 执行或人工'],
     ];
     const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
     const llmPresets = [
@@ -1417,6 +1428,7 @@
         'supervisor-agent': '总控智能体',
         'sensor-monitor-agent': '传感器监测智能体',
         'patrol-analysis-agent': '巡查分析智能体',
+        'vision-analysis-agent': '视觉分析智能体',
         'action-planning-agent': '行动规划智能体',
         'execution-agent': '执行智能体',
         'verification-agent': '复核智能体',
@@ -1427,6 +1439,27 @@
       return ({
         'incident.started': '启动事件分析',
         'incident.decided': '形成处置决策',
+        'incident.failed': '模型调用失败',
+        'incident.invalid': '模型决策校验失败',
+        'incident.timeout': '模型调用超时',
+        'patrol_sop.entered': '进入巡塘 SOP',
+        'patrol_sop.evidence_ready': '巡塘 SOP 证据就绪',
+        'sensor_report.skipped': '跳过传感器上报',
+        'sensor_report.fallback': '使用传感器快照',
+        'sensor_report.requested': '请求 MQTT 传感器上报',
+        'sensor_report.received': '接收 MQTT 传感器上报',
+        'sensor_report.timeout': 'MQTT 传感器上报超时',
+        'llm.request': '提交模型请求',
+        'llm.response': '接收模型响应',
+        'llm.error': '模型调用错误',
+        'tool.get_pond_snapshot': '调用池塘快照工具',
+        'tool.get_device_shadow_state': '调用设备状态工具',
+        'tool.list_active_incidents': '调用活动事件工具',
+        'tool.get_weather_context': '调用天气上下文工具',
+        'tool.get_camera_observations': '调用摄像头观察工具',
+        'tool.search_disease_knowledge': '调用病害知识库工具',
+        'tool.propose_action': '调用动作建议工具',
+        'device.command_result': '接收设备执行结果',
         'validate_trigger': '核验告警触发源',
         'validate_llm_decision': '校验模型决策',
         'get_pond_snapshot': '读取池塘实时快照',
@@ -1522,6 +1555,21 @@
     }
     function localizedStepSummary(step) {
       const raw = String(step?.summary || '').trim();
+      const detail = step?.details || {};
+      if (step?.action === 'llm.request' && detail.message) {
+        return 'Agent 已向大模型发送研判消息，等待结构化回复；展开查看消息正文和上下文。';
+      }
+      if (step?.action === 'llm.response' && detail.decision) {
+        const decision = detail.decision;
+        const parts = [`动作：${({EXECUTE: '自动执行', REQUEST_APPROVAL: '提交人工审批', MANUAL_REQUIRED: '转人工处置', NO_ACTION: '无需设备动作', REFRESH_EVIDENCE: '刷新证据'})[decision.action] || decision.action || '未指定'}`, `风险：${riskLabel(decision.risk)}`];
+        if (decision.device_id) parts.push(`设备：${deviceAssetLabel(decision.device_id)}`);
+        if (decision.target_state) parts.push(`目标：${targetStateLabel(decision.target_state)}`);
+        if (decision.rationale) parts.push(`依据：${decision.rationale}`);
+        return parts.join('；');
+      }
+      if (step?.action === 'device.command_result' && detail.status) {
+        return `${detail.success ? '设备执行成功' : '设备未完成执行'}：${commandStatusLabel(detail.status)}${detail.detail ? `；${detail.detail}` : ''}`;
+      }
       if (step?.action === 'incident.decided') {
         const decision = extractJsonObject(raw);
         if (decision) {
@@ -1538,6 +1586,29 @@
       if (step?.action === 'request_action_execution') return `设备动作已提交安全策略门：${raw || '等待设备返回结果'}`;
       if (step?.action === 'incident.failed' || step?.action === 'incident.invalid' || step?.action === 'incident.timeout') return '模型决策未能完成，已转人工处理。';
       return raw || actionLabel(step?.action);
+    }
+    function traceDisplayValue(value) {
+      if (Array.isArray(value)) return value.map(traceDisplayValue);
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, traceDisplayValue(item)]));
+      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return fmtDate(value, true);
+      return value;
+    }
+    function traceKindLabel(step) {
+      const kind = step?.details?.kind;
+      return ({patrol_sop: '巡塘 SOP', mqtt_sensor_report: 'MQTT 数据', llm_request: '模型输入', llm_response: '模型输出', llm_error: '模型错误', tool_call: '只读工具返回', decision_validation: '决策校验', action_route: '动作路由', skill_call: 'Skill 调用', policy_gate: '策略门', execution_result: '执行结果', manual_task: '人工任务'})[kind] || '运行步骤';
+    }
+    function traceStepMarkup(step) {
+      const details = step?.details && typeof step.details === 'object' ? step.details : null;
+      const detailJson = details && Object.keys(details).length ? JSON.stringify(traceDisplayValue(details), null, 2) : '';
+      const errorClass = ['llm.error', 'incident.failed', 'incident.invalid', 'incident.timeout', 'sensor_report.timeout'].includes(step?.action) || details?.success === false ? ' is-error' : '';
+      const message = details?.message?.content ? `<div class="data-stream-message"><strong>Agent → 大模型</strong>　${escapeHtml(details.message.content)}</div>` : '';
+      const decision = details?.decision ? `<div class="data-stream-message"><strong>大模型 → Agent</strong>　${escapeHtml(JSON.stringify(traceDisplayValue(details.decision)))}</div>` : '';
+      const detailsOpen = ['llm.request', 'llm.response', 'llm.error', 'device.command_result'].includes(step?.action) ? ' open' : '';
+      return `<article class="data-stream-item${errorClass}"><time class="data-stream-time">${fmtDate(step?.created_at, true)}</time><div class="data-stream-main"><div class="data-stream-head"><span class="data-stream-agent">${escapeHtml(agentLabel(step?.agent))}</span><span class="data-stream-action">${escapeHtml(actionLabel(step?.action))}</span></div><div class="data-stream-summary"><span class="trace-kind">${escapeHtml(traceKindLabel(step))}</span>　${escapeHtml(localizedStepSummary(step))}</div>${message}${decision}${detailJson ? `<details class="data-stream-details"${detailsOpen}><summary>查看实际数据</summary><pre>${escapeHtml(detailJson)}</pre></details>` : ''}</div></article>`;
+    }
+    function runTraceMarkup(run, limit = 200) {
+      const steps = (run?.steps || []).slice(-limit);
+      return steps.length ? `<div class="agent-data-stream run-trace-list">${steps.map(traceStepMarkup).join('')}</div>` : '<div class="data-stream-empty">运行后将在这里显示实际数据流</div>';
     }
     function renderAlerts() {
       const incidents = (currentState.incidents || [])
@@ -1639,7 +1710,10 @@
     function renderRuns() {
       const runs = [...(currentState.agent_runs || [])].reverse();
       document.getElementById('run_meta').textContent = `${runs.length} 次运行`;
-      document.getElementById('run_list').innerHTML = runs.length ? runs.map(run => `<article class="run-row"><div class="run-row-head"><span>${assistantText(run.goal)}</span>${badge(run.status, runStatusLabel(run.status))}</div><div class="run-row-meta">停止原因：${escapeHtml(stopReasonLabel(run.stop_reason))} · 委派：${escapeHtml((run.delegated_agents || []).map(agentLabel).join(' → ') || '--')}</div>${run.steps?.length ? `<ol class="run-steps">${run.steps.slice(-5).map(step => `<li>${escapeHtml(agentLabel(step.agent))} / ${escapeHtml(actionLabel(step.action))}：${escapeHtml(localizedStepSummary(step))}</li>`).join('')}</ol>` : ''}</article>`).join('') : '<div class="empty">尚无智能体运行记录</div>';
+      document.getElementById('run_list').innerHTML = runs.length ? runs.map(run => {
+        const occurredAt = run.steps?.[0]?.created_at || run.steps?.at(-1)?.created_at;
+        return `<article class="run-row"><div class="run-row-head"><span>${assistantText(run.goal)}</span><time class="run-row-time">发生：${fmtDate(occurredAt, true)}</time>${badge(run.status, runStatusLabel(run.status))}</div><div class="run-row-meta">停止原因：${escapeHtml(stopReasonLabel(run.stop_reason))} · 委派：${escapeHtml((run.delegated_agents || []).map(agentLabel).join(' → ') || '--')}</div>${runTraceMarkup(run)}</article>`;
+      }).join('') : '<div class="empty">尚无智能体运行记录</div>';
     }
     function assistantText(value) { return escapeHtml(value).replace(/crewai/gi, '智渔AI'); }
     function eventRows(limit = 30, branded = false) {
@@ -1720,18 +1794,6 @@
       document.getElementById('raw_state').textContent = JSON.stringify(currentState, null, 2);
     }
     let selectedCaseId = null;
-    function caseFlowNodes(caseItem) {
-      const run = (currentState.agent_runs || []).find(item => item.id === caseItem.agent_run_id);
-      const steps = run?.steps || [];
-      const nodes = [
-        ['触发', caseItem.trigger, `证据 ${caseItem.evidence_refs?.length || 0} 项`],
-        ['证据汇总', '摄像头 / 天气 / 知识库', steps.find(item => item.action === 'incident.started')?.summary || '等待 Agent 读取多模态证据'],
-        ['CrewAI 决策', run?.stop_reason || '待执行', steps.find(item => item.agent === 'supervisor-agent')?.summary || '主管 Agent 动态委派专职 Agent'],
-        ['策略门', caseItem.expected_device_id ? `${caseItem.expected_target_state || '建议'} · 受控设备` : '人工复核边界', steps.find(item => item.action === 'validate_llm_decision' || item.action === 'route_action')?.summary || '检查能力、风险和审批条件'],
-        ['结果', caseItem.status || 'READY', caseItem.result_summary || caseItem.expected_result],
-      ];
-      return nodes.map((node, index) => `<div class="flow-node ${index < Math.max(0, Math.min(nodes.length, steps.length + 1)) ? 'done' : ''} ${index === Math.min(nodes.length - 1, steps.length) ? 'current' : ''}"><div class="flow-node-label">${index + 1}. ${escapeHtml(node[0])}</div><div class="flow-node-action">${escapeHtml(node[1])}</div><div class="flow-node-summary">${escapeHtml(node[2])}</div></div>`).join('');
-    }
     function renderCases() {
       const cases = [...(currentState.analysis_cases || [])].sort((a,b) => a.sequence - b.sequence);
       if (!selectedCaseId || !cases.some(item => item.id === selectedCaseId)) selectedCaseId = cases[0]?.id || null;
@@ -1739,15 +1801,18 @@
       document.getElementById('demo_catalog').innerHTML = demoCatalog.map(item => `<article class="case-card"><div class="case-card-head"><div><span class="case-number">${escapeHtml(item[0].slice(0,1).toUpperCase())}</span><span class="case-title">${escapeHtml(item[1])}</span></div>${badge('NORMAL', '可演示')}</div><div class="case-category">${escapeHtml(item[2])}</div><div class="case-result">${escapeHtml(item[3])}</div><div class="case-card-actions"><button class="icon-button" type="button" title="运行此 Demo" onclick="event.stopPropagation();runDemo('${item[0]}')"><i data-lucide="play"></i></button></div></article>`).join('');
       document.getElementById('case_summary_grid').innerHTML = cases.length ? cases.map(item => `<article class="case-card ${item.id === selected?.id ? 'active' : ''}" onclick="selectAnalysisCase('${item.id}')"><div class="case-card-head"><div><span class="case-number">${item.sequence}</span><span class="case-title">${escapeHtml(item.title)}</span></div>${badge(item.status === 'READY' ? 'PENDING' : item.status, item.status === 'READY' ? '待演示' : item.status)}</div><div class="case-category">${escapeHtml(item.category)} · ${escapeHtml(item.pond_id)}</div><div class="case-trigger">${escapeHtml(item.trigger)}</div><div class="case-result">${escapeHtml(item.result_summary || item.expected_result)}</div><div class="case-card-actions"><button class="icon-button" type="button" title="运行此案例" onclick="event.stopPropagation();runAnalysisCase('${item.id}')"><i data-lucide="play"></i></button></div></article>`).join('') : '<div class="empty">暂无分析案例，请初始化演示资产</div>';
       if (!selected) {
-        document.getElementById('case_flow_title').textContent = '选择一个案例查看 Agent 流程';
+        document.getElementById('case_flow_title').textContent = '选择一个案例查看实际数据流';
         document.getElementById('case_flow_status').textContent = '';
-        document.getElementById('case_flow_track').innerHTML = '<div class="empty">暂无案例</div>';
+        document.getElementById('case_flow_track').innerHTML = '<div class="data-stream-empty">暂无案例</div>';
         document.getElementById('case_evidence_list').innerHTML = '';
       } else {
+        const selectedRun = (currentState.agent_runs || []).find(item => item.id === selected.agent_run_id);
         document.getElementById('case_flow_title').textContent = selected.title;
-        document.getElementById('case_flow_status').textContent = `${selected.category} · ${selected.pond_id}`;
-        document.getElementById('case_description').textContent = `${selected.description} 预期流程：${selected.expected_path}`;
-        document.getElementById('case_flow_track').innerHTML = caseFlowNodes(selected);
+        document.getElementById('case_flow_status').textContent = selectedRun
+          ? `${selected.category} · ${selected.pond_id} · ${runStatusLabel(selectedRun.status)} · ${fmtDate(selectedRun.steps?.[0]?.created_at, true)}`
+          : `${selected.category} · ${selected.pond_id} · 尚未运行`;
+        document.getElementById('case_description').textContent = `${selected.description} 预期路径仅作参考；下方展示本次 AgentRun 实际经过的巡塘 SOP、模型、策略门和执行数据。`;
+        document.getElementById('case_flow_track').innerHTML = selectedRun ? runTraceMarkup(selectedRun) : '<div class="data-stream-empty">点击运行案例后显示实际数据流</div>';
         const weather = (currentState.weather_observations || []).find(item => item.id === `weather-${selected.pond_id}`);
         const observations = (currentState.camera_observations || []).filter(item => item.pond_id === selected.pond_id);
         const articles = (currentState.disease_knowledge || []).filter(item => selected.evidence_refs?.includes(item.id));
@@ -1763,7 +1828,7 @@
       const observations = currentState.camera_observations || [];
       document.getElementById('camera_meta').textContent = `${(currentState.cameras || []).length} 路摄像头 · ${observations.length} 条 Mock 观察`;
       document.getElementById('camera_observation_grid').innerHTML = observations.map(item => `<article class="camera-observation"><div class="camera-observation-head"><b>${escapeHtml(item.pond_id)} · ${escapeHtml(item.camera_role === 'UNDERWATER' ? '水下' : '水面')}</b>${badge('NORMAL', `${Math.round(item.confidence * 100)}%`)}</div><p>${escapeHtml(item.summary)}</p><div class="camera-tags">${item.labels.map(label => `<span class="camera-tag">${escapeHtml(label)}</span>`).join('')}</div></article>`).join('') || '<div class="empty">暂无摄像头观察</div>';
-      document.getElementById('case_sequence_meta').textContent = cases.length ? `共 ${cases.length} 个案例 · 可单独运行或按顺序演示 · 证据分析不依赖传感器阈值` : '';
+      document.getElementById('case_sequence_meta').textContent = cases.length ? `传感器触发 1 个 · 多模态 ${cases.length} 个 · 案例运行后按真实 AgentRun 显示数据流` : '';
     }
     function selectAnalysisCase(caseId) { selectedCaseId = caseId; renderCases(); iconRefresh(); }
     async function runAnalysisCase(caseId) {
@@ -1979,12 +2044,6 @@
         showToast(message, true);
         if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false;
       }
-    }
-    function runAgentGoal() {
-      const goal = document.getElementById('agent_goal').value;
-      const pondId = document.getElementById('agent_pond_id').value.trim();
-      document.getElementById('agent_message').textContent = '任务提交中...';
-      return mutate(() => api('/api/v1/agent-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({goal,pond_id:pondId||null})}), 'Agent 任务已提交').finally(() => { document.getElementById('agent_message').textContent = ''; });
     }
     function handleAssistantChatKey(event) {
       if (event.key === 'Enter' && !event.shiftKey) {

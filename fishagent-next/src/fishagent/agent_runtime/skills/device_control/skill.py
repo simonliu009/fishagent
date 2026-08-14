@@ -34,7 +34,20 @@ class DeviceControlSkill:
             raise ValueError("device-control skill requires an EXECUTE decision")
         if RiskLevel(decision.risk) != RiskLevel.L1:
             raise ValueError("device-control skill only accepts L1 actions")
-        run.step("execution-agent", "call_skill", "调用 device-control Skill，通过策略门发布 MQTT 控制消息")
+        run.step(
+            "execution-agent",
+            "call_skill",
+            "调用 device-control Skill，通过策略门发布 MQTT 控制消息",
+            details={
+                "kind": "skill_call",
+                "skill": self.name,
+                "transport": "MQTT",
+                "device_id": decision.device_id,
+                "target_state": decision.target_state,
+                "risk": decision.risk,
+                "multimodal_evidence": multimodal_evidence,
+            },
+        )
         return self.system.request_action_execution(
             run,
             incident,

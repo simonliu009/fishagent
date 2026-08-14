@@ -477,6 +477,46 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(health["do-b-04"], "ERROR")
         self.assertEqual(state["events"][0]["event_type"], "system.demo.initialized")
 
+    def test_multimodal_case_run_records_real_agent_data_stream(self) -> None:
+        class MultimodalOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                case = context["analysis_case"]
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="EXECUTE",
+                        device_id=case["expected_device_id"] or "aerator-b01-1",
+                        target_state=case["expected_target_state"] or "on",
+                        risk="L1",
+                        rationale="已核对巡塘证据，执行低风险动作。",
+                        evidence_refs=case["evidence_refs"],
+                    ),
+                    summary="case decision",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["vision-analysis-agent"],
+                    steps=[("vision-analysis-agent", "inspect_multimodal_evidence", "已读取案例证据")],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=MultimodalOrchestrator())
+        system.initialize_demo()
+        run = system.run_analysis_case("case-floating-head-weather")
+        actions = [step.action for step in run.steps]
+        details_by_action = {step.action: step.details for step in run.steps if step.details}
+
+        self.assertIn("patrol_sop.entered", actions)
+        self.assertIn("sensor_report.fallback", actions)
+        self.assertIn("llm.request", actions)
+        self.assertIn("llm.response", actions)
+        self.assertIn("validate_llm_decision", actions)
+        self.assertIn("call_skill", actions)
+        self.assertIn("request_action_execution", actions)
+        self.assertIn("device.command_result", actions)
+        self.assertEqual(details_by_action["llm.request"]["message"]["from"], "supervisor-agent")
+        self.assertEqual(details_by_action["llm.request"]["message"]["context"]["analysis_case"]["id"], "case-floating-head-weather")
+        self.assertEqual(details_by_action["llm.response"]["decision"]["action"], "EXECUTE")
+        self.assertTrue(details_by_action["device.command_result"]["success"])
+
     def test_reset_cancels_case_sequence_before_next_case(self) -> None:
         started = Event()
         release = Event()
