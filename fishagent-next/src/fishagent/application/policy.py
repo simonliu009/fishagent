@@ -28,7 +28,7 @@ def evaluate_action(
     if device.pond_id != pond_id:
         return PolicyResult(False, "REJECTED", "设备与池塘不匹配")
     allowed_states = {
-        "aeration": {"on"},
+        "aeration": {"on", "off"},
         "feeding": {"off"},
         "valve_control": {"off"},
         "circulation": {"on", "off"},
@@ -38,7 +38,7 @@ def evaluate_action(
     }
     if target_state not in allowed_states.get(device.capability, set()):
         return PolicyResult(False, "REJECTED", "设备能力或目标状态不在受控动作白名单")
-    if device.capability == "aeration" and not multimodal_evidence:
+    if device.capability == "aeration" and target_state == "on" and not multimodal_evidence:
         if latest_do is None:
             return PolicyResult(False, "REJECTED", "证据缺失：增氧动作需要可信溶氧读数")
         if not latest_do.is_fresh():

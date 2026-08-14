@@ -243,13 +243,38 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(client.published[0][0], "fishagent/ponds/B-01/devices/aerator-b01-1/commands")
         self.assertEqual(client.published[0][1]["source"], "fishagent.execution-agent")
         gateway.close()
-    def test_success_demo_resolves_incident(self) -> None:
+    def test_success_demo_waits_for_patrol_verification_then_stops_aerator(self) -> None:
         system = FishAgentSystem()
         state = system.run_demo("success")
-        self.assertEqual(state["incidents"][0]["status"], "RESOLVED")
+        self.assertEqual(state["incidents"][0]["status"], "VERIFY_PENDING")
         self.assertEqual(state["commands"][0]["status"], "CONFIRMED")
         self.assertEqual(state["devices"][0]["shadow_state"], "on")
+        self.assertEqual(state["verification_results"], [])
+        self.assertGreater(state["verification_plans"][0]["threshold"], state["ponds"][0]["dissolved_oxygen_min"])
         self.assertEqual(state["agent_runs"][0]["stop_reason"], "ACTION_EXECUTED")
+
+        incident_id = state["incidents"][0]["id"]
+        system.store.force_verification_due(incident_id)
+        system.ingest_do("B-01", 4.9, source_event_id="manual-patrol-recovery", auto_run=False)
+        system.run_patrol()
+        state = system.snapshot()
+        self.assertEqual(state["incidents"][0]["status"], "RESOLVED")
+        self.assertEqual(state["verification_results"][0]["outcome"], "PASSED")
+        self.assertEqual(state["devices"][0]["shadow_state"], "off")
+        self.assertEqual(len(state["commands"]), 2)
+        self.assertEqual(state["commands"][-1]["target_state"], "off")
+
+    def test_patrol_verification_below_recovery_threshold_stays_active(self) -> None:
+        system = FishAgentSystem()
+        state = system.run_demo("success")
+        incident_id = state["incidents"][0]["id"]
+        system.store.force_verification_due(incident_id)
+        system.run_patrol()
+        state = system.snapshot()
+        self.assertEqual(state["incidents"][0]["status"], "VERIFY_PENDING")
+        self.assertEqual(state["verification_results"][0]["outcome"], "FAILED")
+        self.assertGreater(state["incidents"][0]["verification_due_at"], state["verification_results"][0]["created_at"])
+        self.assertEqual(state["verification_plans"][0]["status"], "PENDING")
 
     def test_failure_demo_escalates_manual_task(self) -> None:
         system = FishAgentSystem()

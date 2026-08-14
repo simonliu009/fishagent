@@ -53,6 +53,12 @@ class _AnalysisCaseCancelled(RuntimeError):
     pass
 
 
+# DO safety alarms trigger below the pond safety line, but recovery must be
+# confirmed above it so a marginal reading does not immediately stop aeration.
+DO_RECOVERY_MARGIN = 0.8
+VERIFICATION_RETRY_SECONDS = 300
+
+
 class FishAgentSystem:
     def __init__(
         self,
@@ -149,6 +155,22 @@ class FishAgentSystem:
             latest = self.store.latest_reading(sensor.pond_id, sensor.metric)
             if latest is None:
                 continue
+            value = latest.value
+            active = self.store.active_incident_for_pond(sensor.pond_id)
+            device = self._aerator_device(sensor.pond_id)
+            plan = self.store.verification_plans.get(active.verification_plan_id or "") if active else None
+            # The MQTT mock models a gradual DO recovery after aeration starts.
+            # Each patrol still publishes a real report through the broker.
+            if (
+                sensor.metric == "DO"
+                and latest.quality == "GOOD"
+                and active
+                and active.status == IncidentStatus.VERIFY_PENDING
+                and device
+                and device.shadow_state == "on"
+            ):
+                recovery_threshold = plan.threshold if plan else self._do_recovery_threshold(sensor.pond_id)
+                value = min(recovery_threshold, latest.value + 0.5)
             request_id = "%s-%s" % (run.id, sensor.id)
             source_event_id = "patrol-report-%s-%s" % (run.id, sensor.id)
             if requester(
@@ -156,7 +178,7 @@ class FishAgentSystem:
                 sensor_id=sensor.id,
                 metric=sensor.metric,
                 unit=sensor.unit,
-                value=latest.value,
+                value=value,
                 request_id=request_id,
                 source_event_id=source_event_id,
                 quality=latest.quality,
@@ -537,6 +559,7 @@ class FishAgentSystem:
         self.store.agent_runs[run.id] = run
         run.step("supervisor-agent", "start_patrol", "主动请求全场传感器即时上报后再开始巡查")
         self._request_sensor_reports(run)
+        self._verify_due_incidents_from_patrol(run)
         incidents_to_decide: list[str] = []
         for pond in self.store.ponds.values():
             latest_readings = [self.store.latest_reading(pond.id, spec["metric"]) for spec in DEMO_SENSOR_SPECS]
@@ -656,6 +679,34 @@ class FishAgentSystem:
                 )
         return run
 
+    def _verify_due_incidents_from_patrol(self, patrol_run: AgentRun) -> None:
+        """Run due verification only after the patrol has requested fresh MQTT data."""
+        for incident in list(self.store.due_verifications()):
+            verified = self.verify_incident(incident.id)
+            patrol_run.step(
+                "supervisor-agent",
+                "dispatch_verification",
+                "巡塘已触发 %s：%s" % (incident.title, self._incident_status_label(verified.status)),
+            )
+
+    @staticmethod
+    def _incident_status_label(status: IncidentStatus) -> str:
+        return {
+            IncidentStatus.VERIFY_PENDING: "继续等待下一次复核",
+            IncidentStatus.RESOLVED: "复核通过并关闭告警",
+            IncidentStatus.ESCALATED: "升级人工处理",
+        }.get(status, status.value)
+
+    def _do_recovery_threshold(self, pond_id: str) -> float:
+        pond = self.store.ponds[pond_id]
+        return round(pond.dissolved_oxygen_min + DO_RECOVERY_MARGIN, 2)
+
+    def _aerator_device(self, pond_id: str) -> Optional[Device]:
+        return next(
+            (device for device in self.store.devices.values() if device.pond_id == pond_id and device.capability == "aeration"),
+            None,
+        )
+
     def run_chat(
         self,
         message: str,
@@ -770,7 +821,7 @@ class FishAgentSystem:
         plan = VerificationPlan(
             id=new_id("verify-plan"),
             incident_id=incident.id,
-            threshold=pond.dissolved_oxygen_min,
+            threshold=self._do_recovery_threshold(incident.pond_id),
             earliest_at=due_at,
             latest_at=due_at + timedelta(seconds=60),
         )
@@ -875,11 +926,6 @@ class FishAgentSystem:
         health.status = HealthStatus.ONLINE if quality == "GOOD" else HealthStatus.ERROR
         health.message = "" if quality == "GOOD" else "读数质量：%s" % quality
         incident = self.store.add_reading(reading)
-        if incident is None and metric == "DO" and quality == "GOOD" and auto_run:
-            active = self.store.active_incident_for_pond(pond_id)
-            if active and active.status == IncidentStatus.VERIFY_PENDING:
-                self.verify_incident(active.id)
-                incident = active
         if incident is None and quality != "GOOD" and auto_run:
             incident = self.store.active_incident_for_pond(pond_id)
             evidence = Evidence(
@@ -1383,7 +1429,7 @@ class FishAgentSystem:
                 self.store.emit("device.command.unconfirmed", result.detail or "设备命令未确认", {"command_id": command.id}, correlation_id=run.id)
         return command
 
-    def verify_incident(self, incident_id: str) -> Incident:
+    def verify_incident(self, incident_id: str, force_escalation: bool = False) -> Incident:
         incident = self.store.incidents[incident_id]
         if incident.status != IncidentStatus.VERIFY_PENDING:
             return incident
@@ -1391,34 +1437,72 @@ class FishAgentSystem:
         run = AgentRun(id=new_id("run"), goal="复核 %s" % incident.title, incident_id=incident.id, status="RUNNING")
         self.store.agent_runs[run.id] = run
         latest_do = self.store.latest_reading(incident.pond_id, "DO")
-        run.step("verification-agent", "record_verification", "读取复核溶氧并判断处置效果")
-        passed = bool(
-            latest_do
-            and latest_do.is_fresh()
-            and latest_do.value >= self.store.ponds[incident.pond_id].dissolved_oxygen_min
-        )
+        threshold = plan.threshold if plan else self._do_recovery_threshold(incident.pond_id)
+        run.step("verification-agent", "record_verification", "读取新鲜溶氧并按恢复阈值 %.2fmg/L 判断处置效果" % threshold)
+        has_fresh_do = bool(latest_do and latest_do.is_fresh())
+        passed = bool(has_fresh_do and latest_do.value >= threshold)
+        outcome = "PASSED" if passed else "FAILED" if has_fresh_do else "WAITING_FOR_DATA"
         result = VerificationResult(
             id=new_id("verify"),
             incident_id=incident.id,
             plan_id=plan.id if plan else "",
-            outcome="PASSED" if passed else "FAILED",
+            outcome=outcome,
             observed_value=latest_do.value if latest_do else None,
             evidence_refs=[latest_do.source_event_id] if latest_do else [],
         )
         self.store.verification_results[result.id] = result
         incident.verification_result_ids.append(result.id)
         if plan:
-            plan.status = result.outcome
+            plan.status = "PASSED" if passed else "PENDING"
         for job in self.store.scheduled_jobs.values():
             if job.incident_id == incident.id and job.job_type == "verification":
                 job.status = JobStatus.COMPLETED
                 job.attempts += 1
         if passed:
-            incident.transition(IncidentStatus.RESOLVED)
-            run.status = "COMPLETED"
-            run.stop_reason = "RESOLVED"
-            self.store.emit("verification.resolved", "复核通过，事件关闭", {"incident_id": incident.id}, correlation_id=run.id)
-        else:
+            device = self._aerator_device(incident.pond_id)
+            stop_ok = not device or device.shadow_state == "off"
+            if device and device.shadow_state == "on":
+                stop_command = self.request_action_execution(
+                    run,
+                    incident,
+                    device_id=device.id,
+                    target_state="off",
+                    risk=RiskLevel.L1,
+                    idempotency_key="%s:%s:off" % (incident.pond_id, device.id),
+                )
+                stop_ok = stop_command.status == CommandStatus.CONFIRMED
+            if stop_ok:
+                incident.transition(IncidentStatus.RESOLVED)
+                run.status = "COMPLETED"
+                run.stop_reason = "RESOLVED"
+                self.store.emit(
+                    "verification.resolved",
+                    "DO 达到恢复阈值，增氧机已停机，事件关闭",
+                    {"incident_id": incident.id, "threshold": threshold},
+                    correlation_id=run.id,
+                )
+            else:
+                incident.transition(IncidentStatus.VERIFY_FAILED)
+                incident.transition(IncidentStatus.ESCALATED)
+                incident.assignee = "现场操作员"
+                run.step("verification-agent", "create_manual_task", "复核达标但增氧机停机失败，升级人工处理")
+                manual_task = self.create_manual_task(
+                    title="处理增氧机停机失败：%s" % incident.title,
+                    description="溶氧已达到恢复阈值，但自动停机命令未确认，请现场检查增氧机。",
+                    incident_id=incident.id,
+                )
+                escalation = Escalation(
+                    id=new_id("escalation"),
+                    incident_id=incident.id,
+                    level="L2",
+                    reason="DO 已达到恢复阈值，但增氧机停机未确认",
+                    manual_task_id=manual_task.id,
+                )
+                self.store.escalations[escalation.id] = escalation
+                run.status = "COMPLETED"
+                run.stop_reason = "ESCALATED"
+                self.store.emit("verification.escalated", "停机失败，已升级人工任务", {"incident_id": incident.id}, correlation_id=run.id)
+        elif force_escalation:
             incident.transition(IncidentStatus.VERIFY_FAILED)
             incident.transition(IncidentStatus.ESCALATED)
             incident.assignee = "现场操作员"
@@ -1439,6 +1523,27 @@ class FishAgentSystem:
             run.status = "COMPLETED"
             run.stop_reason = "ESCALATED"
             self.store.emit("verification.escalated", "复核失败，已升级人工任务", {"incident_id": incident.id}, correlation_id=run.id)
+        else:
+            next_due_at = utcnow() + timedelta(seconds=VERIFICATION_RETRY_SECONDS)
+            self._schedule_verification(incident, next_due_at)
+            run.step(
+                "verification-agent",
+                "schedule_reverification",
+                "DO %s，未达到恢复阈值 %.2fmg/L；保持告警活跃，下次随自动或手动巡塘复核：%s"
+                % (
+                    "未上报新鲜数据" if outcome == "WAITING_FOR_DATA" else "仍低于恢复阈值",
+                    threshold,
+                    next_due_at.strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            run.status = "COMPLETED"
+            run.stop_reason = "VERIFY_WAITING_FOR_NEXT_PATROL"
+            self.store.emit(
+                "verification.retry_scheduled",
+                "复核未完成，保持告警活跃并等待下一次巡塘",
+                {"incident_id": incident.id, "next_due_at": next_due_at.isoformat(), "outcome": outcome},
+                correlation_id=run.id,
+            )
         return incident
 
     def dismiss_incident(self, incident_id: str, reason: str = "用户手动消除告警") -> Incident:
@@ -1512,11 +1617,16 @@ class FishAgentSystem:
                 job.attempts += 1
             try:
                 if job.job_type == "verification" and job.incident_id:
-                    self.verify_incident(job.incident_id)
+                    # Verification requires fresh telemetry; use the same MQTT
+                    # request path as scheduled patrols before evaluating DO.
+                    self.run_patrol()
                 elif job.job_type == "patrol":
                     self.run_patrol()
-                job.status = JobStatus.COMPLETED
-                self.store.emit("schedule.job.completed", "后台作业已完成", {"job_id": job.id})
+                if job.status == JobStatus.RUNNING:
+                    job.status = JobStatus.COMPLETED
+                    self.store.emit("schedule.job.completed", "后台作业已完成", {"job_id": job.id})
+                else:
+                    self.store.emit("schedule.job.rescheduled", "复核未达标，已安排下一次巡塘复核", {"job_id": job.id, "due_at": job.due_at.isoformat()})
             except Exception as exc:
                 job.status = JobStatus.RETRY_WAIT if job.attempts < 3 else JobStatus.DEAD_LETTER
                 if job.status == JobStatus.RETRY_WAIT:
@@ -1554,13 +1664,11 @@ class FishAgentSystem:
             if incident:
                 self.store.force_verification_due(incident.id)
                 self._demo_reading("B-01", 2.3, source_event_id="demo-failure-review")
-                self.verify_incident(incident.id)
+                self.verify_incident(incident.id, force_escalation=True)
         else:
             incident = self._demo_reading("B-01", 2.1, source_event_id="demo-success")
-            if incident:
-                self.store.force_verification_due(incident.id)
-                self._demo_reading("B-01", 5.2, source_event_id="demo-success-review")
-                self.verify_incident(incident.id)
+            # Leave the incident in VERIFY_PENDING. DO recovers gradually and
+            # the next automatic patrol supplies the later verification data.
         return self.snapshot()
 
     def snapshot(self) -> dict:

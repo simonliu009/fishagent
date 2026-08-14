@@ -344,6 +344,8 @@
     .alert-outcome.success { border-color: var(--brand); background: var(--brand-soft); }
     .alert-outcome.failed { border-color: var(--red); background: var(--red-soft); }
     .alert-outcome.warning { border-color: var(--amber); background: var(--amber-soft); }
+    .alert-verification-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; padding: 7px 9px; border-left: 3px solid var(--blue); color: var(--muted); background: var(--blue-soft); font-size: 9px; line-height: 1.45; }
+    .alert-verification-meta span:first-child { color: var(--brand-dark); font-weight: 850; }
     .alert-flow { display: flex; align-items: stretch; gap: 0; overflow-x: auto; margin-top: 10px; padding: 2px 2px 4px; }
     .alert-flow-node { position: relative; flex: 1 0 180px; min-height: 94px; padding: 10px 10px 9px 34px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
     .alert-flow-node + .alert-flow-node { margin-left: 26px; }
@@ -967,7 +969,7 @@
     let trendWindowHours = 12;
     const PATROL_REVEAL_INTERVAL_MS = 700;
     const demoCatalog = [
-      ['success', '低溶氧成功闭环', '传感器阈值', '增氧机开启 → MQTT 确认 → 复核恢复'],
+      ['success', '低溶氧处置中 · 待复核', '传感器阈值', '增氧机开启 → MQTT 确认 → 等待自动巡塘复核'],
       ['failure', '设备执行失败升级', '传感器阈值', '网关失败 → 动作失败 → 升级人工'],
       ['dedup', '增氧器已开启 · 待复核', '传感器阈值', 'DO 仍低 → 保持活跃告警 → 复核恢复后关闭'],
       ['approval', '中风险审批', '传感器阈值', 'L2 动作建议 → 人工审批 → 受控执行'],
@@ -1432,6 +1434,8 @@
         hold_current_state: '保持设备当前状态',
         deduplicate_command: '抑制重复设备命令',
         record_verification: '记录处置效果复核',
+        dispatch_verification: '派发复核流程',
+        schedule_reverification: '安排下一次复核',
         create_manual_task: '创建人工处理任务',
         stop: '停止自动处置',
       })[action] || String(action || '执行步骤');
@@ -1458,13 +1462,13 @@
       return ({PROPOSED: '已提出', AUTHORIZED: '已授权', QUEUED: '排队中', SENT: '已发送', ACKNOWLEDGED: '设备已接收', CONFIRMED: '执行成功', REJECTED: '已拒绝', CANCELLED: '已取消', FAILED: '执行失败', TIMED_OUT: '执行超时'})[status] || status || '未知';
     }
     function verificationOutcomeLabel(outcome) {
-      return ({PASSED: '复核通过', FAILED: '复核未通过'})[outcome] || outcome || '等待复核';
+      return ({PASSED: '复核通过', FAILED: '未达到恢复阈值', WAITING_FOR_DATA: '等待新鲜数据'})[outcome] || outcome || '等待复核';
     }
     function runStatusLabel(status) {
       return ({QUEUED: '排队中', RUNNING: '运行中', WAITING_APPROVAL: '等待审批', COMPLETED: '已完成', FAILED: '失败', TIMED_OUT: '超时', CANCELLED: '已取消'})[status] || status || '未知';
     }
     function stopReasonLabel(reason) {
-      return ({ACTION_EXECUTED: '设备动作已执行，等待复核', LLM_ACTION_EXECUTED: '模型动作已执行，等待复核', RESOLVED: '复核通过，告警已关闭', ALREADY_SATISFIED: '设备已处于目标状态，等待复核', ESCALATED: '复核未通过，已升级人工', ACTION_FAILED: '设备动作执行失败', LLM_MANUAL_REQUIRED: '模型建议转人工处置', WAITING_APPROVAL: '等待人工审批', PATROL_COMPLETED: '巡查已完成'})[reason] || reason || '等待结果';
+      return ({ACTION_EXECUTED: '设备动作已执行，等待复核', LLM_ACTION_EXECUTED: '模型动作已执行，等待复核', RESOLVED: '复核通过，告警已关闭', ALREADY_SATISFIED: '设备已处于目标状态，等待复核', ESCALATED: '复核未通过，已升级人工', ACTION_FAILED: '设备动作执行失败', LLM_MANUAL_REQUIRED: '模型建议转人工处置', WAITING_APPROVAL: '等待人工审批', PATROL_COMPLETED: '巡查已完成', VERIFY_WAITING_FOR_NEXT_PATROL: '等待下一次巡塘复核'})[reason] || reason || '等待结果';
     }
     function deviceAssetLabel(deviceId) {
       const device = (currentState.devices || []).find(item => item.id === deviceId);
@@ -1569,6 +1573,8 @@
         const task = [...tasks].reverse().find(candidate => candidate.incident_id === item.id);
         const proposal = [...proposals].reverse().find(candidate => candidate.incident_id === item.id);
         const approval = proposal ? [...approvals].reverse().find(candidate => candidate.proposal_id === proposal.id) : null;
+        const plan = (currentState.verification_plans || []).find(candidate => candidate.id === item.verification_plan_id);
+        const incidentCommands = commands.filter(candidate => (item.command_ids || []).includes(candidate.id));
         const steps = decisionRun?.steps || [];
         const findStep = actions => [...steps].reverse().find(step => actions.includes(step.action));
         const decisionStep = findStep(['incident.decided']) || findStep(['validate_llm_decision', 'propose_action', 'incident.failed', 'incident.invalid', 'incident.timeout', 'stop', 'route']);
@@ -1588,7 +1594,7 @@
         }
         if (executionStep || command || proposal || task) {
           const executionSummary = command
-            ? `发布设备动作：${deviceAssetLabel(command.device_id)} → ${targetStateLabel(command.target_state)}`
+            ? `MQTT 设备动作：${incidentCommands.map(candidate => `${targetStateLabel(candidate.target_state)}（${commandStatusLabel(candidate.status)}）`).join(' → ')}`
             : task
               ? `提交人工任务：${task.title} · ${taskStatusLabel(task.status)} · ${task.assignee || '现场操作员'}`
               : proposal
@@ -1599,9 +1605,11 @@
         if (verificationResult || verificationRun) {
           const resultFailed = verificationResult?.outcome === 'FAILED' || verificationRun?.status === 'FAILED';
           const resultSummary = verificationResult
-            ? `${verificationOutcomeLabel(verificationResult.outcome)}${verificationResult.observed_value == null ? '' : `；溶解氧：${verificationResult.observed_value} mg/L`}`
+            ? `${verificationOutcomeLabel(verificationResult.outcome)}${verificationResult.observed_value == null ? '' : `；溶解氧：${verificationResult.observed_value} mg/L`}${plan?.threshold == null ? '' : `；恢复阈值：${plan.threshold} mg/L`}${verificationResult.outcome === 'PASSED' ? (command?.target_state === 'off' && commandSucceeded ? '；增氧机停机已确认' : '；等待停机确认') : '；保持告警活跃，等待下一次巡塘'}`
             : localizedStepSummary(verificationStep) || alertStatusLabel(verificationRun.stop_reason || verificationRun.status);
           flow.push(flowNode('执行结果', verificationStep?.agent || 'verification-agent', resultSummary, resultFailed ? 'failed' : verificationResult || verificationRun.status === 'COMPLETED' ? 'done' : 'active'));
+        } else if (item.status === 'VERIFY_PENDING' || plan) {
+          flow.push(flowNode('执行结果', 'verification-agent', `等待下一次巡塘复核${item.verification_due_at ? `；下次：${fmtDate(item.verification_due_at)}` : ''}`, 'active'));
         } else if (command) {
           const resultSummary = commandSucceeded
             ? `设备返回确认，${commandStatusLabel(command.status)}`
@@ -1611,7 +1619,14 @@
           flow.push(flowNode('执行结果', executionStep?.agent || 'execution-agent', resultSummary, commandFailed ? 'failed' : terminalCommand ? 'done' : 'active'));
         }
         const dismissAction = closed ? '' : `<button class="button secondary small alert-dismiss" type="button" onclick="dismissIncident('${escapeHtml(item.id)}')"><i data-lucide="check"></i>手动消除</button>`;
-        return `<article class="alert-item ${closed ? 'resolved' : 'active'}"><div class="alert-head"><div class="alert-title">${badge(item.status, `${statusLabel} · ${item.risk}`)}　${escapeHtml(item.title)}</div><div class="alert-head-actions"><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span>${dismissAction}</div></div><div class="alert-flow">${flow.join('')}</div></article>`;
+        const latestVerification = verificationResult
+          ? `${verificationOutcomeLabel(verificationResult.outcome)}${verificationResult.observed_value == null ? '' : ` · DO ${fmtNumber(verificationResult.observed_value, 2)} mg/L`}`
+          : '尚未执行';
+        const nextVerification = closed ? '已完成' : item.verification_due_at || plan?.earliest_at ? fmtDate(item.verification_due_at || plan?.earliest_at) : '待安排';
+        const verificationMeta = (plan || verificationResult || item.status === 'VERIFY_PENDING')
+          ? `<div class="alert-verification-meta"><span>复核计划</span><span>上次：${fmtDate(verificationResult?.created_at, false)}</span><span>结果：${escapeHtml(latestVerification)}</span><span>下次：${escapeHtml(nextVerification)}${closed ? '' : '（自动或手动巡塘）'}</span></div>`
+          : '';
+        return `<article class="alert-item ${closed ? 'resolved' : 'active'}"><div class="alert-head"><div class="alert-title">${badge(item.status, `${statusLabel} · ${item.risk}`)}　${escapeHtml(item.title)}</div><div class="alert-head-actions"><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span>${dismissAction}</div></div>${verificationMeta}<div class="alert-flow">${flow.join('')}</div></article>`;
       }).join('') : '<div class="empty">过去 24 小时没有告警事件</div>';
       iconRefresh();
     }
