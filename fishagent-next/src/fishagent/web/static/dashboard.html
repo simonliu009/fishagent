@@ -1309,7 +1309,7 @@
           return `<span class="patrol-sensor ${tone}"><span>${escapeHtml(item.label)}</span><b class="${tone}">${item.reading ? `${fmtNumber(item.reading.value, item.digits)}${unit}` : '--'}</b></span>`;
         }).join('');
         return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pond.name)}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div></div>`;
-      }).join('') : activeReveal ? `<div class="empty">${activeReveal.runId ? '正在采集逐塘巡检结果...' : '正在清除上一轮巡检明细...'}</div>` : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
+      }).join('') : activeReveal ? `<div class="empty">正在巡查...</div>` : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
       updateCountdown();
     }
     function advanceCountdownTarget(now = Date.now()) {
