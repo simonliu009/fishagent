@@ -668,7 +668,7 @@
           <div class="actions">
             <span id="demo_data_badge" class="status-badge info" hidden><i data-lucide="database"></i>模拟数据</span>
             <button class="button danger" type="button" onclick="runDemo('alerts')"><i data-lucide="triangle-alert"></i>模拟双传感器告警</button>
-            <button class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
+            <button id="run_patrol_button" class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
           </div>
         </div>
         <div id="patrol_summary" class="patrol-summary-grid"></div>
@@ -922,6 +922,10 @@
     let assistantChatHistory = [];
     let assistantChatBusy = false;
     let analysisCasePollTimer = null;
+    let patrolRevealState = null;
+    let patrolRevealTimer = null;
+    let patrolRevealToken = 0;
+    const PATROL_REVEAL_INTERVAL_MS = 700;
     const demoCatalog = [
       ['success', '低溶氧成功闭环', '传感器阈值', '增氧机开启 → MQTT 确认 → 复核恢复'],
       ['failure', '设备执行失败升级', '传感器阈值', '网关失败 → 动作失败 → 升级人工'],
@@ -1169,18 +1173,32 @@
         ['activity','执行情况', `${confirmed} 次自动处置`, `${commands.length - confirmed} 项待确认或失败`]
       ].map((item, index) => `<div class="summary-block"><div class="summary-label"><i data-lucide="${item[0]}"></i>${item[1]}</div><div class="summary-value">${escapeHtml(item[2])}</div><div class="summary-note">${escapeHtml(item[3])}${index === 0 && countdownTarget ? `<span class="summary-inline-next"><i data-lucide="calendar-clock"></i>下次 ${fmtDate(countdownTarget)} · <span id="countdown_number">-- 分 -- 秒</span></span>` : ''}</div></div>`).join('');
       const ponds = currentState.ponds || [];
-      document.getElementById('patrol_scope').textContent = `${ponds.length} 个池塘 · 可滚动查看`;
-      document.getElementById('patrol_pond_list').innerHTML = ponds.length ? ponds.slice(0, 10).map(pond => {
+      const displayPonds = ponds.slice(0, 10);
+      const activeReveal = patrolRevealState;
+      const visiblePonds = activeReveal ? displayPonds.slice(0, activeReveal.visible) : displayPonds;
+      const latestPatrolRunId = activeReveal?.runId || lastRun?.id;
+      const findingsForRun = findings.filter(item => item.patrol_run_id === latestPatrolRunId);
+      const findingByPond = new Map(findingsForRun.map(item => [item.pond_id, item]));
+      if (activeReveal) {
+        const progressLabel = activeReveal.runId ? '逐塘巡检中' : '正在启动巡查';
+        document.getElementById('patrol_scope').textContent = `${progressLabel} ${activeReveal.visible}/${displayPonds.length} 个池塘`;
+      } else {
+        document.getElementById('patrol_scope').textContent = `${ponds.length} 个池塘 · 可滚动查看`;
+      }
+      document.getElementById('patrol_pond_list').innerHTML = visiblePonds.length ? visiblePonds.map(pond => {
         const condition = pondCondition(pond);
         const readings = waterMetrics.map(metric => ({...metric, reading:latestMetricReading(pond.id, metric.metric)}));
         const sampledAt = readings.map(item => item.reading?.sampled_at).filter(Boolean).sort((a,b) => new Date(b) - new Date(a))[0];
+        const finding = findingByPond.get(pond.id);
+        const markedAt = finding?.created_at || sampledAt;
+        const timeMarkup = finding ? `巡检 ${fmtDate(markedAt)}` : `采样 ${fmtDate(sampledAt)}`;
         const sensorStrip = readings.map(item => {
           const unit = item.reading && !item.hideUnit ? ` ${escapeHtml(item.reading.unit || '')}` : '';
           const tone = metricIsAbnormal(item, item.reading, pond) ? 'danger' : '';
           return `<span class="patrol-sensor"><span>${escapeHtml(item.label)}</span><b class="${tone}">${item.reading ? `${fmtNumber(item.reading.value, item.digits)}${unit}` : '--'}</b></span>`;
         }).join('');
-        return `<div class="patrol-pond-row"><span><span class="dot ${condition.tone}"></span>　<b>${escapeHtml(pond.id)}</b> ${escapeHtml(pond.name)}</span><time>采样 ${fmtDate(sampledAt)}</time>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div></div>`;
-      }).join('') : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
+        return `<div class="patrol-pond-row"><span><span class="dot ${condition.tone}"></span>　<b>${escapeHtml(pond.id)}</b> ${escapeHtml(pond.name)}</span><time>${timeMarkup}</time>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div></div>`;
+      }).join('') : activeReveal ? `<div class="empty">${activeReveal.runId ? '正在采集逐塘巡检结果...' : '正在清除上一轮巡检明细...'}</div>` : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
       updateCountdown();
     }
     function advanceCountdownTarget(now = Date.now()) {
@@ -1626,7 +1644,56 @@
     }
     function initializeDemo() { return mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化'); }
     function runDemo(mode) { return mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), mode === 'alerts' ? '已触发溶解氧 + 氨氮双传感器告警' : '故障闭环演示已触发'); }
-    function runPatrol() { return mutate(() => api('/api/v1/patrol-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}), '巡查任务已完成'); }
+    function finishPatrolReveal(token) {
+      if (token !== patrolRevealToken) return;
+      clearTimeout(patrolRevealTimer);
+      patrolRevealTimer = null;
+      patrolRevealState = null;
+      document.getElementById('run_patrol_button').disabled = false;
+      renderPatrol();
+      iconRefresh();
+    }
+    function revealNextPatrolPond(token) {
+      if (token !== patrolRevealToken || !patrolRevealState) return;
+      const total = Math.min((currentState.ponds || []).length, 10);
+      if (patrolRevealState.visible >= total) {
+        patrolRevealTimer = setTimeout(() => finishPatrolReveal(token), PATROL_REVEAL_INTERVAL_MS);
+        return;
+      }
+      patrolRevealState.visible += 1;
+      renderPatrol();
+      patrolRevealTimer = setTimeout(
+        () => patrolRevealState?.visible >= total ? finishPatrolReveal(token) : revealNextPatrolPond(token),
+        PATROL_REVEAL_INTERVAL_MS,
+      );
+    }
+    async function runPatrol() {
+      if (patrolRevealState) return;
+      clearTimeout(patrolRevealTimer);
+      const token = ++patrolRevealToken;
+      patrolRevealState = {runId:null, visible:0};
+      document.getElementById('run_patrol_button').disabled = true;
+      renderPatrol();
+      try {
+        const result = await api('/api/v1/patrol-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+        if (token !== patrolRevealToken) return;
+        currentState = result.state || currentState;
+        patrolRevealState = {runId:result.run?.id || null, visible:0};
+        renderAll();
+        showToast('巡查任务已完成，正在逐塘展示结果');
+        revealNextPatrolPond(token);
+      } catch (error) {
+        if (token !== patrolRevealToken) return;
+        clearTimeout(patrolRevealTimer);
+        patrolRevealTimer = null;
+        patrolRevealState = null;
+        document.getElementById('run_patrol_button').disabled = false;
+        renderPatrol();
+        const message = error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message;
+        showToast(message, true);
+        if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false;
+      }
+    }
     function runAgentGoal() {
       const goal = document.getElementById('agent_goal').value;
       const pondId = document.getElementById('agent_pond_id').value.trim();
