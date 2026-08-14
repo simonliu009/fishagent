@@ -333,21 +333,29 @@
     .alert-item { padding: 11px; border: 1px solid #efb5b5; border-radius: 7px; background: var(--surface); }
     .alert-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
     .alert-title { min-width: 0; font-size: 11px; font-weight: 800; }
-    .alert-time { flex: 0 0 auto; color: var(--muted); font-size: 9px; }
+    .alert-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+    .alert-time { color: var(--muted); font-size: 9px; white-space: nowrap; }
+    .alert-dismiss { min-height: 26px; padding: 4px 7px; color: var(--red); border-color: #efb5b5; font-size: 10px; }
     .alert-summary { margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.55; }
     .alert-cause { margin-top: 7px; padding: 7px; border-radius: 5px; background: var(--surface-alt); font-size: 9px; }
     .alert-outcome { margin-top: 7px; padding: 7px; border-left: 3px solid var(--blue); background: var(--blue-soft); color: var(--ink); font-size: 9px; line-height: 1.55; }
     .alert-outcome.success { border-color: var(--brand); background: var(--brand-soft); }
     .alert-outcome.failed { border-color: var(--red); background: var(--red-soft); }
     .alert-outcome.warning { border-color: var(--amber); background: var(--amber-soft); }
-    .flow-track { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 9px; color: var(--blue); font-size: 9px; text-align: center; }
-    .flow-step { position: relative; padding-top: 10px; }
-    .flow-step::before { content: ""; position: absolute; top: 3px; left: 0; right: 0; height: 2px; background: #c8dbff; }
-    .flow-step:first-child::before { left: 50%; }
-    .flow-step:last-child::before { right: 50%; }
-    .flow-step::after { content: ""; position: absolute; top: 0; left: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; background: var(--blue); }
-    .flow-step.failed { color: var(--red); }
-    .flow-step.failed::after { background: var(--red); }
+    .alert-flow { display: flex; align-items: stretch; gap: 0; overflow-x: auto; margin-top: 10px; padding: 2px 2px 4px; }
+    .alert-flow-node { position: relative; flex: 1 0 180px; min-height: 94px; padding: 10px 10px 9px 34px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
+    .alert-flow-node + .alert-flow-node { margin-left: 26px; }
+    .alert-flow-node + .alert-flow-node::before { content: '→'; position: absolute; left: -22px; top: 33px; color: var(--muted); font-size: 18px; font-weight: 900; }
+    .alert-flow-node.done { border-color: #b7ddce; background: var(--brand-soft); }
+    .alert-flow-node.active { border-color: #b8d1ff; background: var(--blue-soft); }
+    .alert-flow-node.failed { border-color: #efb5b5; background: var(--red-soft); }
+    .alert-flow-check { position: absolute; top: 10px; left: 10px; width: 17px; height: 17px; color: var(--muted); }
+    .alert-flow-node.done .alert-flow-check { color: var(--brand); }
+    .alert-flow-node.active .alert-flow-check { color: var(--blue); }
+    .alert-flow-node.failed .alert-flow-check { color: var(--red); }
+    .alert-flow-label { color: var(--brand-dark); font-size: 10px; font-weight: 850; }
+    .alert-flow-agent { margin-top: 4px; color: var(--ink); font-size: 10px; font-weight: 750; }
+    .alert-flow-summary { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.45; }
     .chart-wrap { position: relative; min-height: 310px; }
     .trend-canvas { width: 100%; height: 280px; display: block; }
     .sensor-trend-panel { margin-bottom: 14px; }
@@ -1398,34 +1406,56 @@
       document.getElementById('alert_list').innerHTML = incidents.length ? incidents.map(item => {
         const evidence = item.evidence?.at(-1);
         const command = [...commands].reverse().find(candidate => (item.command_ids || []).includes(candidate.id));
-        const run = [...runs].reverse().find(candidate => candidate.incident_id === item.id);
+        const incidentRuns = runs.filter(candidate => candidate.incident_id === item.id);
+        const decisionRun = incidentRuns.find(candidate => !(candidate.steps || []).some(step => step.agent === 'verification-agent')) || incidentRuns[0];
+        const verificationRun = [...incidentRuns].reverse().find(candidate => (candidate.steps || []).some(step => step.agent === 'verification-agent'));
         const task = [...tasks].reverse().find(candidate => candidate.incident_id === item.id);
         const proposal = [...proposals].reverse().find(candidate => candidate.incident_id === item.id);
         const approval = proposal ? [...approvals].reverse().find(candidate => candidate.proposal_id === proposal.id) : null;
-        const outcome = [];
-        let outcomeTone = '';
-        if (command) {
-          const succeeded = command.status === 'CONFIRMED';
-          const failed = ['FAILED','REJECTED','TIMED_OUT','CANCELLED'].includes(command.status);
-          outcome.push(`设备动作 ${command.device_id} → ${command.target_state}：${succeeded ? '执行成功' : failed ? `执行失败（${command.status}）` : command.status}`);
-          outcomeTone = succeeded ? 'success' : failed ? 'failed' : '';
+        const steps = decisionRun?.steps || [];
+        const findStep = actions => [...steps].reverse().find(step => actions.includes(step.action));
+        const decisionStep = findStep(['incident.decided']) || findStep(['validate_llm_decision', 'propose_action', 'incident.failed', 'incident.invalid', 'incident.timeout', 'stop', 'route']);
+        const executionStep = findStep(['call_skill', 'request_action_execution', 'route_manual_task', 'route_action', 'deduplicate_command']) || (proposal ? findStep(['propose_action']) : null);
+        const verificationStep = [...(verificationRun?.steps || [])].reverse().find(step => step.agent === 'verification-agent');
+        const verificationResult = [...(currentState.verification_results || [])].reverse().find(result => result.incident_id === item.id);
+        const terminalCommand = command && ['CONFIRMED','REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
+        const commandSucceeded = command?.status === 'CONFIRMED';
+        const commandFailed = command && ['REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
+        const flowNode = (label, agent, summary, state = 'done') => `<div class="alert-flow-node ${state}"><i class="alert-flow-check" data-lucide="${state === 'done' ? 'check-circle-2' : state === 'failed' ? 'circle-x' : 'circle'}"></i><div class="alert-flow-label">${escapeHtml(label)}</div><div class="alert-flow-agent">${escapeHtml(agent)}</div><div class="alert-flow-summary">${escapeHtml(summary)}</div></div>`;
+        const flow = [
+          flowNode('告警原因', evidence?.type === 'sensor_snapshot' ? '传感器监测 Agent' : '事件证据', evidence?.summary || item.title),
+        ];
+        if (decisionStep) {
+          const decisionState = ['incident.failed','incident.invalid','incident.timeout'].includes(decisionStep.action) ? 'failed' : 'done';
+          flow.push(flowNode('Agent 决策', decisionStep.agent, decisionStep.summary || decisionRun.stop_reason || decisionRun.status, decisionState));
         }
-        if (approval) {
-          outcome.push(`人工审批：${approval.status}`);
-          if (approval.status === 'PENDING' && outcomeTone !== 'failed') outcomeTone = 'warning';
+        if (executionStep || command || proposal || task) {
+          const executionSummary = command
+            ? `发布设备动作：${command.device_id} → ${command.target_state}`
+            : task
+              ? `提交人工任务：${task.title} · ${task.status}`
+              : proposal
+                ? `提交受控动作：${proposal.device_id} → ${proposal.target_state} · ${approval?.status || proposal.status}`
+                : executionStep.summary;
+          flow.push(flowNode('执行动作', executionStep?.agent || 'execution-agent', executionSummary, executionStep || command || proposal || task ? 'done' : 'active'));
         }
-        if (task) {
-          outcome.push(`人工任务：${task.title} · ${task.status} · ${task.assignee}`);
-          if (task.status !== 'COMPLETED' && outcomeTone !== 'failed') outcomeTone = 'warning';
+        if (verificationResult || verificationRun) {
+          const resultFailed = verificationResult?.outcome === 'FAILED' || verificationRun?.status === 'FAILED';
+          const resultSummary = verificationResult
+            ? `复核结果：${verificationResult.outcome}${verificationResult.observed_value == null ? '' : ` · DO ${verificationResult.observed_value}`}`
+            : verificationStep?.summary || verificationRun.stop_reason || verificationRun.status;
+          flow.push(flowNode('执行结果', verificationStep?.agent || 'verification-agent', resultSummary, resultFailed ? 'failed' : verificationResult || verificationRun.status === 'COMPLETED' ? 'done' : 'active'));
+        } else if (command) {
+          const resultSummary = commandSucceeded
+            ? '设备返回确认，动作执行成功'
+            : commandFailed
+              ? `设备返回失败：${command.status}`
+              : `等待设备返回：${command.status}`;
+          flow.push(flowNode('执行结果', executionStep?.agent || 'execution-agent', resultSummary, commandFailed ? 'failed' : terminalCommand ? 'done' : 'active'));
         }
-        if (run) {
-          outcome.push(`Agent 决策：${run.stop_reason || run.status}`);
-          const reasonStep = [...(run.steps || [])].reverse().find(step => ['incident.failed','incident.invalid','route_manual_task'].includes(step.action));
-          if (reasonStep) outcome.push(`原因：${reasonStep.summary}`);
-        }
-        if (!outcome.length) outcome.push('Agent 决策排队中');
-        return `<article class="alert-item"><div class="alert-head"><div class="alert-title">${badge(item.status, item.risk)}　${escapeHtml(item.title)}</div><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span></div><div class="alert-summary">${escapeHtml(evidence?.summary || '等待证据')}</div><div class="alert-cause"><b>触发原因：</b>${escapeHtml(evidence?.refs?.join(', ') || '--')}</div><div class="alert-outcome ${outcomeTone}"><b>处理结果：</b>${escapeHtml(outcome.join('；'))}</div><div class="flow-track"><span class="flow-step">待处置</span><span class="flow-step">Agent 研判</span><span class="flow-step">执行/审批</span><span class="flow-step ${['ESCALATED','ACTION_FAILED'].includes(item.status)?'failed':''}">复核闭环</span></div></article>`;
+        return `<article class="alert-item"><div class="alert-head"><div class="alert-title">${badge(item.status, item.risk)}　${escapeHtml(item.title)}</div><div class="alert-head-actions"><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span><button class="button secondary small alert-dismiss" type="button" onclick="dismissIncident('${escapeHtml(item.id)}')"><i data-lucide="check"></i>手动消除</button></div></div><div class="alert-flow">${flow.join('')}</div></article>`;
       }).join('') : '<div class="empty">当前没有未关闭告警</div>';
+      iconRefresh();
     }
     function renderRuns() {
       const runs = [...(currentState.agent_runs || [])].reverse();
@@ -1853,6 +1883,7 @@
     function approveProposal(id) { return mutate(() => api(`/api/v1/action-proposals/${id}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approver:'现场负责人',reason:'控制台批准'})}), '动作已批准'); }
     function rejectProposal(id) { return mutate(() => api(`/api/v1/action-proposals/${id}/reject`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approver:'现场负责人',reason:'控制台拒绝'})}), '动作已拒绝'); }
     function completeTask(id) { return mutate(() => api(`/api/v1/manual-tasks/${id}/complete`,{method:'POST'}), '人工任务已完成'); }
+    function dismissIncident(id) { return mutate(() => api(`/api/v1/incidents/${id}/dismiss`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason:'用户在告警列表手动消除'})}), '告警已手动消除'); }
     function createSchedule() { return mutate(() => api('/api/v1/schedules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('schedule_name').value,interval_seconds:Number(document.getElementById('schedule_interval').value),job_type:'patrol'})}), '巡查调度已创建'); }
     function dispatchJobs() { return mutate(() => api('/api/v1/scheduled-jobs:dispatch',{method:'POST'}), '到期作业已处理'); }
 

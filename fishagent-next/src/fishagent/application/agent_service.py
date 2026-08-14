@@ -1402,6 +1402,20 @@ class FishAgentSystem:
             self.store.emit("verification.escalated", "复核失败，已升级人工任务", {"incident_id": incident.id}, correlation_id=run.id)
         return incident
 
+    def dismiss_incident(self, incident_id: str, reason: str = "用户手动消除告警") -> Incident:
+        incident = self.store.incidents[incident_id]
+        if incident.status not in {IncidentStatus.RESOLVED, IncidentStatus.DISMISSED}:
+            previous_status = incident.status.value
+            incident.transition(IncidentStatus.DISMISSED)
+            self.store.emit(
+                "incident.dismissed",
+                reason,
+                {"incident_id": incident.id, "previous_status": previous_status},
+                resource_type="incident",
+                resource_id=incident.id,
+            )
+        return incident
+
     def run_due_jobs(self, limit: int = 50) -> list[ScheduledJob]:
         with self._job_lock:
             jobs = self.claim_due_jobs(limit)

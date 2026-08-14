@@ -272,6 +272,17 @@ class B01FlowTest(unittest.TestCase):
         self.assertIsNone(incident)
         self.assertEqual(system.snapshot()["incidents"], [])
 
+    def test_manual_dismiss_closes_active_incident(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+        incident = system.ingest_do("B-01", 2.1, source_event_id="manual-dismiss", auto_run=False)
+        self.assertIsNotNone(incident)
+
+        dismissed = system.dismiss_incident(incident.id)
+
+        self.assertEqual(dismissed.status, IncidentStatus.DISMISSED)
+        self.assertEqual(system.snapshot()["incidents"][0]["status"], "DISMISSED")
+
     def test_stale_evidence_stops_without_command(self) -> None:
         system = FishAgentSystem()
         system.initialize_demo()

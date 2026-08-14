@@ -1217,6 +1217,28 @@ async def verify(request: Request, incident_id: str) -> Any:
     return {"incident": state_item("incidents", verified.id), "state": SYSTEM.snapshot()}
 
 
+@app.post("/api/v1/incidents/{incident_id}/dismiss")
+async def dismiss_incident(request: Request, incident_id: str, payload: JsonPayload) -> Any:
+    session = authenticate(request, request.url.path, write=True)
+    reason = str(payload.model_dump().get("reason") or "用户手动消除告警")
+    try:
+        dismissed = SYSTEM.dismiss_incident(incident_id, reason)
+    except KeyError as exc:
+        return problem(404, "Incident not found", str(exc))
+    except ValueError as exc:
+        return problem(409, "Incident cannot be dismissed", str(exc))
+    record_user_audit(
+        session,
+        "incident.dismissed.by_user",
+        "用户手动消除告警",
+        {"incident_id": incident_id, "reason": reason},
+        "incident",
+        incident_id,
+        request.headers.get("X-Correlation-ID"),
+    )
+    return {"incident": state_item("incidents", dismissed.id), "state": SYSTEM.snapshot()}
+
+
 @app.post("/api/v1/manual-tasks/{task_id}/complete")
 async def complete_task(request: Request, task_id: str) -> Any:
     authenticate(request, request.url.path, write=True)

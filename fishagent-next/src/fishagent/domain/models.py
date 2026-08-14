@@ -432,12 +432,15 @@ class Incident:
                 IncidentStatus.WAITING_APPROVAL,
                 IncidentStatus.MANUAL_REQUIRED,
                 IncidentStatus.ACTION_FAILED,
+                IncidentStatus.DISMISSED,
             },
             IncidentStatus.WAITING_APPROVAL: {IncidentStatus.EXECUTING, IncidentStatus.DISMISSED},
-            IncidentStatus.EXECUTING: {IncidentStatus.VERIFY_PENDING, IncidentStatus.RESOLVED, IncidentStatus.ACTION_FAILED},
-            IncidentStatus.VERIFY_PENDING: {IncidentStatus.RESOLVED, IncidentStatus.VERIFY_FAILED},
-            IncidentStatus.VERIFY_FAILED: {IncidentStatus.ESCALATED},
-            IncidentStatus.ACTION_FAILED: {IncidentStatus.ESCALATED},
+            IncidentStatus.MANUAL_REQUIRED: {IncidentStatus.DISMISSED},
+            IncidentStatus.EXECUTING: {IncidentStatus.VERIFY_PENDING, IncidentStatus.RESOLVED, IncidentStatus.ACTION_FAILED, IncidentStatus.DISMISSED},
+            IncidentStatus.VERIFY_PENDING: {IncidentStatus.RESOLVED, IncidentStatus.VERIFY_FAILED, IncidentStatus.DISMISSED},
+            IncidentStatus.VERIFY_FAILED: {IncidentStatus.ESCALATED, IncidentStatus.DISMISSED},
+            IncidentStatus.ACTION_FAILED: {IncidentStatus.ESCALATED, IncidentStatus.DISMISSED},
+            IncidentStatus.ESCALATED: {IncidentStatus.DISMISSED},
         }
         if target not in allowed.get(self.status, set()):
             raise ValueError("invalid incident transition %s -> %s" % (self.status, target))

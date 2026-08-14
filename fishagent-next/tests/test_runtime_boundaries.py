@@ -317,12 +317,13 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('onclick="toggleAlertCapsule(event)"', response.text)
         self.assertIn('onclick="openAlertView(event)"', response.text)
         self.assertIn("function advanceCountdownTarget", response.text)
-        self.assertIn("采样 ${fmtDate(sampledAt)}", response.text)
+        self.assertIn("巡检 ${fmtDate(markedAt)}", response.text)
         self.assertIn('id="assistant_chat"', response.text)
         self.assertIn('id="assistant_chat_input"', response.text)
         self.assertIn("/api/v1/agent-chat/stream", response.text)
         self.assertIn("全场设备 · 在线率", response.text)
-        self.assertIn("<b>处理结果：</b>", response.text)
+        self.assertIn('class="alert-flow"', response.text)
+        self.assertIn('function dismissIncident', response.text)
         self.assertIn("waterMetrics.map", response.text)
 
     def test_agent_chat_endpoint_returns_audited_crewai_reply(self) -> None:
