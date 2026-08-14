@@ -263,6 +263,8 @@ class B01FlowTest(unittest.TestCase):
         state = system.run_demo("dedup")
         self.assertEqual(state["commands"], [])
         self.assertEqual(state["agent_runs"][0]["stop_reason"], "ALREADY_SATISFIED")
+        self.assertEqual(state["incidents"][0]["status"], "VERIFY_PENDING")
+        self.assertEqual(state["verification_results"], [])
         self.assertIn("patrol-analysis-agent", state["agent_runs"][0]["delegated_agents"])
 
     def test_normal_do_does_not_create_incident(self) -> None:

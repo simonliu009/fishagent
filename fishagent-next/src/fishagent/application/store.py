@@ -765,7 +765,9 @@ class InMemoryStore:
         return None
 
     def active_incident_for_pond(self, pond_id: str) -> Optional[Incident]:
-        terminal = {IncidentStatus.RESOLVED, IncidentStatus.DISMISSED, IncidentStatus.ESCALATED}
+        # Escalated incidents remain active until the condition is recovered or
+        # an operator explicitly dismisses them.
+        terminal = {IncidentStatus.RESOLVED, IncidentStatus.DISMISSED}
         for incident in self.incidents.values():
             if incident.pond_id == pond_id and incident.status not in terminal:
                 return incident

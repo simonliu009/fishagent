@@ -330,7 +330,9 @@
     .pond-metric b.danger { color: var(--red); }
     .pond-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; color: var(--muted); font-size: 9px; }
     .alert-list { display: grid; gap: 8px; max-height: 480px; overflow: auto; padding-right: 2px; }
-    .alert-item { padding: 11px; border: 1px solid #efb5b5; border-radius: 7px; background: var(--surface); }
+    .alert-item { padding: 11px; border: 1px solid #efb5b5; border-radius: 7px; background: var(--red-soft); }
+    .alert-item.resolved { border-color: #b7ddce; background: var(--brand-soft); }
+    .alert-item.active { border-color: #efb5b5; background: var(--red-soft); }
     .alert-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
     .alert-title { min-width: 0; font-size: 11px; font-weight: 800; }
     .alert-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
@@ -658,6 +660,8 @@
       .chart-wrap { min-height: 250px; }
       .trend-canvas, .sensor-trend-canvas { height: 250px; }
       .sensor-trend-current-head { align-items: flex-start; flex-direction: column; gap: 3px; }
+      .alert-head { flex-direction: column; }
+      .alert-head-actions { justify-content: space-between; width: 100%; }
       .app-footer { align-items: flex-start; flex-direction: column; }
       .header-actions .icon-button:first-child { display: none; }
     }
@@ -728,7 +732,7 @@
 
       <div class="dashboard-grid single-panel-grid">
         <section id="alert_panel" class="tool-panel" tabindex="-1">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="bell-ring"></i>告警列表</h2><span id="alert_meta" class="status-badge danger">0 条未关闭</span></div>
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="bell-ring"></i>告警列表</h2><span id="alert_meta" class="status-badge danger">0 条/24h · 0 条活跃</span></div>
           <div id="alert_list" class="alert-list"></div>
         </section>
       </div>
@@ -932,10 +936,10 @@
       <div class="auth-actions"><button class="button secondary" type="button" onclick="testLlm()"><i data-lucide="plug-zap"></i>测试连接</button><button class="button" type="button" onclick="saveLlm()"><i data-lucide="save"></i>保存</button></div>
     </section>
   </div>
-  <aside id="alert_capsule" class="alert-capsule" hidden aria-label="未关闭告警" onmouseleave="releaseAlertCapsuleHover()">
+  <aside id="alert_capsule" class="alert-capsule" hidden aria-label="活跃告警" onmouseleave="releaseAlertCapsuleHover()">
     <div class="alert-capsule-head">
       <button id="alert_capsule_toggle" class="alert-capsule-icon" type="button" aria-expanded="false" title="固定展开告警" onclick="toggleAlertCapsule(event)"><i data-lucide="bell-ring"></i></button>
-      <div id="alert_capsule_list" class="alert-capsule-list" aria-label="未关闭告警轮播"></div>
+      <div id="alert_capsule_list" class="alert-capsule-list" aria-label="活跃告警轮播"></div>
       <i class="alert-capsule-chevron" data-lucide="chevron-right"></i>
     </div>
   </aside>
@@ -965,7 +969,7 @@
     const demoCatalog = [
       ['success', '低溶氧成功闭环', '传感器阈值', '增氧机开启 → MQTT 确认 → 复核恢复'],
       ['failure', '设备执行失败升级', '传感器阈值', '网关失败 → 动作失败 → 升级人工'],
-      ['dedup', '幂等去重', '传感器阈值', '影子状态/幂等键检查 → 抑制重复命令'],
+      ['dedup', '增氧器已开启 · 待复核', '传感器阈值', 'DO 仍低 → 保持活跃告警 → 复核恢复后关闭'],
       ['approval', '中风险审批', '传感器阈值', 'L2 动作建议 → 人工审批 → 受控执行'],
       ['alerts', '混合异常', 'MQTT 多事件', '低溶氧 + 氨氮 → 分别决策 → 执行或人工'],
     ];
@@ -989,7 +993,7 @@
     }
     function fmtNumber(value, digits = 1) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '--'; }
     function statusTone(status) {
-      if (['ESCALATED','ACTION_FAILED','FAILED','DEAD_LETTER','MANUAL_REQUIRED'].includes(status)) return 'danger';
+      if (['DETECTED','INVESTIGATING','ACTION_PROPOSED','EXECUTING','VERIFY_FAILED','ESCALATED','ACTION_FAILED','FAILED','DEAD_LETTER','MANUAL_REQUIRED'].includes(status)) return 'danger';
       if (['WAITING_APPROVAL','PENDING','RETRY_WAIT','VERIFY_PENDING','NEEDS_ATTENTION'].includes(status)) return 'warning';
       if (['RUNNING','EXECUTING','QUEUED','SENT','ACKNOWLEDGED'].includes(status)) return 'info';
       return '';
@@ -1380,31 +1384,59 @@
         return `<article class="pond-card"><div class="pond-head"><span class="pond-name"><span class="dot ${condition.tone}"></span>　${escapeHtml(pond.id)}　<span style="font-weight:500;color:var(--muted)">${escapeHtml(pond.species || '')}</span></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div><div class="pond-metrics">${metrics}</div><div class="pond-foot"><span>传感器 ${online}/${sensors.length} 在线</span><span>增氧机 ${escapeHtml(deviceStatus)}</span></div></article>`;
       }).join('') : '<div class="empty">暂无水质监控对象</div>';
     }
+    function alertEventTime(item) {
+      const timestamps = (item.evidence || []).map(evidence => new Date(evidence.created_at).getTime()).filter(Number.isFinite);
+      return timestamps.length ? Math.min(...timestamps) : null;
+    }
+    function alertStatusLabel(status) {
+      return ({
+        DETECTED: '待分析',
+        INVESTIGATING: '分析中',
+        ACTION_PROPOSED: '待派发',
+        WAITING_APPROVAL: '待审批',
+        MANUAL_REQUIRED: '待人工处置',
+        EXECUTING: '处置中',
+        VERIFY_PENDING: '处置中 · 待复核',
+        VERIFY_FAILED: '复核未通过',
+        ACTION_FAILED: '执行失败',
+        ESCALATED: '已升级 · 未闭环',
+        RESOLVED: '已处置',
+        DISMISSED: '已手动消除',
+      })[status] || status || '未知状态';
+    }
     function renderAlerts() {
-      const incidents = (currentState.incidents || []).filter(item => !closedIncidents.has(item.status)).reverse();
+      const incidents = (currentState.incidents || [])
+        .filter(item => {
+          const occurredAt = alertEventTime(item);
+          return occurredAt === null || occurredAt >= Date.now() - 24 * 60 * 60 * 1000;
+        })
+        .sort((a, b) => (alertEventTime(b) || 0) - (alertEventTime(a) || 0));
+      const activeIncidents = incidents.filter(item => !closedIncidents.has(item.status));
       const commands = currentState.commands || [];
       const runs = currentState.agent_runs || [];
       const tasks = currentState.manual_tasks || [];
       const proposals = currentState.action_proposals || [];
       const approvals = currentState.approvals || [];
-      document.getElementById('alert_meta').textContent = `${incidents.length} 条未关闭`;
+      document.getElementById('alert_meta').textContent = `${incidents.length} 条/24h · ${activeIncidents.length} 条活跃`;
       const capsule = document.getElementById('alert_capsule');
-      capsule.hidden = incidents.length === 0;
-      if (!incidents.length) {
+      capsule.hidden = activeIncidents.length === 0;
+      if (!activeIncidents.length) {
         stopAlertCarousel();
         capsule.classList.remove('is-pinned', 'is-collapsed');
         document.getElementById('alert_capsule_toggle').setAttribute('aria-expanded', 'false');
       }
-      if (incidents.length) {
-        const carouselItems = incidents.length > 1 ? [...incidents, incidents[0]] : incidents;
+      if (activeIncidents.length) {
+        const carouselItems = activeIncidents.length > 1 ? [...activeIncidents, activeIncidents[0]] : activeIncidents;
         document.getElementById('alert_capsule_list').innerHTML = `<div id="alert_capsule_track" class="alert-capsule-track">${carouselItems.map(item => {
           const evidence = item.evidence?.at(-1);
-          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${incidents.length} 条待处置 · ${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(evidence?.summary || item.status || '等待处置')}</span></button>`;
+          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${activeIncidents.length} 条活跃 · ${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(evidence?.summary || item.status || '等待处置')}</span></button>`;
         }).join('')}</div>`;
-        startAlertCarousel(incidents.length);
+        startAlertCarousel(activeIncidents.length);
       }
       document.getElementById('alert_list').innerHTML = incidents.length ? incidents.map(item => {
         const evidence = item.evidence?.at(-1);
+        const closed = closedIncidents.has(item.status);
+        const statusLabel = alertStatusLabel(item.status);
         const command = [...commands].reverse().find(candidate => (item.command_ids || []).includes(candidate.id));
         const incidentRuns = runs.filter(candidate => candidate.incident_id === item.id);
         const decisionRun = incidentRuns.find(candidate => !(candidate.steps || []).some(step => step.agent === 'verification-agent')) || incidentRuns[0];
@@ -1415,7 +1447,7 @@
         const steps = decisionRun?.steps || [];
         const findStep = actions => [...steps].reverse().find(step => actions.includes(step.action));
         const decisionStep = findStep(['incident.decided']) || findStep(['validate_llm_decision', 'propose_action', 'incident.failed', 'incident.invalid', 'incident.timeout', 'stop', 'route']);
-        const executionStep = findStep(['call_skill', 'request_action_execution', 'route_manual_task', 'route_action', 'deduplicate_command']) || (proposal ? findStep(['propose_action']) : null);
+        const executionStep = findStep(['call_skill', 'request_action_execution', 'hold_current_state', 'route_manual_task', 'route_action', 'deduplicate_command']) || (proposal ? findStep(['propose_action']) : null);
         const verificationStep = [...(verificationRun?.steps || [])].reverse().find(step => step.agent === 'verification-agent');
         const verificationResult = [...(currentState.verification_results || [])].reverse().find(result => result.incident_id === item.id);
         const terminalCommand = command && ['CONFIRMED','REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
@@ -1453,8 +1485,9 @@
               : `等待设备返回：${command.status}`;
           flow.push(flowNode('执行结果', executionStep?.agent || 'execution-agent', resultSummary, commandFailed ? 'failed' : terminalCommand ? 'done' : 'active'));
         }
-        return `<article class="alert-item"><div class="alert-head"><div class="alert-title">${badge(item.status, item.risk)}　${escapeHtml(item.title)}</div><div class="alert-head-actions"><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span><button class="button secondary small alert-dismiss" type="button" onclick="dismissIncident('${escapeHtml(item.id)}')"><i data-lucide="check"></i>手动消除</button></div></div><div class="alert-flow">${flow.join('')}</div></article>`;
-      }).join('') : '<div class="empty">当前没有未关闭告警</div>';
+        const dismissAction = closed ? '' : `<button class="button secondary small alert-dismiss" type="button" onclick="dismissIncident('${escapeHtml(item.id)}')"><i data-lucide="check"></i>手动消除</button>`;
+        return `<article class="alert-item ${closed ? 'resolved' : 'active'}"><div class="alert-head"><div class="alert-title">${badge(item.status, `${statusLabel} · ${item.risk}`)}　${escapeHtml(item.title)}</div><div class="alert-head-actions"><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span>${dismissAction}</div></div><div class="alert-flow">${flow.join('')}</div></article>`;
+      }).join('') : '<div class="empty">过去 24 小时没有告警事件</div>';
       iconRefresh();
     }
     function renderRuns() {

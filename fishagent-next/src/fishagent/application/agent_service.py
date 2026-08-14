@@ -842,6 +842,11 @@ class FishAgentSystem:
         health.status = HealthStatus.ONLINE if quality == "GOOD" else HealthStatus.ERROR
         health.message = "" if quality == "GOOD" else "读数质量：%s" % quality
         incident = self.store.add_reading(reading)
+        if incident is None and metric == "DO" and quality == "GOOD" and auto_run:
+            active = self.store.active_incident_for_pond(pond_id)
+            if active and active.status == IncidentStatus.VERIFY_PENDING:
+                self.verify_incident(active.id)
+                incident = active
         if incident is None and quality != "GOOD" and auto_run:
             incident = self.store.active_incident_for_pond(pond_id)
             evidence = Evidence(
@@ -1088,6 +1093,7 @@ class FishAgentSystem:
 
         if device.shadow_state == "on":
             run.step("supervisor-agent", "route", "设备已开启，停止重复执行并转向效果复核/故障调查")
+            run.step("execution-agent", "hold_current_state", "设备已处于开启状态，不重复下发命令，转入效果复核")
             incident.transition(IncidentStatus.ACTION_PROPOSED)
             incident.transition(IncidentStatus.EXECUTING)
             incident.transition(IncidentStatus.VERIFY_PENDING)
@@ -1509,10 +1515,7 @@ class FishAgentSystem:
                 self.run_incident_flow(incident.id, risk_override=RiskLevel.L2)
         elif mode == "dedup":
             self.store.devices["aerator-b01-1"].shadow_state = "on"
-            incident = self._demo_reading("B-01", 2.1, source_event_id="demo-dedup")
-            if incident:
-                self.store.force_verification_due(incident.id)
-                self.verify_incident(incident.id)
+            self._demo_reading("B-01", 2.1, source_event_id="demo-dedup")
         elif mode == "failure":
             incident = self._demo_reading("B-01", 2.1, source_event_id="demo-failure")
             if incident:
