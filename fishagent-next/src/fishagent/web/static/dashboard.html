@@ -970,6 +970,7 @@
     let patrolRevealState = null;
     let patrolRevealTimer = null;
     let patrolRevealToken = 0;
+    let lastPatrolRunId = null;
     let selectedTrendMetric = 'DO';
     let trendWindowHours = 12;
     const PATROL_REVEAL_INTERVAL_MS = 700;
@@ -1901,11 +1902,23 @@
     async function refresh() {
       try {
         const [state, config, user] = await Promise.all([api('/api/v1/state'), api('/api/v1/config/llm'), api('/api/v1/me')]);
+        const latestPatrolRun = (state.agent_runs || []).filter(run => String(run.goal).includes('巡查')).at(-1);
+        const patrolRunChanged = Boolean(lastPatrolRunId && latestPatrolRun?.id && latestPatrolRun.id !== lastPatrolRunId && !patrolRevealState);
         currentState = state;
+        lastPatrolRunId = latestPatrolRun?.id || null;
         currentLlm = config.llm || {};
         llmProfiles = config.profiles || [];
         document.getElementById('user_chip').textContent = user.role === 'admin' ? '管理' : escapeHtml(user.role);
-        renderAll();
+        if (patrolRunChanged) {
+          clearTimeout(patrolRevealTimer);
+          const token = ++patrolRevealToken;
+          patrolRevealState = {runId:latestPatrolRun.id, visible:0};
+          document.getElementById('run_patrol_button').disabled = true;
+          renderAll();
+          revealNextPatrolPond(token);
+        } else {
+          renderAll();
+        }
       } catch (error) {
         if (error.status !== 401) { document.getElementById('footer_status').textContent = '数据刷新异常'; showToast(`刷新失败：${error.message}`, true); }
       }
@@ -1950,6 +1963,7 @@
         const result = await api('/api/v1/patrol-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
         if (token !== patrolRevealToken) return;
         currentState = result.state || currentState;
+        lastPatrolRunId = result.run?.id || lastPatrolRunId;
         patrolRevealState = {runId:result.run?.id || null, visible:0};
         renderAll();
         showToast('巡查任务已完成，正在逐塘展示结果');
