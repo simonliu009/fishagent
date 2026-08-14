@@ -660,7 +660,7 @@
             </div>
             <div class="actions">
               <span id="demo_data_badge" class="status-badge info" hidden><i data-lucide="database"></i>模拟数据</span>
-              <button class="button danger" type="button" onclick="runDemo('alerts')"><i data-lucide="triangle-alert"></i>模拟告警</button>
+              <button class="button danger" type="button" onclick="runDemo('alerts')"><i data-lucide="triangle-alert"></i>模拟双传感器告警</button>
               <button class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
             </div>
           </div>
@@ -1465,7 +1465,7 @@
       catch (error) { showToast(error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message, true); if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false; }
     }
     function initializeDemo() { return mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化'); }
-    function runDemo(mode) { return mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), '故障闭环演示已触发'); }
+    function runDemo(mode) { return mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), mode === 'alerts' ? '已触发溶解氧 + 氨氮双传感器告警' : '故障闭环演示已触发'); }
     function runPatrol() { return mutate(() => api('/api/v1/patrol-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}), '巡查任务已完成'); }
     function runAgentGoal() {
       const goal = document.getElementById('agent_goal').value;
