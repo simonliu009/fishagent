@@ -4,6 +4,7 @@
 
 ## 环境变量
 
+- `FISHAGENT_TIMEZONE`：聊天证据时间显示时区，默认 `Asia/Shanghai`；模型回答禁止使用 UTC 标记。
 - `FISHAGENT_LLM_PROVIDER`：`zai`、`openai` 或 `compatible`。
 - `FISHAGENT_LLM_BASE_URL`：模型 API Base URL。
 - `FISHAGENT_LLM_MODEL`：模型名。

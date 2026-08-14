@@ -93,6 +93,42 @@ class RuntimeBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "safe final chat answer"):
             CrewAIOrchestrator._extract_public_answer("Here's a thinking process: internal details")
 
+    def test_crewai_chat_localizes_snapshot_times_for_operator(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.available = True
+        orchestrator.last_error = None
+        orchestrator.llm_config = LLMConfig(chat_retry_count=0)
+        orchestrator.system = SimpleNamespace(
+            snapshot=lambda: {
+                "ponds": [{"id": "B-02", "name": "B-02 草鱼生态池"}],
+                "readings": [
+                    {
+                        "pond_id": "B-02",
+                        "metric": "PH",
+                        "value": 7.9,
+                        "sampled_at": "2026-08-14T07:24:00+00:00",
+                    }
+                ],
+                "devices": [],
+                "incidents": [],
+            }
+        )
+        captured = {}
+
+        def kickoff(*args, **kwargs):
+            del args
+            captured.update(kwargs)
+            return SimpleNamespace(raw="结论：B-02 水质正常。")
+
+        orchestrator._kickoff_crew = kickoff
+        result = orchestrator.chat("B-02 水质是否正常", [], "B-02")
+
+        self.assertEqual(result.stop_reason, "CREW_CHAT_COMPLETED")
+        live_state = captured["context"]["live_state"]
+        self.assertEqual(live_state["latest_readings"][0]["sampled_at"], "2026-08-14 15:24:00")
+        self.assertEqual(live_state["timezone"], "Asia/Shanghai")
+        self.assertNotIn("UTC", str(live_state))
+
     def test_crewai_chat_retries_an_empty_provider_response(self) -> None:
         orchestrator = object.__new__(CrewAIOrchestrator)
         orchestrator.available = True
@@ -259,8 +295,11 @@ class RuntimeBoundaryTests(unittest.TestCase):
             self.assertIn(f'id="view_{view}"', response.text)
         self.assertIn('onclick="openLlmDialog()"', response.text)
         self.assertIn('<option value="openrouter">OpenRouter</option>', response.text)
-        for metric in ("AMMONIA", "NITRITE", "TURBIDITY", "CHLOROPHYLL", "PH", "TEMPERATURE"):
-            self.assertIn(f'id="sensor_chart_{metric}"', response.text)
+        self.assertIn('id="sensor_trend_chart"', response.text)
+        self.assertIn('id="sensor_trend_tabs"', response.text)
+        self.assertIn('onclick="setTrendWindow(12)"', response.text)
+        self.assertIn('onclick="setTrendWindow(24)"', response.text)
+        self.assertIn('function setTrendMetric', response.text)
         self.assertIn('id="llm_profile"', response.text)
         self.assertIn('onclick="newLlmProvider()"', response.text)
         self.assertIn("id:'preset:volcengine'", response.text)
@@ -490,6 +529,35 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(client.published[0][1]["request_id"], "patrol-request-1")
         self.assertEqual(client.published[1][0], "farms/farm-demo/ponds/B-01/sensors/do-b-01")
         self.assertEqual(client.published[1][1]["source_event_id"], "patrol-report-1")
+
+    def test_mqtt_mock_sensor_supports_passive_telemetry_upload(self) -> None:
+        class FakeResult:
+            rc = 0
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.published = []
+
+            def publish(self, topic, payload, qos, retain):
+                self.published.append((topic, json.loads(payload), qos, retain))
+                return FakeResult()
+
+        publisher = MqttTelemetryPublisher("mqtt.test", 1883)
+        client = FakeClient()
+        publisher._ensure_client = lambda: client
+
+        self.assertTrue(
+            publisher.publish_reading(
+                pond_id="B-02",
+                sensor_id="ph-b-02",
+                metric="PH",
+                unit="pH",
+                value=7.9,
+                source_event_id="passive-report-1",
+            )
+        )
+        self.assertEqual(client.published[0][0], "farms/farm-demo/ponds/B-02/sensors/ph-b-02")
+        self.assertEqual(client.published[0][1]["source_event_id"], "passive-report-1")
 
     def test_mqtt_network_callback_queues_slow_ingest(self) -> None:
         ingest_started = threading.Event()

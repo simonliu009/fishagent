@@ -17,6 +17,7 @@ services:
       PYTHONPATH: /app/src
       FISHAGENT_HOST: 0.0.0.0
       FISHAGENT_PORT: 3000
+      FISHAGENT_TIMEZONE: ${FISHAGENT_TIMEZONE:-Asia/Shanghai}
       FISHAGENT_PUBLIC_PORT: 3001
       FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS: ${FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS:-300}
       FISHAGENT_DATABASE_URL: postgresql://fishagent:fishagent@postgres:5432/fishagent
@@ -68,6 +69,7 @@ services:
     build: .
     environment: &fishagent-runtime-env
       PYTHONPATH: /app/src
+      FISHAGENT_TIMEZONE: ${FISHAGENT_TIMEZONE:-Asia/Shanghai}
       FISHAGENT_DATABASE_URL: postgresql://fishagent:fishagent@postgres:5432/fishagent
       FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS: ${FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS:-300}
       FISHAGENT_REDIS_URL: redis://redis:6379/0
