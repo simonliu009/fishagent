@@ -232,22 +232,23 @@
       border-radius: 5px;
       font-size: 11px;
     }
-    .patrol-sensor-strip { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+    .patrol-sensor-strip { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
     .patrol-sensor {
       min-width: 0;
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      gap: 6px;
-      padding: 4px 6px;
+      gap: 4px;
+      padding: 3px 5px;
       border: 1px solid var(--line);
       border-radius: 4px;
       background: var(--surface);
       color: var(--muted);
-      font-size: 9px;
+      font-size: 8px;
+      line-height: 1.25;
     }
     .patrol-sensor span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .patrol-sensor b { flex: 0 0 auto; color: var(--ink); font-size: 9px; }
+    .patrol-sensor b { flex: 0 0 auto; color: var(--ink); font-size: 8px; }
     .patrol-sensor b.danger { color: var(--red); }
     .dot { width: 8px; height: 8px; display: inline-block; border-radius: 50%; background: var(--brand); }
     .dot.warning { background: var(--amber); }
@@ -599,6 +600,7 @@
       .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .case-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .patrol-sensor-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     }
     @media (max-width: 720px) {
       .app-header { padding: 9px 12px; }
