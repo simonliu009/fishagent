@@ -35,6 +35,23 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(llm["model"], "openrouter/openrouter/free")
         self.assertEqual(llm["base_url"], "https://openrouter.ai/api/v1")
 
+    def test_crewai_uses_openai_prefix_for_compatible_endpoints(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.available = True
+        orchestrator.llm_config = LLMConfig(
+            provider="compatible",
+            base_url="https://ark.cn-beijing.volces.com/api/plan/v3",
+            model="ark-code-latest",
+            api_key="test-key",
+            enabled=True,
+        )
+        orchestrator._LLM = lambda **kwargs: kwargs
+
+        llm = orchestrator._llm()
+
+        self.assertEqual(llm["model"], "openai/ark-code-latest")
+        self.assertEqual(llm["base_url"], "https://ark.cn-beijing.volces.com/api/plan/v3")
+
     def test_crewai_hierarchical_manager_is_not_duplicated_in_member_agents(self) -> None:
         orchestrator = object.__new__(CrewAIOrchestrator)
         orchestrator.system = SimpleNamespace(
@@ -82,6 +99,10 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(
             CrewAIOrchestrator._decision_failure_reason(RuntimeError("connection reset")),
             "LLM_MODEL_OR_TOOL_FAILURE",
+        )
+        self.assertEqual(
+            CrewAIOrchestrator._decision_failure_reason(RuntimeError("LLM Provider NOT provided")),
+            "LLM_PROVIDER_CONFIG_INVALID",
         )
 
     def test_crewai_decision_invalid_only_means_invalid_structured_output(self) -> None:

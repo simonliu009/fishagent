@@ -70,11 +70,16 @@ class CrewAIOrchestrator:
     def _llm(self):
         if not self.available:
             raise CrewAIUnavailable("CrewAI 未启用或模型 API Key 未配置")
-        model = self.llm_config.model
-        if self.llm_config.provider.lower() == "openrouter":
+        provider = self.llm_config.provider.strip().lower()
+        model = self.llm_config.model.strip()
+        if provider == "openrouter":
             model = "openrouter/%s" % model
-        elif self.llm_config.provider.lower() not in {"openai", "zai", "openai-compatible", "compatible"}:
-            model = "%s/%s" % (self.llm_config.provider, model)
+        elif provider in {"openai-compatible", "compatible"} and not model.startswith("openai/"):
+            # LiteLLM needs an explicit provider when a custom OpenAI-compatible
+            # endpoint uses a model name such as ark-code-latest.
+            model = "openai/%s" % model
+        elif provider not in {"openai", "zai", "openai-compatible", "compatible"}:
+            model = "%s/%s" % (provider, model)
         return self._LLM(
             model=model,
             base_url=self.llm_config.base_url,
@@ -315,6 +320,8 @@ class CrewAIOrchestrator:
         message = str(exc).lower()
         if any(marker in message for marker in ("429", "rate limit", "rate_limit", "quota", "free-models-per-day")):
             return "LLM_RATE_LIMITED"
+        if "llm provider not provided" in message or "provider not provided" in message:
+            return "LLM_PROVIDER_CONFIG_INVALID"
         return "LLM_MODEL_OR_TOOL_FAILURE"
 
     def decide_incident(self, context: dict) -> CrewRunResult:
@@ -340,10 +347,17 @@ class CrewAIOrchestrator:
                 output = self._kickoff_crew(goal, pond_id, steps, context=context)
         except Exception as exc:
             self.last_error = str(exc)
-            steps.append(("supervisor-agent", "incident.failed", "模型输出或工具失败，停止自动处置：%s" % exc))
+            reason = self._decision_failure_reason(exc)
+            if reason == "LLM_PROVIDER_CONFIG_INVALID":
+                summary = "模型供应商配置无效，未执行设备写操作：%s" % exc
+            elif reason == "LLM_RATE_LIMITED":
+                summary = "模型调用达到限额，未执行设备写操作：%s" % exc
+            else:
+                summary = "模型输出或工具失败，未执行设备写操作：%s" % exc
+            steps.append(("supervisor-agent", "incident.failed", summary))
             return CrewRunResult(
-                summary="模型调用或工具执行失败，未执行设备写操作：%s" % exc,
-                stop_reason=self._decision_failure_reason(exc),
+                summary=summary,
+                stop_reason=reason,
                 steps=steps,
             )
         raw = str(getattr(output, "raw", output))
