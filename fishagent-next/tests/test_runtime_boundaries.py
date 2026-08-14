@@ -133,8 +133,11 @@ class RuntimeBoundaryTests(unittest.TestCase):
             self.assertIn(f'id="view_{view}"', response.text)
         self.assertIn('onclick="openLlmDialog()"', response.text)
         self.assertIn('<option value="openrouter">OpenRouter</option>', response.text)
-        self.assertIn('id="sensor_trend_chart"', response.text)
-        self.assertIn('id="sensor_trend_legend"', response.text)
+        for metric in ("AMMONIA", "NITRITE", "TURBIDITY", "CHLOROPHYLL", "PH", "TEMPERATURE"):
+            self.assertIn(f'id="sensor_chart_{metric}"', response.text)
+        self.assertIn('id="llm_profile"', response.text)
+        self.assertIn('onclick="newLlmProvider()"', response.text)
+        self.assertNotIn('id="monitor_chart"', response.text)
         self.assertIn('position: sticky', response.text)
         self.assertIn('id="llm_layer"', response.text)
         self.assertIn('id="alert_capsule"', response.text)

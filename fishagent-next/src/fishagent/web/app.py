@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
 from fishagent.application.agent_service import FishAgentSystem
-from fishagent.core import AppConfig, RuntimeConfigStore
+from fishagent.core import AppConfig, LLMConfig, RuntimeConfigStore, new_llm_profile_id
 from fishagent.domain.models import RiskLevel, ScheduleStatus, VisionFrame, new_id, utcnow
 from fishagent.infrastructure.auth import auth_from_config
 from fishagent.infrastructure.gateways import mqtt_gateway_from_config
@@ -54,7 +54,7 @@ SYSTEM = FishAgentSystem(
 )
 AUTH = auth_from_config(CONFIG.auth_enabled, CONFIG.auth_username, CONFIG.auth_password)
 CONFIG_STORE = RuntimeConfigStore()
-CONFIG.llm = CONFIG_STORE.load_llm(CONFIG.llm)
+CONFIG.llm, LLM_PROFILES = CONFIG_STORE.load_llm_bundle(CONFIG.llm)
 SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
 STATIC_DIR = Path(__file__).parent / "static"
 MQTT_ADAPTER: MqttTelemetryAdapter | None = None
@@ -403,16 +403,39 @@ async def state(request: Request) -> dict:
 @app.get("/api/v1/config/llm")
 async def get_llm_config(request: Request) -> dict:
     authenticate(request, "/api/v1/config/llm")
-    return {"llm": CONFIG.llm.public_dict()}
+    return {
+        "llm": CONFIG.llm.public_dict(),
+        "profiles": [profile.public_dict() for profile in LLM_PROFILES],
+    }
 
 
 @app.post("/api/v1/config/llm")
-async def update_llm_config(request: Request, payload: JsonPayload) -> dict:
+async def update_llm_config(request: Request, payload: JsonPayload) -> Any:
+    global LLM_PROFILES
     session = authenticate(request, "/api/v1/config/llm", write=True)
     data = payload.model_dump(exclude_none=True)
     if not data.get("api_key"):
         data.pop("api_key", None)
+    requested_profile_id = str(data.pop("profile_id", "") or "").strip()
+    save_as_profile = bool(data.pop("save_as_profile", False))
+    if save_as_profile:
+        name = str(data.get("name", "") or "").strip()
+        if not name:
+            return problem(400, "Invalid LLM provider", "自定义供应商必须填写名称")
+        profile_id = requested_profile_id if requested_profile_id and requested_profile_id != "__new__" else new_llm_profile_id()
+        data["profile_id"] = profile_id
+    elif requested_profile_id:
+        data["profile_id"] = requested_profile_id
     CONFIG.llm.update_from_payload(data)
+    if save_as_profile:
+        saved_profile = LLMConfig()
+        saved_profile.update_from_payload(CONFIG.llm.private_dict())
+        for index, profile in enumerate(LLM_PROFILES):
+            if profile.profile_id == saved_profile.profile_id:
+                LLM_PROFILES[index] = saved_profile
+                break
+        else:
+            LLM_PROFILES.append(saved_profile)
     SYSTEM.store.emit(
         "config.llm.updated",
         "大模型 API 配置已更新：%s / %s" % (CONFIG.llm.provider, CONFIG.llm.model),
@@ -421,10 +444,13 @@ async def update_llm_config(request: Request, payload: JsonPayload) -> dict:
         resource_type="config",
         resource_id="llm",
     )
-    CONFIG_STORE.save_llm(CONFIG.llm)
+    CONFIG_STORE.save_llm(CONFIG.llm, LLM_PROFILES)
     SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
     SYSTEM.snapshot()
-    return {"llm": CONFIG.llm.public_dict()}
+    return {
+        "llm": CONFIG.llm.public_dict(),
+        "profiles": [profile.public_dict() for profile in LLM_PROFILES],
+    }
 
 
 @app.post("/api/v1/config/llm/test")

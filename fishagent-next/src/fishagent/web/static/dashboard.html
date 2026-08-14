@@ -129,14 +129,11 @@
       box-shadow: var(--shadow);
     }
     .patrol-panel {
-      display: grid;
-      grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr);
-      gap: 18px;
+      display: block;
       padding: 20px;
       border-color: #bdcafc;
       background: var(--blue-soft);
     }
-    .patrol-main { min-width: 0; padding-right: 18px; border-right: 1px solid #cdd5f4; }
     .panel-heading, .section-heading {
       display: flex;
       align-items: flex-start;
@@ -347,15 +344,23 @@
     .flow-step.failed::after { background: var(--red); }
     .chart-wrap { position: relative; min-height: 310px; }
     .trend-canvas { width: 100%; height: 280px; display: block; }
+    .sensor-trend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+    .sensor-trend-card { min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
+    .sensor-trend-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--ink); font-size: 10px; font-weight: 800; }
+    .sensor-trend-card-value { color: var(--muted); font-size: 9px; font-weight: 500; white-space: nowrap; }
+    .sensor-trend-canvas { width: 100%; height: 112px; display: block; margin-top: 5px; }
     .chart-legend { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; min-height: 22px; margin-top: 6px; }
     .legend-item { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
     .legend-swatch { width: 8px; height: 8px; border-radius: 2px; }
     .page-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 14px; }
+    .single-panel-grid { grid-template-columns: minmax(0, 1fr); }
     .analytics-events-panel { margin-top: 14px; }
     .assistant-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(330px, .75fr); gap: 14px; }
     .stack { display: grid; gap: 14px; align-content: start; }
     .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .llm-profile-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: end; margin: 14px 0 10px; }
     .field { display: grid; gap: 5px; min-width: 0; color: var(--muted); font-size: 10px; }
+    .field-hint { color: var(--muted); font-size: 9px; line-height: 1.4; }
     .field.wide { grid-column: 1 / -1; }
     input, select, textarea {
       width: 100%;
@@ -591,7 +596,6 @@
     .system-ok { display: flex; align-items: center; gap: 6px; }
     @media (max-width: 1080px) {
       .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout, .case-flow-layout { grid-template-columns: 1fr; }
-      .patrol-main { padding-right: 0; padding-bottom: 16px; border-right: 0; border-bottom: 1px solid #cdd5f4; }
       .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .case-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -606,7 +610,8 @@
       .app-main { padding: 12px; }
       .patrol-panel, .tool-panel { padding: 12px; }
       .panel-heading { align-items: stretch; flex-direction: column; }
-      .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary, .case-summary-grid, .knowledge-grid, .camera-observation-grid { grid-template-columns: 1fr; }
+      .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary, .case-summary-grid, .knowledge-grid, .camera-observation-grid, .sensor-trend-grid { grid-template-columns: 1fr; }
+      .llm-profile-bar { grid-template-columns: 1fr; }
       .metric-tile { min-height: 68px; }
       .patrol-pond-row { grid-template-columns: 1fr auto; gap: 6px; }
       .patrol-sensor-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -653,23 +658,21 @@
   <main class="app-main">
     <section id="view_monitor" class="view active">
       <section class="patrol-panel">
-        <div class="patrol-main">
-          <div class="panel-heading">
-            <div class="heading-copy">
-              <span class="heading-icon"><i data-lucide="scan-line"></i></span>
-              <div><h1>Agent 巡查总览</h1><p class="eyebrow">感知 → 决策 → 执行 → 复核，全程留痕</p></div>
-            </div>
-            <div class="actions">
-              <span id="demo_data_badge" class="status-badge info" hidden><i data-lucide="database"></i>模拟数据</span>
-              <button class="button danger" type="button" onclick="runDemo('alerts')"><i data-lucide="triangle-alert"></i>模拟双传感器告警</button>
-              <button class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
-            </div>
+        <div class="panel-heading">
+          <div class="heading-copy">
+            <span class="heading-icon"><i data-lucide="scan-line"></i></span>
+            <div><h1>Agent 巡查总览</h1><p class="eyebrow">感知 → 决策 → 执行 → 复核，全程留痕</p></div>
           </div>
-          <div id="patrol_summary" class="patrol-summary-grid"></div>
-          <div class="patrol-detail">
-            <div class="detail-head"><b>逐塘巡检明细</b><span id="patrol_scope">0 个池塘</span></div>
-            <div id="patrol_pond_list" class="patrol-pond-list"></div>
+          <div class="actions">
+            <span id="demo_data_badge" class="status-badge info" hidden><i data-lucide="database"></i>模拟数据</span>
+            <button class="button danger" type="button" onclick="runDemo('alerts')"><i data-lucide="triangle-alert"></i>模拟双传感器告警</button>
+            <button class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
           </div>
+        </div>
+        <div id="patrol_summary" class="patrol-summary-grid"></div>
+        <div class="patrol-detail">
+          <div class="detail-head"><b>逐塘巡检明细</b><span id="patrol_scope">0 个池塘</span></div>
+          <div id="patrol_pond_list" class="patrol-pond-list"></div>
         </div>
       </section>
 
@@ -686,14 +689,10 @@
         </section>
       </div>
 
-      <div class="dashboard-grid">
+      <div class="dashboard-grid single-panel-grid">
         <section id="alert_panel" class="tool-panel" tabindex="-1">
           <div class="section-heading"><h2 class="section-title"><i data-lucide="bell-ring"></i>告警列表</h2><span id="alert_meta" class="status-badge danger">0 条未关闭</span></div>
           <div id="alert_list" class="alert-list"></div>
-        </section>
-        <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="chart-spline"></i>溶解氧趋势</h2><span class="section-meta">最新 200 条读数</span></div>
-          <div class="chart-wrap"><canvas id="monitor_chart" class="trend-canvas"></canvas><div id="monitor_legend" class="chart-legend"></div></div>
         </section>
       </div>
     </section>
@@ -791,8 +790,15 @@
           <div class="chart-wrap"><canvas id="analytics_chart" class="trend-canvas"></canvas><div id="analytics_legend" class="chart-legend"></div></div>
         </section>
         <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="activity"></i>其他传感器趋势</h2><span class="section-meta">按各自量程归一化</span></div>
-          <div class="chart-wrap"><canvas id="sensor_trend_chart" class="trend-canvas"></canvas><div id="sensor_trend_legend" class="chart-legend"></div></div>
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="activity"></i>其他传感器趋势</h2><span class="section-meta">每种传感器独立成图</span></div>
+          <div class="sensor-trend-grid">
+            <article class="sensor-trend-card"><div class="sensor-trend-card-head"><span>氨氮</span><span id="sensor_value_AMMONIA" class="sensor-trend-card-value">-- mg/L</span></div><canvas id="sensor_chart_AMMONIA" class="sensor-trend-canvas"></canvas><div id="sensor_legend_AMMONIA" class="chart-legend"></div></article>
+            <article class="sensor-trend-card"><div class="sensor-trend-card-head"><span>亚硝酸根离子</span><span id="sensor_value_NITRITE" class="sensor-trend-card-value">-- mg/L</span></div><canvas id="sensor_chart_NITRITE" class="sensor-trend-canvas"></canvas><div id="sensor_legend_NITRITE" class="chart-legend"></div></article>
+            <article class="sensor-trend-card"><div class="sensor-trend-card-head"><span>浊度</span><span id="sensor_value_TURBIDITY" class="sensor-trend-card-value">-- NTU</span></div><canvas id="sensor_chart_TURBIDITY" class="sensor-trend-canvas"></canvas><div id="sensor_legend_TURBIDITY" class="chart-legend"></div></article>
+            <article class="sensor-trend-card"><div class="sensor-trend-card-head"><span>叶绿素</span><span id="sensor_value_CHLOROPHYLL" class="sensor-trend-card-value">-- ug/L</span></div><canvas id="sensor_chart_CHLOROPHYLL" class="sensor-trend-canvas"></canvas><div id="sensor_legend_CHLOROPHYLL" class="chart-legend"></div></article>
+            <article class="sensor-trend-card"><div class="sensor-trend-card-head"><span>pH</span><span id="sensor_value_PH" class="sensor-trend-card-value">--</span></div><canvas id="sensor_chart_PH" class="sensor-trend-canvas"></canvas><div id="sensor_legend_PH" class="chart-legend"></div></article>
+            <article class="sensor-trend-card"><div class="sensor-trend-card-head"><span>水温</span><span id="sensor_value_TEMPERATURE" class="sensor-trend-card-value">-- C</span></div><canvas id="sensor_chart_TEMPERATURE" class="sensor-trend-canvas"></canvas><div id="sensor_legend_TEMPERATURE" class="chart-legend"></div></article>
+          </div>
         </section>
       </div>
       <section class="tool-panel analytics-events-panel">
@@ -874,7 +880,12 @@
         <button class="icon-button" type="button" title="关闭" onclick="closeLlmDialog()"><i data-lucide="x"></i></button>
       </div>
       <div class="section-heading"><span class="section-meta">配置保存在服务端</span><span id="llm_badge" class="status-badge warning">未启用</span></div>
+      <div class="llm-profile-bar">
+        <label class="field">已保存配置<select id="llm_profile" onchange="selectLlmProfile(this.value)"></select></label>
+        <button class="button secondary" type="button" onclick="newLlmProvider()"><i data-lucide="plus"></i>添加供应商</button>
+      </div>
       <div class="form-grid">
+        <label class="field wide">供应商名称<input id="llm_name" placeholder="例如：DeepSeek 生产环境"><span class="field-hint">自定义名称仅用于管理显示；接口协议、Endpoint 和模型单独配置。</span></label>
         <label class="field">提供商<select id="llm_provider" onchange="applyLlmProviderPreset()"><option value="zai">Z.ai</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="compatible">OpenAI-compatible</option></select></label>
         <label class="field">模型<input id="llm_model"></label>
         <label class="field wide">Base URL<input id="llm_base_url"></label>
@@ -898,6 +909,7 @@
     let csrfToken = sessionStorage.getItem('fishagent_csrf') || '';
     let currentState = {};
     let currentLlm = {};
+    let llmProfiles = [];
     let currentView = 'monitor';
     let countdownTarget = null;
     let countdownIntervalSeconds = 0;
@@ -915,6 +927,12 @@
       ['alerts', '混合异常', 'MQTT 多事件', '低溶氧 + 氨氮 → 分别决策 → 执行或人工'],
     ];
     const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
+    const llmPresets = [
+      {id:'preset:zai', name:'Z.ai', provider:'zai', base_url:'https://api.z.ai/api/paas/v4', model:'glm-4.5'},
+      {id:'preset:openai', name:'OpenAI', provider:'openai', base_url:'https://api.openai.com/v1', model:'gpt-4o-mini'},
+      {id:'preset:openrouter', name:'OpenRouter', provider:'openrouter', base_url:'https://openrouter.ai/api/v1', model:'openrouter/free'},
+      {id:'preset:compatible', name:'OpenAI-compatible', provider:'compatible', base_url:'', model:''}
+    ];
     const closedIncidents = new Set(['RESOLVED', 'DISMISSED']);
 
     function iconRefresh() { if (window.lucide) window.lucide.createIcons({attrs: {'stroke-width': 1.8}}); }
@@ -982,7 +1000,46 @@
       const layer = document.getElementById('llm_layer');
       layer.hidden = false;
       iconRefresh();
-      requestAnimationFrame(() => document.getElementById('llm_provider').focus());
+      requestAnimationFrame(() => document.getElementById('llm_profile').focus());
+    }
+    function renderLlmProfiles() {
+      const select = document.getElementById('llm_profile');
+      if (!select) return;
+      const options = [
+        '<option value="__new__">新建自定义供应商</option>',
+        ...llmPresets.map(item => `<option value="${item.id}">预置 · ${escapeHtml(item.name)}</option>`),
+        ...llmProfiles.map(item => `<option value="${escapeHtml(item.profile_id)}">自定义 · ${escapeHtml(item.name || item.provider)}</option>`)
+      ];
+      select.innerHTML = options.join('');
+      const activeId = currentLlm.profile_id || `preset:${currentLlm.provider || 'zai'}`;
+      select.value = [...select.options].some(item => item.value === activeId) ? activeId : '__new__';
+    }
+    function applyLlmForm(config, fallbackName = '') {
+      const preset = llmPresets.find(item => item.provider === config.provider && item.id === document.getElementById('llm_profile').value);
+      document.getElementById('llm_name').value = config.name || fallbackName || preset?.name || '';
+      document.getElementById('llm_provider').value = config.provider || 'compatible';
+      document.getElementById('llm_model').value = config.model || '';
+      document.getElementById('llm_base_url').value = config.base_url || '';
+      document.getElementById('llm_api_key').value = '';
+      document.getElementById('llm_enabled').checked = Boolean(config.enabled);
+    }
+    function selectLlmProfile(profileId) {
+      if (profileId === '__new__') {
+        newLlmProvider(false);
+        return;
+      }
+      const preset = llmPresets.find(item => item.id === profileId);
+      const profile = llmProfiles.find(item => item.profile_id === profileId);
+      if (preset) applyLlmForm({...preset, enabled: currentLlm.enabled}, preset.name);
+      else if (profile) applyLlmForm(profile, profile.name);
+      document.getElementById('llm_message').textContent = profile ? (profile.api_key_configured ? `密钥已配置：${profile.api_key_preview}` : '尚未配置 API Key') : '预置配置；保存后仅切换当前活动配置';
+    }
+    function newLlmProvider(focus = true) {
+      const select = document.getElementById('llm_profile');
+      if (select) select.value = '__new__';
+      applyLlmForm({provider:'compatible', model:'', base_url:'', enabled:true});
+      document.getElementById('llm_message').textContent = '填写供应商名称后保存，即可加入自定义供应商列表';
+      if (focus) requestAnimationFrame(() => document.getElementById('llm_name').focus());
     }
     function applyLlmProviderPreset() {
       if (document.getElementById('llm_provider').value !== 'openrouter') return;
@@ -1274,10 +1331,8 @@
     function renderAssistant() {
       renderRuns();
       document.getElementById('assistant_events').innerHTML = eventRows(24);
-      document.getElementById('llm_provider').value = currentLlm.provider || 'zai';
-      document.getElementById('llm_model').value = currentLlm.model || '';
-      document.getElementById('llm_base_url').value = currentLlm.base_url || '';
-      document.getElementById('llm_enabled').checked = Boolean(currentLlm.enabled);
+      renderLlmProfiles();
+      applyLlmForm(currentLlm);
       const badgeNode = document.getElementById('llm_badge');
       badgeNode.className = `status-badge ${currentLlm.enabled ? '' : 'warning'}`;
       badgeNode.textContent = currentLlm.enabled ? '已启用' : '未启用';
@@ -1285,7 +1340,7 @@
       const chatBadge = document.getElementById('assistant_model_badge');
       const modelReady = Boolean(currentLlm.enabled && currentLlm.api_key_configured);
       chatBadge.className = `status-badge ${modelReady ? '' : 'warning'}`;
-      chatBadge.textContent = modelReady ? `${currentLlm.provider} / ${currentLlm.model}` : '模型未配置';
+      chatBadge.textContent = modelReady ? `${currentLlm.name || currentLlm.provider} / ${currentLlm.model}` : '模型未配置';
       const pondSelect = document.getElementById('assistant_chat_pond');
       const selectedPond = pondSelect.value;
       pondSelect.innerHTML = '<option value="">全场</option>' + (currentState.ponds || []).map(pond => `<option value="${escapeHtml(pond.id)}">${escapeHtml(pond.id)} · ${escapeHtml(pond.name)}</option>`).join('');
@@ -1451,18 +1506,18 @@
       }
       document.getElementById(legendId).innerHTML = series.map((entry,index) => `<span class="legend-item"><span class="legend-swatch" style="background:${colors[index%colors.length]}"></span>${escapeHtml(entry[0])}</span>`).join('');
     }
-    function drawNormalizedSensorChart(canvasId, legendId) {
-      const canvas = document.getElementById(canvasId);
+    function drawSensorMetricChart(metric, colorIndex) {
+      const canvas = document.getElementById(`sensor_chart_${metric.metric}`);
+      const legend = document.getElementById(`sensor_legend_${metric.metric}`);
+      const valueNode = document.getElementById(`sensor_value_${metric.metric}`);
       if (!canvas || canvas.offsetWidth < 40) return;
-      const metrics = Object.fromEntries(waterMetrics.map(item => [item.metric, item]));
       const grouped = {};
-      (currentState.readings || []).forEach(item => {
-        if (item.metric === 'DO' || !metrics[item.metric]) return;
-        (grouped[item.metric] ||= []).push(item);
+      (currentState.readings || []).filter(item => item.metric === metric.metric).forEach(item => {
+        (grouped[item.pond_id] ||= []).push(item);
       });
-      const series = waterMetrics
-        .filter(item => item.metric !== 'DO' && grouped[item.metric]?.length)
-        .map(item => [item.metric, [...grouped[item.metric]].sort((a, b) => String(a.sampled_at).localeCompare(String(b.sampled_at))) ]);
+      const series = Object.entries(grouped)
+        .map(item => [item[0], item[1].slice().sort((a, b) => String(a.sampled_at).localeCompare(String(b.sampled_at)))])
+        .filter(item => item[1].length);
       const ratio = window.devicePixelRatio || 1;
       const width = canvas.offsetWidth;
       const height = canvas.offsetHeight;
@@ -1477,35 +1532,39 @@
       const surface = style.getPropertyValue('--surface').trim();
       context.fillStyle = surface;
       context.fillRect(0, 0, width, height);
-      const pad = {left: 42, right: 14, top: 12, bottom: 30};
+      const pad = {left: 30, right: 8, top: 8, bottom: 22};
       const chartWidth = width - pad.left - pad.right;
       const chartHeight = height - pad.top - pad.bottom;
       context.font = '10px system-ui';
       context.strokeStyle = line;
       context.fillStyle = muted;
       context.lineWidth = 1;
-      for (let value = 0; value <= 100; value += 25) {
-        const y = pad.top + chartHeight - value / 100 * chartHeight;
+      const values = series.flatMap(item => item[1].map(reading => Number(reading.value))).filter(Number.isFinite);
+      const lower = metric.min !== undefined ? metric.min : Math.min(...values);
+      const upper = metric.max !== undefined ? metric.max : Math.max(...values);
+      const range = Math.max(upper - lower, Math.abs(upper) * 0.1, 0.0001);
+      const minScale = lower - (metric.min === undefined ? range * 0.05 : 0);
+      const maxScale = upper + (metric.max === undefined ? range * 0.05 : 0);
+      const scaleRange = Math.max(maxScale - minScale, 0.0001);
+      for (let index = 0; index <= 2; index += 1) {
+        const value = minScale + scaleRange * index / 2;
+        const y = pad.top + chartHeight - index / 2 * chartHeight;
         context.beginPath(); context.moveTo(pad.left, y); context.lineTo(width - pad.right, y); context.stroke();
-        context.fillText(`${value}%`, 9, y + 3);
+        context.fillText(fmtNumber(value, metric.digits), 2, y + 3);
       }
       if (!series.length) {
-        context.fillText('暂无其他传感器读数', Math.max(pad.left, width / 2 - 50), height / 2);
-        document.getElementById(legendId).innerHTML = '';
+        context.fillText('暂无读数', Math.max(pad.left, width / 2 - 22), height / 2);
+        legend.innerHTML = '';
+        valueNode.textContent = `--${metric.hideUnit ? '' : ` ${metric.metric === 'TURBIDITY' ? 'NTU' : metric.metric === 'CHLOROPHYLL' ? 'ug/L' : metric.metric === 'TEMPERATURE' ? 'C' : 'mg/L'}`}`;
         return;
       }
       const maxPoints = Math.max(...series.map(item => item[1].length), 2);
       series.forEach((entry, index) => {
-        const metric = metrics[entry[0]];
-        const values = entry[1].map(reading => Number(reading.value)).filter(Number.isFinite);
-        const lower = metric.min !== undefined ? metric.min : Math.min(...values);
-        const upper = metric.max !== undefined ? metric.max : Math.max(...values);
-        const range = Math.max(upper - lower, 0.0001);
-        context.strokeStyle = colors[index % colors.length];
+        context.strokeStyle = colors[(colorIndex + index) % colors.length];
         context.lineWidth = 2;
         context.beginPath();
         entry[1].forEach((reading, pointIndex) => {
-          const normalized = Math.min(1, Math.max(0, (Number(reading.value) - lower) / range));
+          const normalized = Math.min(1, Math.max(0, (Number(reading.value) - minScale) / scaleRange));
           const x = pad.left + pointIndex / Math.max(maxPoints - 1, 1) * chartWidth;
           const y = pad.top + chartHeight - normalized * chartHeight;
           pointIndex ? context.lineTo(x, y) : context.moveTo(x, y);
@@ -1515,19 +1574,19 @@
       const ticks = Math.min(6, maxPoints);
       for (let index = 0; index < ticks; index += 1) {
         const x = pad.left + index / Math.max(ticks - 1, 1) * chartWidth;
-        const sample = series[0][1][Math.round(index / Math.max(ticks - 1, 1) * (series[0][1].length - 1))];
+        const samples = series[0][1];
+        const sample = samples[Math.round(index / Math.max(ticks - 1, 1) * (samples.length - 1))];
         context.fillStyle = muted;
         context.fillText(sample ? fmtDate(sample.sampled_at, false).slice(-5) : '--', x - 13, height - 9);
       }
-      document.getElementById(legendId).innerHTML = series.map((entry, index) => {
-        const metric = metrics[entry[0]];
-        return `<span class="legend-item"><span class="legend-swatch" style="background:${colors[index % colors.length]}"></span>${escapeHtml(metric.label)}</span>`;
-      }).join('');
+      const latest = series[0][1].at(-1);
+      const unit = metric.hideUnit ? '' : ` ${metric.metric === 'TURBIDITY' ? 'NTU' : metric.metric === 'CHLOROPHYLL' ? 'ug/L' : metric.metric === 'TEMPERATURE' ? 'C' : 'mg/L'}`;
+      valueNode.textContent = `${fmtNumber(latest?.value, metric.digits)}${unit}`;
+      legend.innerHTML = series.map((entry, index) => `<span class="legend-item"><span class="legend-swatch" style="background:${colors[(colorIndex + index) % colors.length]}"></span>${escapeHtml(entry[0])}</span>`).join('');
     }
     function drawCharts() {
-      drawChart('monitor_chart', 'monitor_legend');
       drawChart('analytics_chart', 'analytics_legend');
-      drawNormalizedSensorChart('sensor_trend_chart', 'sensor_trend_legend');
+      waterMetrics.filter(metric => metric.metric !== 'DO').forEach((metric, index) => drawSensorMetricChart(metric, index));
     }
     function renderAll() {
       renderPatrol(); renderMetrics(); renderExecution(); renderWater(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics();
@@ -1540,6 +1599,7 @@
         const [state, config, user] = await Promise.all([api('/api/v1/state'), api('/api/v1/config/llm'), api('/api/v1/me')]);
         currentState = state;
         currentLlm = config.llm || {};
+        llmProfiles = config.profiles || [];
         document.getElementById('user_chip').textContent = user.role === 'admin' ? '管理' : escapeHtml(user.role);
         renderAll();
       } catch (error) {
@@ -1596,8 +1656,25 @@
       }
     }
     function saveLlm() {
-      const payload = {provider:document.getElementById('llm_provider').value,model:document.getElementById('llm_model').value,base_url:document.getElementById('llm_base_url').value,api_key:document.getElementById('llm_api_key').value,enabled:document.getElementById('llm_enabled').checked};
-      return mutate(() => api('/api/v1/config/llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}), '模型配置已保存');
+      const profileId = document.getElementById('llm_profile').value;
+      const name = document.getElementById('llm_name').value.trim();
+      const saveAsProfile = profileId === '__new__' || !profileId.startsWith('preset:');
+      if (saveAsProfile && !name) {
+        showToast('请填写自定义供应商名称', true);
+        document.getElementById('llm_name').focus();
+        return Promise.resolve();
+      }
+      const payload = {
+        profile_id: profileId,
+        save_as_profile: saveAsProfile,
+        name,
+        provider:document.getElementById('llm_provider').value,
+        model:document.getElementById('llm_model').value,
+        base_url:document.getElementById('llm_base_url').value,
+        api_key:document.getElementById('llm_api_key').value,
+        enabled:document.getElementById('llm_enabled').checked
+      };
+      return mutate(() => api('/api/v1/config/llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}), saveAsProfile ? '自定义供应商已保存并启用' : '模型配置已保存');
     }
     async function testLlm() { try { const result = await api('/api/v1/config/llm/test',{method:'POST'}); showToast(`模型连接成功：HTTP ${result.status_code}`); } catch (error) { showToast(`模型连接失败：${error.message}`, true); } }
     function createAsset() {

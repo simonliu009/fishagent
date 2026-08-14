@@ -2,6 +2,8 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
+from uuid import uuid4
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -21,6 +23,8 @@ def normalize_llm_base_url(value: str) -> str:
 
 @dataclass
 class LLMConfig:
+    profile_id: str = ""
+    name: str = ""
     provider: str = "zai"
     base_url: str = "https://api.z.ai/api/paas/v4"
     model: str = "glm-4.5"
@@ -34,6 +38,8 @@ class LLMConfig:
     @classmethod
     def from_env(cls) -> "LLMConfig":
         return cls(
+            profile_id=os.environ.get("FISHAGENT_LLM_PROFILE_ID", ""),
+            name=os.environ.get("FISHAGENT_LLM_NAME", ""),
             provider=os.environ.get("FISHAGENT_LLM_PROVIDER", cls.provider),
             base_url=normalize_llm_base_url(os.environ.get("FISHAGENT_LLM_BASE_URL", cls.base_url)),
             model=os.environ.get("FISHAGENT_LLM_MODEL", cls.model),
@@ -43,6 +49,8 @@ class LLMConfig:
 
     def public_dict(self) -> dict:
         return {
+            "profile_id": self.profile_id,
+            "name": self.name,
             "provider": self.provider,
             "base_url": self.base_url,
             "model": self.model,
@@ -52,7 +60,7 @@ class LLMConfig:
         }
 
     def update_from_payload(self, payload: dict) -> None:
-        for key in ("provider", "base_url", "model", "api_key"):
+        for key in ("profile_id", "name", "provider", "base_url", "model", "api_key"):
             if key in payload:
                 value = str(payload.get(key) or "").strip()
                 setattr(self, key, normalize_llm_base_url(value) if key == "base_url" else value)
@@ -62,6 +70,8 @@ class LLMConfig:
 
     def private_dict(self) -> dict:
         return {
+            "profile_id": self.profile_id,
+            "name": self.name,
             "provider": self.provider,
             "base_url": self.base_url,
             "model": self.model,
@@ -131,17 +141,40 @@ class RuntimeConfigStore:
             return fallback
         with self.path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
-        llm = data.get("llm", {})
+        return self._config_from_payload(fallback, data.get("llm", {}))
+
+    @staticmethod
+    def _config_from_payload(fallback: LLMConfig, payload: object) -> LLMConfig:
         merged = fallback.private_dict()
-        merged.update({key: value for key, value in llm.items() if key in merged})
+        if isinstance(payload, dict):
+            merged.update({key: value for key, value in payload.items() if key in merged})
         result = LLMConfig()
         result.update_from_payload(merged)
         return result
 
-    def save_llm(self, config: LLMConfig) -> None:
+    def load_llm_bundle(self, fallback: LLMConfig) -> tuple[LLMConfig, list[LLMConfig]]:
+        if not self.path.exists():
+            return fallback, []
+        with self.path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        active = self._config_from_payload(fallback, data.get("llm", {}))
+        profiles = [
+            self._config_from_payload(LLMConfig(), item)
+            for item in data.get("llm_profiles", [])
+            if isinstance(item, dict) and str(item.get("profile_id") or "").strip()
+        ]
+        return active, profiles
+
+    def save_llm(self, config: LLMConfig, profiles: Optional[list[LLMConfig]] = None) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        payload = {"llm": config.private_dict()}
+        payload: dict[str, object] = {"llm": config.private_dict()}
+        if profiles is not None:
+            payload["llm_profiles"] = [item.private_dict() for item in profiles]
         tmp = self.path.with_suffix(".tmp")
         with tmp.open("w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
         tmp.replace(self.path)
+
+
+def new_llm_profile_id() -> str:
+    return "custom-%s" % uuid4().hex[:12]

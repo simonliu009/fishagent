@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
 from fishagent.application.agent_service import FishAgentSystem
-from fishagent.core import AppConfig, LLMConfig, RuntimeConfigStore
+from fishagent.core import AppConfig, LLMConfig, RuntimeConfigStore, new_llm_profile_id
 from fishagent.domain.models import RiskLevel, ScheduleStatus
 from fishagent.infrastructure.auth import auth_from_config
 from fishagent.infrastructure.gateways import mqtt_gateway_from_config
@@ -43,7 +43,7 @@ SYSTEM = FishAgentSystem(
 )
 AUTH = auth_from_config(CONFIG.auth_enabled, CONFIG.auth_username, CONFIG.auth_password)
 CONFIG_STORE = RuntimeConfigStore()
-CONFIG.llm = CONFIG_STORE.load_llm(CONFIG.llm)
+CONFIG.llm, LLM_PROFILES = CONFIG_STORE.load_llm_bundle(CONFIG.llm)
 SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
 STATIC_DIR = Path(__file__).parent / "static"
 MQTT_ADAPTER: MqttTelemetryAdapter | None = None
@@ -680,7 +680,11 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/v1/state":
             json_response(self, 200, SYSTEM.snapshot())
         elif path == "/api/v1/config/llm":
-            json_response(self, 200, {"llm": CONFIG.llm.public_dict()})
+            json_response(
+                self,
+                200,
+                {"llm": CONFIG.llm.public_dict(), "profiles": [profile.public_dict() for profile in LLM_PROFILES]},
+            )
         elif path in {"/api/v1/farms", "/api/v1/ponds", "/api/v1/sensors", "/api/v1/devices", "/api/v1/cameras"}:
             json_response(self, 200, {path.rsplit("/", 1)[-1]: asset_collection(path.rsplit("/", 1)[-1])})
         elif path == "/api/v1/incidents":
@@ -778,14 +782,37 @@ class Handler(BaseHTTPRequestHandler):
             keep_existing_key = not payload.get("api_key")
             if keep_existing_key:
                 payload.pop("api_key", None)
+            requested_profile_id = str(payload.pop("profile_id", "") or "").strip()
+            save_as_profile = bool(payload.pop("save_as_profile", False))
+            if save_as_profile:
+                name = str(payload.get("name", "") or "").strip()
+                if not name:
+                    problem(self, 400, "Invalid LLM provider", "自定义供应商必须填写名称")
+                    return
+                payload["profile_id"] = requested_profile_id if requested_profile_id and requested_profile_id != "__new__" else new_llm_profile_id()
+            elif requested_profile_id:
+                payload["profile_id"] = requested_profile_id
             CONFIG.llm.update_from_payload(payload)
+            if save_as_profile:
+                saved_profile = LLMConfig()
+                saved_profile.update_from_payload(CONFIG.llm.private_dict())
+                for index, profile in enumerate(LLM_PROFILES):
+                    if profile.profile_id == saved_profile.profile_id:
+                        LLM_PROFILES[index] = saved_profile
+                        break
+                else:
+                    LLM_PROFILES.append(saved_profile)
             SYSTEM.store.emit(
                 "config.llm.updated",
                 "大模型 API 配置已更新：%s / %s" % (CONFIG.llm.provider, CONFIG.llm.model),
             )
-            CONFIG_STORE.save_llm(CONFIG.llm)
+            CONFIG_STORE.save_llm(CONFIG.llm, LLM_PROFILES)
             SYSTEM.agent_orchestrator = CrewAIOrchestrator(SYSTEM, CONFIG.llm)
-            json_response(self, 200, {"llm": CONFIG.llm.public_dict()})
+            json_response(
+                self,
+                200,
+                {"llm": CONFIG.llm.public_dict(), "profiles": [profile.public_dict() for profile in LLM_PROFILES]},
+            )
             return
         if path == "/api/v1/agent-runs":
             payload = read_json_body(self)

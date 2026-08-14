@@ -650,6 +650,27 @@ class B01FlowTest(unittest.TestCase):
             self.assertEqual(restored.api_key, "sk-persisted")
             self.assertTrue(restored.enabled)
 
+    def test_runtime_config_store_persists_named_llm_profiles(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = RuntimeConfigStore(temp_dir)
+            active = LLMConfig(profile_id="custom-deepseek", name="DeepSeek 生产", provider="compatible", enabled=True)
+            profile = LLMConfig(
+                profile_id="custom-deepseek",
+                name="DeepSeek 生产",
+                provider="compatible",
+                base_url="https://api.deepseek.com/v1",
+                model="deepseek-chat",
+                api_key="sk-deepseek",
+                enabled=True,
+            )
+            store.save_llm(active, [profile])
+            restored, profiles = store.load_llm_bundle(LLMConfig())
+            self.assertEqual(restored.name, "DeepSeek 生产")
+            self.assertEqual(len(profiles), 1)
+            self.assertEqual(profiles[0].profile_id, "custom-deepseek")
+            self.assertEqual(profiles[0].base_url, "https://api.deepseek.com/v1")
+            self.assertEqual(profiles[0].api_key, "sk-deepseek")
+
     def test_l2_action_waits_for_approval_and_executes_once_approved(self) -> None:
         system = FishAgentSystem()
         system.initialize_demo()

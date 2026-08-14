@@ -73,7 +73,7 @@ class CrewAIOrchestrator:
         model = self.llm_config.model
         if self.llm_config.provider.lower() == "openrouter":
             model = "openrouter/%s" % model
-        elif self.llm_config.provider.lower() not in {"openai", "zai", "openai-compatible"}:
+        elif self.llm_config.provider.lower() not in {"openai", "zai", "openai-compatible", "compatible"}:
             model = "%s/%s" % (self.llm_config.provider, model)
         return self._LLM(
             model=model,
