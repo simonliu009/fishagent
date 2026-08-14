@@ -703,21 +703,21 @@
       <div class="assistant-layout">
         <section class="tool-panel chat-panel">
           <div class="chat-head">
-            <h2 class="section-title"><i data-lucide="bot"></i>CrewAI 助手</h2>
+            <h2 class="section-title"><i data-lucide="bot"></i>智渔AI 助手</h2>
             <span id="assistant_model_badge" class="status-badge warning">模型未配置</span>
           </div>
           <div id="assistant_chat" class="chat-log" role="log" aria-live="polite"></div>
           <form id="assistant_chat_form" class="chat-composer" onsubmit="submitAssistantChat(event)">
             <div class="chat-compose-row">
               <select id="assistant_chat_pond" title="对话范围" aria-label="对话范围"><option value="">全场</option></select>
-              <textarea id="assistant_chat_input" maxlength="2000" rows="2" placeholder="输入养殖运营问题" aria-label="发送给 CrewAI 的消息" onkeydown="handleAssistantChatKey(event)"></textarea>
+              <textarea id="assistant_chat_input" maxlength="2000" rows="2" placeholder="输入养殖运营问题" aria-label="发送给智渔AI的消息" onkeydown="handleAssistantChatKey(event)"></textarea>
               <button id="assistant_chat_send" class="icon-button chat-send" type="submit" title="发送消息"><i data-lucide="send"></i></button>
             </div>
           </form>
         </section>
         <div class="stack">
           <section class="tool-panel">
-            <div class="section-heading"><h2 class="section-title"><i data-lucide="message-square-text"></i>Agent 任务台</h2><span class="status-badge info">CrewAI / LLM</span></div>
+            <div class="section-heading"><h2 class="section-title"><i data-lucide="message-square-text"></i>Agent 任务台</h2><span class="status-badge info">智渔AI / LLM</span></div>
             <div class="form-grid">
               <label class="field wide">任务目标<input id="agent_goal" value="巡查全场" placeholder="例如：检查 B-01 溶氧并给出处置建议"></label>
               <label class="field">指定池塘<input id="agent_pond_id" placeholder="B-01"></label>
@@ -1339,25 +1339,27 @@
     function renderRuns() {
       const runs = [...(currentState.agent_runs || [])].reverse();
       document.getElementById('run_meta').textContent = `${runs.length} 次运行`;
-      document.getElementById('run_list').innerHTML = runs.length ? runs.map(run => `<article class="run-row"><div class="run-row-head"><span>${escapeHtml(run.goal)}</span>${badge(run.status)}</div><div class="run-row-meta">停止原因：${escapeHtml(run.stop_reason || '--')} · 委派：${escapeHtml((run.delegated_agents || []).join(' → ') || '--')}</div>${run.steps?.length ? `<ol class="run-steps">${run.steps.slice(-5).map(step => `<li>${escapeHtml(step.agent)} / ${escapeHtml(step.action)}：${escapeHtml(step.summary)}</li>`).join('')}</ol>` : ''}</article>`).join('') : '<div class="empty">尚无 Agent 运行记录</div>';
+      document.getElementById('run_list').innerHTML = runs.length ? runs.map(run => `<article class="run-row"><div class="run-row-head"><span>${assistantText(run.goal)}</span>${badge(run.status)}</div><div class="run-row-meta">停止原因：${assistantText(run.stop_reason || '--')} · 委派：${assistantText((run.delegated_agents || []).join(' → ') || '--')}</div>${run.steps?.length ? `<ol class="run-steps">${run.steps.slice(-5).map(step => `<li>${assistantText(step.agent)} / ${assistantText(step.action)}：${assistantText(step.summary)}</li>`).join('')}</ol>` : ''}</article>`).join('') : '<div class="empty">尚无 Agent 运行记录</div>';
     }
-    function eventRows(limit = 30) {
-      return [...(currentState.events || [])].reverse().slice(0, limit).map(item => `<article class="event-row"><div class="event-row-head"><span>#${item.sequence} ${escapeHtml(item.event_type)}</span><span>${fmtDate(item.occurred_at, false)}</span></div><div class="event-row-meta">${escapeHtml(item.summary)}</div></article>`).join('') || '<div class="empty">暂无事件</div>';
+    function assistantText(value) { return escapeHtml(value).replace(/crewai/gi, '智渔AI'); }
+    function eventRows(limit = 30, branded = false) {
+      const format = branded ? assistantText : escapeHtml;
+      return [...(currentState.events || [])].reverse().slice(0, limit).map(item => `<article class="event-row"><div class="event-row-head"><span>#${item.sequence} ${format(item.event_type)}</span><span>${fmtDate(item.occurred_at, false)}</span></div><div class="event-row-meta">${format(item.summary)}</div></article>`).join('') || '<div class="empty">暂无事件</div>';
     }
     function renderAssistantChat() {
       const log = document.getElementById('assistant_chat');
       if (!assistantChatHistory.length && !assistantChatBusy) {
-        log.innerHTML = '<div class="chat-empty"><i data-lucide="messages-square"></i><strong>CrewAI 养殖运营助手</strong><span>选择全场或指定鱼塘后开始对话</span></div>';
+        log.innerHTML = '<div class="chat-empty"><i data-lucide="messages-square"></i><strong>智渔AI 养殖运营助手</strong><span>选择全场或指定鱼塘后开始对话</span></div>';
         return;
       }
       const messages = assistantChatHistory.map(item => `<div class="chat-message ${item.role}"><span class="chat-avatar"><i data-lucide="${item.role === 'user' ? 'user-round' : 'bot'}"></i></span><div class="chat-bubble">${escapeHtml(item.content)}</div></div>`);
-      if (assistantChatBusy) messages.push('<div class="chat-message assistant pending"><span class="chat-avatar"><i data-lucide="bot"></i></span><div class="chat-bubble">CrewAI 正在调用 Agent 和只读工具...</div></div>');
+      if (assistantChatBusy) messages.push('<div class="chat-message assistant pending"><span class="chat-avatar"><i data-lucide="bot"></i></span><div class="chat-bubble">智渔AI 正在调用 Agent 和只读工具...</div></div>');
       log.innerHTML = messages.join('');
       requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; iconRefresh(); });
     }
     function renderAssistant() {
       renderRuns();
-      document.getElementById('assistant_events').innerHTML = eventRows(24);
+      document.getElementById('assistant_events').innerHTML = eventRows(24, true);
       const llmDialogOpen = !document.getElementById('llm_layer').hidden;
       if (!llmDialogOpen || !llmDialogDirty) {
         renderLlmProfiles();
@@ -1728,7 +1730,7 @@
         await refresh();
       } catch (error) {
         assistantChatHistory.push({role:'assistant', content:`无法完成本次对话：${error.message}`});
-        showToast(`CrewAI 对话失败：${error.message}`, true);
+        showToast(`智渔AI 对话失败：${error.message}`, true);
       } finally {
         assistantChatBusy = false;
         document.getElementById('assistant_chat_send').disabled = false;
