@@ -1,3 +1,4 @@
+import re
 import time
 from datetime import datetime, timedelta
 from queue import Empty, Queue
@@ -577,7 +578,8 @@ class FishAgentSystem:
         normalized = message.strip()
         if not normalized:
             raise ValueError("message is required")
-        if pond_id and pond_id not in self.store.ponds:
+        effective_pond_id = pond_id or self._infer_chat_pond_id(normalized)
+        if effective_pond_id and effective_pond_id not in self.store.ponds:
             raise ValueError("pond_id does not exist")
         run = AgentRun(id=new_id("run"), goal="对话：%s" % normalized[:80], status="RUNNING")
         self.store.agent_runs[run.id] = run
@@ -589,7 +591,7 @@ class FishAgentSystem:
             run.step("supervisor-agent", "chat.stop", reply)
             self.store.emit("agent.chat.failed", reply, {"run_id": run.id}, correlation_id=run.id)
             return run, reply
-        result = orchestrator.chat(normalized, (history or [])[-12:], pond_id)
+        result = orchestrator.chat(normalized, (history or [])[-12:], effective_pond_id)
         for agent, action, summary in result.steps:
             run.step(agent, action, summary)
         run.delegated_agents = sorted(set(run.delegated_agents + result.delegated_agents))
@@ -598,10 +600,26 @@ class FishAgentSystem:
         self.store.emit(
             "agent.chat.completed" if run.status == "COMPLETED" else "agent.chat.failed",
             result.summary,
-            {"run_id": run.id, "pond_id": pond_id, "stop_reason": result.stop_reason},
+            {"run_id": run.id, "pond_id": effective_pond_id, "stop_reason": result.stop_reason},
             correlation_id=run.id,
         )
         return run, result.summary
+
+    def _infer_chat_pond_id(self, message: str) -> Optional[str]:
+        """Use an explicit pond token in a question to narrow chat evidence."""
+        for candidate in self.store.ponds:
+            match = re.fullmatch(r"([A-Za-z]+)[-_ ]?(\d+)", candidate)
+            if match:
+                prefix, number = match.groups()
+                pattern = r"(?<![A-Za-z0-9])%s[-_ ]?%s(?![A-Za-z0-9])" % (
+                    re.escape(prefix),
+                    re.escape(number),
+                )
+            else:
+                pattern = r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(candidate)
+            if re.search(pattern, message, flags=re.IGNORECASE):
+                return candidate
+        return None
 
     def run_goal(self, goal: str, pond_id: Optional[str] = None) -> AgentRun:
         normalized = goal.strip()

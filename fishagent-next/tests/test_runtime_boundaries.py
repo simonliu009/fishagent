@@ -7,7 +7,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from fishagent.agent_runtime.contracts import IncidentDecision
-from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator, IncidentDecisionOutput
+from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator, CrewRunResult, IncidentDecisionOutput
+from fishagent.application.agent_service import FishAgentSystem
 from fishagent.core import LLMConfig
 from fishagent.domain.models import AgentRun, Device
 from fishagent.infrastructure.gateways import SimulatorDeviceGateway
@@ -91,6 +92,31 @@ class RuntimeBoundaryTests(unittest.TestCase):
     def test_crewai_chat_rejects_reasoning_without_final_answer(self) -> None:
         with self.assertRaisesRegex(ValueError, "safe final chat answer"):
             CrewAIOrchestrator._extract_public_answer("Here's a thinking process: internal details")
+
+    def test_chat_infers_pond_from_user_message(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+        self.assertEqual(system._infer_chat_pond_id("请检查 B01 水塘水质"), "B-01")
+        self.assertEqual(system._infer_chat_pond_id("B-02水质是否正常"), "B-02")
+        self.assertIsNone(system._infer_chat_pond_id("全场水质是否正常"))
+
+    def test_chat_passes_inferred_pond_to_orchestrator(self) -> None:
+        calls = []
+
+        class FakeOrchestrator:
+            available = True
+
+            def chat(self, message, history, pond_id):
+                calls.append((message, history, pond_id))
+                return CrewRunResult(summary="结论：B-01 水质正常。", stop_reason="CREW_CHAT_COMPLETED")
+
+        system = FishAgentSystem(agent_orchestrator=FakeOrchestrator())
+        system.initialize_demo()
+        run, reply = system.run_chat("B-01水塘水质是否正常")
+
+        self.assertEqual(run.status, "COMPLETED")
+        self.assertEqual(reply, "结论：B-01 水质正常。")
+        self.assertEqual(calls[0][2], "B-01")
 
     def test_crewai_classifies_provider_rate_limits_separately_from_invalid_json(self) -> None:
         self.assertEqual(
