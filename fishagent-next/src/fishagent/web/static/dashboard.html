@@ -220,10 +220,11 @@
       background: var(--surface);
     }
     .detail-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; }
+    .detail-head b { color: var(--ink); font-size: 16px; font-weight: 800; }
     .patrol-pond-list { display: grid; gap: 4px; margin-top: 7px; }
     .patrol-pond-row {
       display: grid;
-      grid-template-columns: minmax(180px, 1fr) minmax(150px, auto) auto;
+      grid-template-columns: minmax(180px, 1fr) auto;
       gap: 7px 10px;
       align-items: center;
       min-height: 70px;
@@ -247,8 +248,12 @@
       font-size: 8px;
       line-height: 1.25;
     }
+    .patrol-pond-name { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; }
+    .patrol-pond-name .dot { flex: 0 0 auto; }
+    .patrol-pond-name time { color: var(--muted); font-size: 10px; white-space: nowrap; }
     .patrol-sensor span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .patrol-sensor b { flex: 0 0 auto; color: var(--ink); font-size: 8px; }
+    .patrol-sensor.danger { border-color: #efaaa5; background: var(--red-soft); color: var(--red); }
     .patrol-sensor b.danger { color: var(--red); }
     .dot { width: 8px; height: 8px; display: inline-block; border-radius: 50%; background: var(--brand); }
     .dot.warning { background: var(--amber); }
@@ -289,7 +294,7 @@
     .metric-icon.blue { color: var(--blue); background: var(--blue-soft); }
     .metric-icon svg { width: 17px; height: 17px; }
     .metric-copy { min-width: 0; flex: 1; }
-    .metric-label { color: var(--muted); font-size: 11px; }
+    .metric-label { color: var(--ink); font-size: 16px; font-weight: 800; }
     .metric-number { margin-left: 5px; color: var(--brand-dark); font-size: 18px; font-weight: 900; }
     .metric-note { margin-top: 6px; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dashboard-grid { display: grid; grid-template-columns: minmax(360px, .8fr) minmax(0, 1.2fr); gap: 14px; margin-top: 14px; }
@@ -1215,6 +1220,16 @@
     function latestReading(pondId) {
       return latestMetricReading(pondId, 'DO');
     }
+    function patrolMetricIsAlert(metric, reading, pond, finding) {
+      if (metricIsAbnormal(metric, reading, pond)) return true;
+      if (!finding || finding.status === 'NORMAL' || !reading) return false;
+      const reasons = String(finding.summary || '').split('；异常：')[1] || '';
+      if (!reasons) return false;
+      const reasonLabel = metric.metric === 'DO' ? '溶氧' : metric.label;
+      return reasons.includes(`${reasonLabel}高于安全线`)
+        || reasons.includes(`${reasonLabel}超出安全范围`)
+        || (metric.metric === 'DO' && reasons.includes('溶氧低于安全线'));
+    }
     function activeIncident(pondId) {
       return [...(currentState.incidents || [])].reverse().find(item => item.pond_id === pondId && !closedIncidents.has(item.status));
     }
@@ -1268,13 +1283,12 @@
         const sampledAt = readings.map(item => item.reading?.sampled_at).filter(Boolean).sort((a,b) => new Date(b) - new Date(a))[0];
         const finding = findingByPond.get(pond.id);
         const markedAt = finding?.created_at || sampledAt;
-        const timeMarkup = finding ? `巡检 ${fmtDate(markedAt)}` : `采样 ${fmtDate(sampledAt)}`;
         const sensorStrip = readings.map(item => {
           const unit = item.reading && !item.hideUnit ? ` ${escapeHtml(item.reading.unit || '')}` : '';
-          const tone = metricIsAbnormal(item, item.reading, pond) ? 'danger' : '';
-          return `<span class="patrol-sensor"><span>${escapeHtml(item.label)}</span><b class="${tone}">${item.reading ? `${fmtNumber(item.reading.value, item.digits)}${unit}` : '--'}</b></span>`;
+          const tone = patrolMetricIsAlert(item, item.reading, pond, finding) ? 'danger' : '';
+          return `<span class="patrol-sensor ${tone}"><span>${escapeHtml(item.label)}</span><b class="${tone}">${item.reading ? `${fmtNumber(item.reading.value, item.digits)}${unit}` : '--'}</b></span>`;
         }).join('');
-        return `<div class="patrol-pond-row"><span><span class="dot ${condition.tone}"></span>　<b>${escapeHtml(pond.id)}</b> ${escapeHtml(pond.name)}</span><time>${timeMarkup}</time>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div></div>`;
+        return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pond.name)}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div></div>`;
       }).join('') : activeReveal ? `<div class="empty">${activeReveal.runId ? '正在采集逐塘巡检结果...' : '正在清除上一轮巡检明细...'}</div>` : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
       updateCountdown();
     }
