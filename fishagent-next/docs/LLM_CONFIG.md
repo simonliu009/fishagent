@@ -9,6 +9,7 @@
 - `FISHAGENT_LLM_MODEL`：模型名。
 - `FISHAGENT_LLM_API_KEY`：API Key。
 - `FISHAGENT_LLM_ENABLED`：是否启用模型调用。
+- `FISHAGENT_LLM_CHAT_RETRY_COUNT`：聊天模型返回空响应时的重试次数，默认 `3`；设置为 `0` 关闭重试，最大为 `10`。
 - `FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS`：单次告警 LLM 决策预算，默认 `300` 秒。
 
 ## HTTP API

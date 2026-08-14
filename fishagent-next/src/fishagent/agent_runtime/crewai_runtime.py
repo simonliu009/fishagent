@@ -7,6 +7,7 @@ tool. The application service remains the only policy and execution boundary.
 import io
 import json
 import os
+import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -382,6 +383,32 @@ class CrewAIOrchestrator:
         return "LLM_MODEL_OR_TOOL_FAILURE"
 
     @staticmethod
+    def _chat_failure_retryable(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(
+            marker in message
+            for marker in (
+                "invalid response from llm call",
+                "none or empty",
+                "connection reset",
+                "temporarily unavailable",
+                "service unavailable",
+            )
+        )
+
+    @staticmethod
+    def _chat_failure_detail(exc: Exception) -> str:
+        message = str(exc).strip() or exc.__class__.__name__
+        lowered = message.lower()
+        if "none or empty" in lowered or "invalid response from llm call" in lowered:
+            return "模型供应商返回空响应，可能是上游瞬时失败或连接未完成：%s" % message
+        if "provider not provided" in lowered:
+            return "模型供应商未正确配置：%s" % message
+        if "429" in lowered or "rate limit" in lowered or "quota" in lowered:
+            return "模型调用达到供应商限额：%s" % message
+        return message
+
+    @staticmethod
     def _extract_decision_payload(output: Any) -> dict:
         structured = getattr(output, "json_dict", None)
         if isinstance(structured, dict):
@@ -517,14 +544,36 @@ class CrewAIOrchestrator:
                     if item.get("pond_id") in pond_ids and item.get("status") not in {"RESOLVED", "DISMISSED"}
                 ],
             }
-            with self._service_execution_context():
-                output = self._kickoff_crew(
-                    message,
-                    pond_id,
-                    steps,
-                    context={"history": history[-12:], "live_state": live_state},
-                    response_mode="chat",
-                )
+            output = None
+            retry_count = max(0, min(10, int(getattr(self.llm_config, "chat_retry_count", 3))))
+            for attempt in range(retry_count + 1):
+                try:
+                    with self._service_execution_context():
+                        candidate_output = self._kickoff_crew(
+                            message,
+                            pond_id,
+                            steps,
+                            context={"history": history[-12:], "live_state": live_state},
+                            response_mode="chat",
+                        )
+                    candidate_raw = getattr(candidate_output, "raw", candidate_output)
+                    if candidate_raw is None or str(candidate_raw).strip().lower() in {"", "none", "null"}:
+                        raise RuntimeError("Invalid response from LLM call - None or empty.")
+                    output = candidate_output
+                    break
+                except Exception as exc:
+                    if attempt >= retry_count or not self._chat_failure_retryable(exc):
+                        raise
+                    retry_number = attempt + 1
+                    steps.append(
+                        (
+                            "supervisor-agent",
+                            "chat.retry",
+                            "模型返回空响应或暂时不可用，第 %s/%s 次重试，等待后再次请求"
+                            % (retry_number, retry_count),
+                        )
+                    )
+                    time.sleep(0.25)
             raw = str(getattr(output, "raw", output))
             answer = self._extract_public_answer(raw)
             steps.append(("supervisor-agent", "chat.completed", answer[:800]))
@@ -537,9 +586,10 @@ class CrewAIOrchestrator:
             )
         except Exception as exc:
             self.last_error = str(exc)
-            steps.append(("supervisor-agent", "chat.failed", "模型或工具失败，安全停止：%s" % exc))
+            detail = self._chat_failure_detail(exc)
+            steps.append(("supervisor-agent", "chat.failed", "模型或工具失败，安全停止：%s" % detail))
             return CrewRunResult(
-                summary="CrewAI 对话失败，未执行任何设备操作",
+                summary="CrewAI 对话失败，未执行任何设备操作。原因：%s" % detail,
                 stop_reason="MODEL_OR_TOOL_FAILURE",
                 steps=steps,
             )

@@ -93,6 +93,61 @@ class RuntimeBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "safe final chat answer"):
             CrewAIOrchestrator._extract_public_answer("Here's a thinking process: internal details")
 
+    def test_crewai_chat_retries_an_empty_provider_response(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.available = True
+        orchestrator.last_error = None
+        orchestrator.llm_config = LLMConfig(chat_retry_count=3)
+        orchestrator.system = SimpleNamespace(
+            snapshot=lambda: {"ponds": [], "readings": [], "devices": [], "incidents": []}
+        )
+        responses = [
+            RuntimeError("Invalid response from LLM call - None or empty."),
+            SimpleNamespace(raw="结论：B-01 水质正常。"),
+        ]
+
+        def kickoff(*args, **kwargs):
+            del args, kwargs
+            response = responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
+
+        orchestrator._kickoff_crew = kickoff
+
+        self.assertTrue(CrewAIOrchestrator._chat_failure_retryable(RuntimeError("None or empty")))
+        self.assertFalse(CrewAIOrchestrator._chat_failure_retryable(RuntimeError("provider not provided")))
+        result = orchestrator.chat("检查 B-01", [], "B-01")
+
+        self.assertEqual(result.stop_reason, "CREW_CHAT_COMPLETED")
+        self.assertEqual(result.summary, "结论：B-01 水质正常。")
+        self.assertEqual(len(responses), 0)
+        self.assertTrue(any(action == "chat.retry" for _, action, _ in result.steps))
+
+    def test_crewai_chat_uses_three_configured_retries_for_empty_raw(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.available = True
+        orchestrator.last_error = None
+        orchestrator.llm_config = LLMConfig(chat_retry_count=3)
+        orchestrator.system = SimpleNamespace(
+            snapshot=lambda: {"ponds": [], "readings": [], "devices": [], "incidents": []}
+        )
+        responses = [
+            SimpleNamespace(raw=""),
+            SimpleNamespace(raw=None),
+            SimpleNamespace(raw="None"),
+            SimpleNamespace(raw="结论：B-01 水质正常。"),
+        ]
+
+        orchestrator._kickoff_crew = lambda *args, **kwargs: responses.pop(0)
+
+        result = orchestrator.chat("检查 B-01", [], "B-01")
+
+        self.assertEqual(result.stop_reason, "CREW_CHAT_COMPLETED")
+        self.assertEqual(result.summary, "结论：B-01 水质正常。")
+        self.assertEqual(len(responses), 0)
+        self.assertEqual(sum(action == "chat.retry" for _, action, _ in result.steps), 3)
+
     def test_chat_infers_pond_from_user_message(self) -> None:
         system = FishAgentSystem()
         system.initialize_demo()

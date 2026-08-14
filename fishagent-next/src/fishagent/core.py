@@ -13,6 +13,17 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _bounded_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, parsed))
+
+
 def normalize_llm_base_url(value: str) -> str:
     base_url = value.strip().rstrip("/")
     suffix = "/chat/completions"
@@ -30,6 +41,7 @@ class LLMConfig:
     model: str = "glm-4.5"
     api_key: str = ""
     enabled: bool = False
+    chat_retry_count: int = 3
 
     def has_api_key(self) -> bool:
         value = self.api_key.strip()
@@ -45,6 +57,7 @@ class LLMConfig:
             model=os.environ.get("FISHAGENT_LLM_MODEL", cls.model),
             api_key=os.environ.get("FISHAGENT_LLM_API_KEY", ""),
             enabled=_bool_env("FISHAGENT_LLM_ENABLED", False),
+            chat_retry_count=_bounded_int_env("FISHAGENT_LLM_CHAT_RETRY_COUNT", 3, 0, 10),
         )
 
     def public_dict(self) -> dict:
@@ -55,6 +68,7 @@ class LLMConfig:
             "base_url": self.base_url,
             "model": self.model,
             "enabled": self.enabled,
+            "chat_retry_count": self.chat_retry_count,
             "api_key_configured": self.has_api_key(),
             "api_key_preview": ("%s..." % self.api_key[:6]) if self.has_api_key() else "",
         }
@@ -67,6 +81,11 @@ class LLMConfig:
         if "enabled" in payload:
             value = payload["enabled"]
             self.enabled = value if isinstance(value, bool) else str(value).lower() in {"1", "true", "yes", "on"}
+        if "chat_retry_count" in payload:
+            try:
+                self.chat_retry_count = max(0, min(10, int(payload["chat_retry_count"])))
+            except (TypeError, ValueError):
+                pass
 
     def private_dict(self) -> dict:
         return {
@@ -77,6 +96,7 @@ class LLMConfig:
             "model": self.model,
             "api_key": self.api_key,
             "enabled": self.enabled,
+            "chat_retry_count": self.chat_retry_count,
         }
 
 

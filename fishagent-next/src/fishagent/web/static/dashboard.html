@@ -897,6 +897,7 @@
         <label class="field">模型<input id="llm_model" oninput="markLlmFormDirty()"></label>
         <label class="field wide">Base URL<input id="llm_base_url" oninput="markLlmFormDirty()"></label>
         <label class="field wide">API Key<input id="llm_api_key" type="password" placeholder="留空保持当前密钥" oninput="markLlmFormDirty()"></label>
+        <label class="field">空响应重试次数<input id="llm_chat_retry_count" type="number" min="0" max="10" step="1" oninput="markLlmFormDirty()"><span class="field-hint">首次请求失败后再次请求的次数，0 表示关闭。</span></label>
         <label class="checkbox-field wide"><input id="llm_enabled" type="checkbox" onchange="markLlmFormDirty()">启用模型驱动决策</label>
       </div>
       <div id="llm_message" class="message"></div>
@@ -1088,6 +1089,7 @@
       document.getElementById('llm_model').value = config.model || '';
       document.getElementById('llm_base_url').value = config.base_url || '';
       document.getElementById('llm_api_key').value = '';
+      document.getElementById('llm_chat_retry_count').value = Number.isFinite(Number(config.chat_retry_count)) ? Number(config.chat_retry_count) : 3;
       document.getElementById('llm_enabled').checked = Boolean(config.enabled);
     }
     function selectLlmProfile(profileId) {
@@ -1106,7 +1108,7 @@
       llmDialogDirty = true;
       const select = document.getElementById('llm_profile');
       if (select) select.value = '__new__';
-      applyLlmForm({provider:'compatible', model:'', base_url:'', enabled:true});
+      applyLlmForm({provider:'compatible', model:'', base_url:'', enabled:true, chat_retry_count:3});
       document.getElementById('llm_message').textContent = '填写供应商名称后保存，即可加入自定义供应商列表';
       if (focus) requestAnimationFrame(() => document.getElementById('llm_name').focus());
     }
@@ -1828,6 +1830,7 @@
         model:document.getElementById('llm_model').value,
         base_url:document.getElementById('llm_base_url').value,
         api_key:document.getElementById('llm_api_key').value,
+        chat_retry_count:Number(document.getElementById('llm_chat_retry_count').value),
         enabled:document.getElementById('llm_enabled').checked
       };
       llmDialogDirty = false;

@@ -340,6 +340,15 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(config.base_url, "https://openrouter.ai/api/v1")
         self.assertEqual(config.model, "openrouter/free")
 
+    def test_llm_config_persists_chat_retry_count(self) -> None:
+        config = LLMConfig()
+        config.update_from_payload({"chat_retry_count": 3})
+        self.assertEqual(config.chat_retry_count, 3)
+        config.update_from_payload({"chat_retry_count": -2})
+        self.assertEqual(config.chat_retry_count, 0)
+        config.update_from_payload({"chat_retry_count": 99})
+        self.assertEqual(config.chat_retry_count, 10)
+
     def test_llm_config_does_not_treat_placeholder_as_a_key(self) -> None:
         config = LLMConfig(api_key="sk-or-v1-REPLACE_WITH_YOUR_KEY", enabled=True)
         self.assertFalse(config.has_api_key())
@@ -765,6 +774,7 @@ class B01FlowTest(unittest.TestCase):
                 model="fish-ops-model",
                 api_key="sk-persisted",
                 enabled=True,
+                chat_retry_count=3,
             )
             store.save_llm(original)
             restored = store.load_llm(LLMConfig())
@@ -773,6 +783,7 @@ class B01FlowTest(unittest.TestCase):
             self.assertEqual(restored.model, "fish-ops-model")
             self.assertEqual(restored.api_key, "sk-persisted")
             self.assertTrue(restored.enabled)
+            self.assertEqual(restored.chat_retry_count, 3)
 
     def test_runtime_config_store_persists_named_llm_profiles(self) -> None:
         with TemporaryDirectory() as temp_dir:
