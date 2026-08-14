@@ -614,7 +614,7 @@ class InMemoryStore:
                 status=item.get("status", "QUEUED"),
                 stop_reason=item.get("stop_reason"),
                 delegated_agents=item.get("delegated_agents", []),
-                budget=item.get("budget", {"delegations": 8, "tool_calls": 20, "seconds": 90}),
+                budget=item.get("budget", {"delegations": 8, "tool_calls": 20, "seconds": 300}),
             )
             run.steps = [
                 AgentStep(

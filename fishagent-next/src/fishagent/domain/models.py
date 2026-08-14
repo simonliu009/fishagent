@@ -461,7 +461,7 @@ class AgentRun:
     stop_reason: Optional[str] = None
     steps: List[AgentStep] = field(default_factory=list)
     delegated_agents: List[str] = field(default_factory=list)
-    budget: Dict[str, int] = field(default_factory=lambda: {"delegations": 8, "tool_calls": 20, "seconds": 90})
+    budget: Dict[str, int] = field(default_factory=lambda: {"delegations": 8, "tool_calls": 20, "seconds": 300})
 
     def step(self, agent: str, action: str, summary: str) -> None:
         if agent not in self.delegated_agents:

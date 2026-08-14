@@ -40,6 +40,7 @@ SYSTEM = FishAgentSystem(
     event_publisher=EVENT_PUBLISHER,
     device_gateway=DEVICE_GATEWAY,
     telemetry_publisher=TELEMETRY_PUBLISHER,
+    agent_decision_timeout_seconds=CONFIG.agent_decision_timeout_seconds,
 )
 AUTH = auth_from_config(CONFIG.auth_enabled, CONFIG.auth_username, CONFIG.auth_password)
 CONFIG_STORE = RuntimeConfigStore()

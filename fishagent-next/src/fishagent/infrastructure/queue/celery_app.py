@@ -65,6 +65,7 @@ def system() -> FishAgentSystem:
             CONFIG.mqtt_port,
             CONFIG.mqtt_command_topic,
         ),
+        agent_decision_timeout_seconds=CONFIG.agent_decision_timeout_seconds,
     )
     app.agent_orchestrator = CrewAIOrchestrator(app, llm_config)
     return app

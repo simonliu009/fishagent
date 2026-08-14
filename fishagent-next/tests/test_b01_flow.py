@@ -38,12 +38,83 @@ class B01FlowTest(unittest.TestCase):
 
         system = FishAgentSystem(agent_orchestrator=FakeOrchestrator())
         system.initialize_demo()
-        incident = system.ingest_do("B-01", 2.0, source_event_id="llm-low-do")
+        with patch.object(system.device_control_skill, "execute", wraps=system.device_control_skill.execute) as skill:
+            incident = system.ingest_do("B-01", 2.0, source_event_id="llm-low-do")
         self.assertIsNotNone(incident)
+        skill.assert_called_once()
         state = system.snapshot()
         self.assertEqual(state["commands"][0]["status"], "CONFIRMED")
         self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_ACTION_EXECUTED")
         self.assertEqual(state["incidents"][0]["status"], "VERIFY_PENDING")
+
+    def test_device_control_skill_loads_contract_and_keeps_mqtt_gateway_boundary(self) -> None:
+        system = FishAgentSystem()
+
+        self.assertEqual(system.device_control_skill.name, "device-control")
+        self.assertIn("MQTT", system.device_control_skill.instructions)
+        self.assertIn("policy gate", system.device_control_skill.instructions)
+
+    def test_llm_decision_skill_publishes_mqtt_device_control_command(self) -> None:
+        class FakeOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return CrewRunResult(
+                    summary="低溶氧自动处置",
+                    stop_reason="LLM_DECISION_READY",
+                    steps=[("supervisor-agent", "incident.decided", "EXECUTE")],
+                    decision=IncidentDecision(
+                        action="EXECUTE",
+                        device_id="aerator-b01-1",
+                        target_state="on",
+                        risk="L1",
+                        rationale="低溶氧证据充分，开启增氧机。",
+                    ),
+                )
+
+        class PublishResult:
+            rc = 0
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                self.published = []
+
+            def connect(self, host, port, keepalive):
+                self.connection = (host, port, keepalive)
+
+            def loop_start(self):
+                pass
+
+            def publish(self, topic, payload, qos, retain):
+                self.published.append((topic, json.loads(payload), qos, retain))
+                return PublishResult()
+
+            def loop_stop(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+        client = None
+
+        def factory(**kwargs):
+            nonlocal client
+            client = FakeClient(**kwargs)
+            return client
+
+        gateway = MqttDeviceGateway("mqtt.test", 1883, client_factory=factory, simulate_ack=True)
+        system = FishAgentSystem(agent_orchestrator=FakeOrchestrator(), device_gateway=gateway)
+        system.initialize_demo()
+        system.ingest_do("B-01", 2.0, source_event_id="skill-mqtt-low-do")
+        state = system.snapshot()
+
+        self.assertEqual(state["commands"][0]["status"], "CONFIRMED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_ACTION_EXECUTED")
+        self.assertIsNotNone(client)
+        self.assertEqual(client.published[0][0], "fishagent/ponds/B-01/devices/aerator-b01-1/commands")
+        self.assertEqual(client.published[0][1]["source"], "fishagent.execution-agent")
+        gateway.close()
 
     def test_production_orchestrator_without_llm_never_uses_rule_execution(self) -> None:
         class UnavailableOrchestrator:
@@ -62,7 +133,7 @@ class B01FlowTest(unittest.TestCase):
         class SlowOrchestrator:
             available = True
 
-        system = FishAgentSystem(agent_orchestrator=SlowOrchestrator())
+        system = FishAgentSystem(agent_orchestrator=SlowOrchestrator(), agent_decision_timeout_seconds=17)
         system.initialize_demo()
         with patch.object(
             system,
@@ -75,6 +146,7 @@ class B01FlowTest(unittest.TestCase):
         state = system.snapshot()
         self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
         self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_TIMEOUT")
+        self.assertEqual(state["agent_runs"][0]["budget"]["seconds"], 17)
         self.assertEqual(len(state["manual_tasks"]), 1)
 
     def test_invalid_llm_action_reports_value_and_creates_manual_task(self) -> None:
@@ -520,6 +592,58 @@ class B01FlowTest(unittest.TestCase):
         self.assertTrue(any("氨氮超标" in title for title in titles))
         self.assertEqual(len(state["agent_runs"]), 2)
         self.assertEqual(len(state["manual_tasks"]), 2)
+
+    def test_mixed_alert_demo_executes_llm_low_do_and_routes_ammonia_to_manual(self) -> None:
+        class AlertOrchestrator:
+            available = True
+
+            def __init__(self) -> None:
+                self.contexts = []
+
+            def decide_incident(self, context):
+                self.contexts.append(context)
+                if context["incident"]["pond_id"] == "B-01":
+                    return CrewRunResult(
+                        summary="低溶氧证据充分，开启增氧机并等待复核。",
+                        stop_reason="LLM_DECISION_READY",
+                        delegated_agents=["sensor-monitor-agent", "action-planning-agent"],
+                        steps=[("supervisor-agent", "incident.decided", "低溶氧自动处置")],
+                        decision=IncidentDecision(
+                            action="EXECUTE",
+                            device_id="aerator-b01-1",
+                            target_state="on",
+                            risk="L1",
+                            rationale="低溶氧读数新鲜且设备健康，自动开启增氧机。",
+                            verification_delay_seconds=30,
+                        ),
+                    )
+                return CrewRunResult(
+                    summary="氨氮异常需要现场复测和检查投喂记录。",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["sensor-monitor-agent"],
+                    steps=[("supervisor-agent", "incident.decided", "氨氮异常转人工")],
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="氨氮异常需要现场复测，禁止模型直接投药。",
+                    ),
+                )
+
+        orchestrator = AlertOrchestrator()
+        system = FishAgentSystem(agent_orchestrator=orchestrator)
+        state = system.run_demo("alerts")
+
+        incidents = {item["pond_id"]: item for item in state["incidents"]}
+        runs = {item["incident_id"]: item for item in state["agent_runs"] if item["incident_id"]}
+        self.assertEqual(len(orchestrator.contexts), 2)
+        self.assertEqual(state["commands"][0]["status"], "CONFIRMED")
+        self.assertEqual(state["commands"][0]["device_id"], "aerator-b01-1")
+        self.assertEqual(incidents["B-01"]["status"], "VERIFY_PENDING")
+        self.assertEqual(runs[incidents["B-01"]["id"]]["stop_reason"], "LLM_ACTION_EXECUTED")
+        self.assertEqual(incidents["B-02"]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(runs[incidents["B-02"]["id"]]["stop_reason"], "LLM_MANUAL_REQUIRED")
+        self.assertEqual(len(state["manual_tasks"]), 1)
+        self.assertEqual(state["manual_tasks"][0]["incident_id"], incidents["B-02"]["id"])
 
     def test_crewai_chat_turn_is_audited_as_agent_run(self) -> None:
         class ChatOrchestrator:

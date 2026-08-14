@@ -18,6 +18,7 @@ services:
       FISHAGENT_HOST: 0.0.0.0
       FISHAGENT_PORT: 3000
       FISHAGENT_PUBLIC_PORT: 3001
+      FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS: ${FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS:-300}
       FISHAGENT_DATABASE_URL: postgresql://fishagent:fishagent@postgres:5432/fishagent
       FISHAGENT_REDIS_URL: redis://redis:6379/0
       FISHAGENT_CELERY_BROKER_URL: redis://redis:6379/1
@@ -67,6 +68,7 @@ services:
     environment: &fishagent-runtime-env
       PYTHONPATH: /app/src
       FISHAGENT_DATABASE_URL: postgresql://fishagent:fishagent@postgres:5432/fishagent
+      FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS: ${FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS:-300}
       FISHAGENT_REDIS_URL: redis://redis:6379/0
       FISHAGENT_CELERY_ENABLED: "true"
       FISHAGENT_CELERY_BROKER_URL: redis://redis:6379/1

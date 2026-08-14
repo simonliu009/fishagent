@@ -60,6 +60,7 @@ def main() -> None:
             event_publisher=publisher_from_config(config.redis_url),
             device_gateway=device_gateway,
             telemetry_publisher=telemetry_publisher,
+            agent_decision_timeout_seconds=config.agent_decision_timeout_seconds,
         )
         system.agent_orchestrator = CrewAIOrchestrator(system, config.llm)
         adapter = None

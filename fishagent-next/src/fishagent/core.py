@@ -102,6 +102,7 @@ class AppConfig:
     auth_enabled: bool = False
     auth_username: str = "admin"
     auth_password: str = ""
+    agent_decision_timeout_seconds: int = 300
     llm: LLMConfig = field(default_factory=LLMConfig)
 
     @classmethod
@@ -127,6 +128,7 @@ class AppConfig:
             auth_enabled=_bool_env("FISHAGENT_AUTH_ENABLED", False),
             auth_username=os.environ.get("FISHAGENT_ADMIN_USERNAME", "admin"),
             auth_password=os.environ.get("FISHAGENT_ADMIN_PASSWORD", ""),
+            agent_decision_timeout_seconds=int(os.environ.get("FISHAGENT_AGENT_DECISION_TIMEOUT_SECONDS", "300")),
             llm=LLMConfig.from_env(),
         )
 

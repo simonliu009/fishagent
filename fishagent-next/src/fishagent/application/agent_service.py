@@ -5,6 +5,7 @@ from threading import RLock, Thread
 from typing import Any, Optional, cast
 
 from fishagent.agent_runtime.contracts import IncidentDecision
+from fishagent.agent_runtime.skills.device_control import DeviceControlSkill
 from fishagent.application.demo_data import DEMO_SENSOR_BY_METRIC, DEMO_SENSOR_SPECS, DEMO_WATER_SERIES
 from fishagent.application.policy import evaluate_action
 from fishagent.application.store import WATER_QUALITY_HIGH_LIMITS, WATER_QUALITY_RANGES, InMemoryStore
@@ -60,6 +61,7 @@ class FishAgentSystem:
         device_gateway: Optional[DeviceGateway] = None,
         agent_orchestrator: Optional[Any] = None,
         telemetry_publisher: Optional[Any] = None,
+        agent_decision_timeout_seconds: int = 300,
     ) -> None:
         self.store = store or InMemoryStore()
         self.repository = repository
@@ -67,6 +69,8 @@ class FishAgentSystem:
         self.device_gateway = device_gateway or SimulatorDeviceGateway()
         self.agent_orchestrator = agent_orchestrator
         self.telemetry_publisher = telemetry_publisher
+        self.agent_decision_timeout_seconds = max(1, int(agent_decision_timeout_seconds))
+        self.device_control_skill = DeviceControlSkill(self)
         self._job_lock = RLock()
         self._analysis_case_lock = RLock()
         self._analysis_case_thread: Optional[Thread] = None
@@ -885,6 +889,7 @@ class FishAgentSystem:
     def _run_llm_incident_flow(self, incident_id: str) -> AgentRun:
         incident = self.store.incidents[incident_id]
         run = AgentRun(id=new_id("run"), goal="模型驱动处理 %s" % incident.title, incident_id=incident_id, status="RUNNING")
+        run.budget["seconds"] = self.agent_decision_timeout_seconds
         self.store.agent_runs[run.id] = run
         self.store.emit("agent.run.started", run.goal, {"run_id": run.id, "mode": "llm"}, correlation_id=run.id)
         incident.transition(IncidentStatus.INVESTIGATING)
@@ -893,10 +898,14 @@ class FishAgentSystem:
             result = self._decide_incident_with_timeout(
                 orchestrator,
                 self._incident_llm_context(incident_id),
-                run.budget.get("seconds", 90),
+                run.budget.get("seconds", self.agent_decision_timeout_seconds),
             )
         except TimeoutError:
-            run.step("supervisor-agent", "incident.timeout", "CrewAI 超过 90 秒运行预算，迟到结果已作废")
+            run.step(
+                "supervisor-agent",
+                "incident.timeout",
+                "CrewAI 超过 %s 秒运行预算，迟到结果已作废" % run.budget.get("seconds", self.agent_decision_timeout_seconds),
+            )
             return self._llm_manual_stop(incident, run, "LLM_TIMEOUT", "模型决策超时，已转人工确认")
         except Exception as exc:
             run.step("supervisor-agent", "incident.failed", "模型调用失败：%s" % exc)
@@ -937,12 +946,10 @@ class FishAgentSystem:
                 return run
             if decision.action != "EXECUTE" or risk != RiskLevel.L1:
                 return self._llm_manual_stop(incident, run, "LLM_ACTION_REQUIRES_REVIEW", decision.rationale)
-            command = self.request_action_execution(
+            command = self.device_control_skill.execute(
                 run,
                 incident,
-                device_id=decision.device_id,
-                target_state=decision.target_state,
-                risk=RiskLevel.L1,
+                decision,
                 multimodal_evidence=bool(set(decision.evidence_refs) & {ref for evidence in incident.evidence for ref in evidence.refs}),
             )
         except (KeyError, TypeError, ValueError) as exc:
