@@ -73,6 +73,41 @@ class RuntimeBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "safe final chat answer"):
             CrewAIOrchestrator._extract_public_answer("Here's a thinking process: internal details")
 
+    def test_crewai_classifies_provider_rate_limits_separately_from_invalid_json(self) -> None:
+        self.assertEqual(
+            CrewAIOrchestrator._decision_failure_reason(RuntimeError("429 free-models-per-day")),
+            "LLM_RATE_LIMITED",
+        )
+        self.assertEqual(
+            CrewAIOrchestrator._decision_failure_reason(RuntimeError("connection reset")),
+            "LLM_MODEL_OR_TOOL_FAILURE",
+        )
+
+    def test_crewai_decision_invalid_only_means_invalid_structured_output(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.available = True
+        orchestrator.last_error = None
+        orchestrator._kickoff_crew = lambda *args, **kwargs: SimpleNamespace(raw="not json")
+
+        result = orchestrator.decide_incident({"incident": {"id": "inc-test", "pond_id": "B-01"}})
+
+        self.assertIsNone(result.decision)
+        self.assertEqual(result.stop_reason, "LLM_DECISION_INVALID")
+
+    def test_crewai_decision_rate_limit_is_not_reported_as_invalid(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.available = True
+        orchestrator.last_error = None
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("429 free-models-per-day")
+
+        orchestrator._kickoff_crew = fail
+        result = orchestrator.decide_incident({"incident": {"id": "inc-test", "pond_id": "B-01"}})
+
+        self.assertIsNone(result.decision)
+        self.assertEqual(result.stop_reason, "LLM_RATE_LIMITED")
+
     def test_console_keeps_core_views_and_adds_operational_views(self) -> None:
         with TestClient(app) as client:
             response = client.get("/")

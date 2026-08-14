@@ -310,6 +310,13 @@ class CrewAIOrchestrator:
             raise ValueError("CrewAI did not return a safe final chat answer")
         return candidate[:4000]
 
+    @staticmethod
+    def _decision_failure_reason(exc: Exception) -> str:
+        message = str(exc).lower()
+        if any(marker in message for marker in ("429", "rate limit", "rate_limit", "quota", "free-models-per-day")):
+            return "LLM_RATE_LIMITED"
+        return "LLM_MODEL_OR_TOOL_FAILURE"
+
     def decide_incident(self, context: dict) -> CrewRunResult:
         """Ask the CrewAI hierarchy for the next incident action."""
         if not self.available:
@@ -331,25 +338,34 @@ class CrewAIOrchestrator:
         try:
             with self._service_execution_context():
                 output = self._kickoff_crew(goal, pond_id, steps, context=context)
-            raw = str(getattr(output, "raw", output))
-            decision = IncidentDecision.from_payload(self._extract_json(raw))
-            steps.append(("supervisor-agent", "incident.decided", raw[:800]))
-            delegated = [agent for agent, _, _ in steps if agent not in {"supervisor-agent", "crewai"}]
-            return CrewRunResult(
-                summary=decision.rationale,
-                stop_reason="LLM_DECISION_READY",
-                delegated_agents=sorted(set(delegated)),
-                steps=steps,
-                decision=decision,
-            )
         except Exception as exc:
             self.last_error = str(exc)
             steps.append(("supervisor-agent", "incident.failed", "模型输出或工具失败，停止自动处置：%s" % exc))
             return CrewRunResult(
-                summary="LLM incident decision failed; no device write was attempted",
-                stop_reason="MODEL_OR_TOOL_FAILURE",
+                summary="模型调用或工具执行失败，未执行设备写操作：%s" % exc,
+                stop_reason=self._decision_failure_reason(exc),
                 steps=steps,
             )
+        raw = str(getattr(output, "raw", output))
+        try:
+            decision = IncidentDecision.from_payload(self._extract_json(raw))
+        except (TypeError, ValueError) as exc:
+            self.last_error = str(exc)
+            steps.append(("supervisor-agent", "incident.invalid", "模型未返回可执行的结构化决策：%s" % exc))
+            return CrewRunResult(
+                summary="模型返回的结构化决策无效：%s" % exc,
+                stop_reason="LLM_DECISION_INVALID",
+                steps=steps,
+            )
+        steps.append(("supervisor-agent", "incident.decided", raw[:800]))
+        delegated = [agent for agent, _, _ in steps if agent not in {"supervisor-agent", "crewai"}]
+        return CrewRunResult(
+            summary=decision.rationale,
+            stop_reason="LLM_DECISION_READY",
+            delegated_agents=sorted(set(delegated)),
+            steps=steps,
+            decision=decision,
+        )
 
     def run(self, goal: str, pond_id: Optional[str] = None) -> CrewRunResult:
         if not self.available:

@@ -848,11 +848,16 @@ class FishAgentSystem:
         if incident.status == IncidentStatus.ACTION_PROPOSED:
             incident.transition(IncidentStatus.MANUAL_REQUIRED)
         incident.assignee = "现场操作员"
+        detail = str(summary or "未提供模型错误详情").strip()
+        if len(detail) > 600:
+            detail = detail[:600] + "..."
+        manual_description = "错误码：%s；原因：%s" % (reason, detail)
         self.create_manual_task(
             title="模型驱动处置待人工确认：%s" % incident.title,
-            description=reason,
+            description=manual_description,
             incident_id=incident.id,
         )
+        run.step("execution-agent", "route_manual_task", manual_description)
         run.status = "COMPLETED"
         run.stop_reason = reason
         self.store.emit("agent.run.completed", summary, {"run_id": run.id, "reason": reason}, correlation_id=run.id)
@@ -901,7 +906,8 @@ class FishAgentSystem:
         run.delegated_agents = sorted(set(run.delegated_agents + result.delegated_agents))
         decision: Optional[IncidentDecision] = result.decision
         if decision is None:
-            return self._llm_manual_stop(incident, run, "LLM_DECISION_INVALID", result.summary)
+            reason = result.stop_reason if result.stop_reason.startswith("LLM_") else "LLM_MODEL_OR_TOOL_FAILURE"
+            return self._llm_manual_stop(incident, run, reason, result.summary)
 
         run.step("execution-agent", "validate_llm_decision", "结构化动作通过协议校验，提交安全策略门")
         incident.transition(IncidentStatus.ACTION_PROPOSED)

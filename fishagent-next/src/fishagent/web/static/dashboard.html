@@ -1238,7 +1238,11 @@
           outcome.push(`人工任务：${task.title} · ${task.status} · ${task.assignee}`);
           if (task.status !== 'COMPLETED' && outcomeTone !== 'failed') outcomeTone = 'warning';
         }
-        if (run) outcome.push(`Agent 决策：${run.stop_reason || run.status}`);
+        if (run) {
+          outcome.push(`Agent 决策：${run.stop_reason || run.status}`);
+          const reasonStep = [...(run.steps || [])].reverse().find(step => ['incident.failed','incident.invalid','route_manual_task'].includes(step.action));
+          if (reasonStep) outcome.push(`原因：${reasonStep.summary}`);
+        }
         if (!outcome.length) outcome.push('Agent 决策排队中');
         return `<article class="alert-item"><div class="alert-head"><div class="alert-title">${badge(item.status, item.risk)}　${escapeHtml(item.title)}</div><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span></div><div class="alert-summary">${escapeHtml(evidence?.summary || '等待证据')}</div><div class="alert-cause"><b>触发原因：</b>${escapeHtml(evidence?.refs?.join(', ') || '--')}</div><div class="alert-outcome ${outcomeTone}"><b>处理结果：</b>${escapeHtml(outcome.join('；'))}</div><div class="flow-track"><span class="flow-step">待处置</span><span class="flow-step">Agent 研判</span><span class="flow-step">执行/审批</span><span class="flow-step ${['ESCALATED','ACTION_FAILED'].includes(item.status)?'failed':''}">复核闭环</span></div></article>`;
       }).join('') : '<div class="empty">当前没有未关闭告警</div>';
