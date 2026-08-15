@@ -57,5 +57,6 @@ def evaluate_action(
     if idempotency_seen:
         return PolicyResult(False, "ALREADY_SATISFIED", "幂等键已执行，抑制重复命令")
     approval_note = "，审批已通过" if risk == RiskLevel.L2 else ""
+    health_note = "，设备健康状态异常，仍允许下发并等待设备确认" if not device.healthy else ""
     evidence_note = "多模态证据已由 Agent 汇总、" if multimodal_evidence else "溶氧证据新鲜、"
-    return PolicyResult(True, "AUTHORIZED", "L%s 受控动作通过：%s设备白名单、无重复执行%s" % (risk.value[1:], evidence_note, approval_note))
+    return PolicyResult(True, "AUTHORIZED", "L%s 受控动作通过：%s设备白名单、无重复执行%s%s" % (risk.value[1:], evidence_note, approval_note, health_note))

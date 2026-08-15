@@ -47,6 +47,36 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_ACTION_EXECUTED")
         self.assertEqual(state["incidents"][0]["status"], "VERIFY_PENDING")
 
+    def test_llm_execute_can_target_unhealthy_device(self) -> None:
+        class FakeOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="EXECUTE",
+                        device_id="aerator-b04-1",
+                        target_state="on",
+                        risk="L1",
+                        rationale="低溶氧需要立即尝试开启现场增氧设备，并保留设备健康风险提示。",
+                    ),
+                    summary="执行不健康设备控制",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["action-planning-agent"],
+                    steps=[],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=FakeOrchestrator())
+        system.initialize_demo()
+        system.ingest_do("B-04", 2.0, source_event_id="llm-unhealthy-device")
+        state = system.snapshot()
+        command = next(item for item in state["commands"] if item["device_id"] == "aerator-b04-1")
+        self.assertEqual(command["status"], "CONFIRMED")
+        self.assertEqual(next(item for item in state["devices"] if item["id"] == "aerator-b04-1")["shadow_state"], "on")
+        policy_step = next(step for step in state["agent_runs"][0]["steps"] if step["action"] == "request_action_execution")
+        self.assertTrue(policy_step["details"]["allowed"])
+        self.assertIn("健康状态异常", policy_step["details"]["reason"])
+
     def test_device_control_skill_loads_contract_and_keeps_mqtt_gateway_boundary(self) -> None:
         system = FishAgentSystem()
 
@@ -635,6 +665,8 @@ class B01FlowTest(unittest.TestCase):
         self.assertIn("pH传感器异常", state["incidents"][0]["title"])
         self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
         self.assertEqual(len(state["manual_tasks"]), 1)
+        self.assertIn("不可信", state["incidents"][0]["evidence"][0]["summary"])
+        self.assertNotIn("SUSPECT", state["incidents"][0]["evidence"][0]["summary"])
 
     def test_patrol_records_all_sensor_metrics_and_dispatches_anomaly(self) -> None:
         class ManualOrchestrator:

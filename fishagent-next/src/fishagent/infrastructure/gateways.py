@@ -36,9 +36,8 @@ class SimulatorDeviceGateway:
         return device.shadow_state
 
     def send_command(self, device: Device, target_state: str, idempotency_key: str) -> GatewayResult:
-        if not device.healthy:
-            return GatewayResult(False, False, False, "设备网关报告设备不健康")
-        return GatewayResult(True, True, True, "模拟设备已确认目标状态")
+        health_note = "；设备健康状态异常，已尝试执行" if not device.healthy else ""
+        return GatewayResult(True, True, True, "模拟设备已确认目标状态%s" % health_note)
 
 
 class MqttDeviceGateway:
@@ -84,8 +83,6 @@ class MqttDeviceGateway:
             return self.client
 
     def send_command(self, device: Device, target_state: str, idempotency_key: str) -> GatewayResult:
-        if not device.healthy:
-            return GatewayResult(False, False, False, "设备网关报告设备不健康")
         topic = self.topic_template.format(pond_id=device.pond_id, device_id=device.id)
         payload = json.dumps(
             {
@@ -103,13 +100,14 @@ class MqttDeviceGateway:
             result = client.publish(topic, payload, qos=1, retain=False)
             rc = int(getattr(result, "rc", 0))
             if rc != 0:
-                raise RuntimeError("MQTT publish failed with rc=%s" % rc)
+                raise RuntimeError("MQTT 控制消息发布失败，返回码：%s" % rc)
             self.last_error = ""
-            detail = "MQTT IoT command published to %s" % topic
-            return GatewayResult(True, True, self.simulate_ack, detail if self.simulate_ack else detail + "; waiting for device ACK")
+            health_note = "；设备健康状态异常，已尝试执行" if not device.healthy else ""
+            detail = "MQTT 控制消息已发布到 %s%s" % (topic, health_note)
+            return GatewayResult(True, True, self.simulate_ack, detail if self.simulate_ack else detail + "；等待设备确认")
         except Exception as exc:
             self.last_error = str(exc)
-            return GatewayResult(False, False, False, "MQTT IoT command publish failed: %s" % exc)
+            return GatewayResult(False, False, False, "MQTT 控制消息发布失败：%s" % exc)
 
     def close(self) -> None:
         if self.client is not None:

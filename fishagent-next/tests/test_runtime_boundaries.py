@@ -506,11 +506,12 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(audit["resource_type"], "approval")
         self.assertEqual(audit["resource_id"], "approval-1")
 
-    def test_simulator_gateway_is_safe_for_unhealthy_device(self) -> None:
+    def test_simulator_gateway_can_execute_unhealthy_device_with_warning(self) -> None:
         device = Device(id="d-1", pond_id="p-1", name="增氧机", capability="aeration", healthy=False)
         result = SimulatorDeviceGateway().send_command(device, "on", "p-1:d-1:on")
-        self.assertFalse(result.accepted)
-        self.assertFalse(result.confirmed)
+        self.assertTrue(result.accepted)
+        self.assertTrue(result.confirmed)
+        self.assertIn("健康状态异常", result.detail)
 
     def test_mqtt_adapter_maps_topic_and_payload(self) -> None:
         received = []

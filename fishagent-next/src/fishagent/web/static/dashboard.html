@@ -238,6 +238,15 @@
       font-size: 11px;
     }
     .patrol-sensor-strip { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+    .patrol-device-block { grid-column: 1 / -1; }
+    .patrol-device-heading { margin-bottom: 3px; color: var(--muted); font-size: 9px; font-weight: 750; }
+    .patrol-device-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+    .patrol-device { min-width: 0; display: flex; align-items: center; gap: 4px; padding: 4px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--surface); font-size: 8px; line-height: 1.25; }
+    .patrol-device .dot { width: 6px; height: 6px; flex: 0 0 auto; }
+    .patrol-device-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .patrol-device b { margin-left: auto; flex: 0 0 auto; color: var(--brand-dark); font-size: 8px; }
+    .patrol-device.offline { border-color: #efaaa5; color: var(--red); background: var(--red-soft); }
+    .patrol-device.offline b { color: var(--red); }
     .patrol-sensor {
       min-width: 0;
       display: flex;
@@ -367,7 +376,8 @@
     .alert-flow-node.failed .alert-flow-check { color: var(--red); }
     .alert-flow-label { color: var(--brand-dark); font-size: 10px; font-weight: 850; }
     .alert-flow-agent { margin-top: 4px; color: var(--ink); font-size: 10px; font-weight: 750; }
-    .alert-flow-summary { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+    .alert-flow-summary { position: relative; z-index: 1; display: -webkit-box; max-height: 2.9em; margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; cursor: zoom-in; }
+    .alert-flow-summary:hover { z-index: 10; display: block; width: min(420px, calc(100vw - 44px)); max-width: calc(100vw - 44px); max-height: none; margin: -2px 0 -8px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--ink); background: var(--surface); box-shadow: 0 9px 24px rgba(24, 48, 42, .18); font-size: 11px; line-height: 1.55; }
     .chart-wrap { position: relative; min-height: 310px; }
     .trend-canvas { width: 100%; height: 280px; display: block; }
     .sensor-trend-panel { margin-bottom: 14px; }
@@ -670,6 +680,7 @@
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .case-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .patrol-sensor-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .patrol-device-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 720px) {
       .app-header { padding: 9px 12px; }
@@ -686,6 +697,7 @@
       .metric-tile { min-height: 68px; }
       .patrol-pond-row { grid-template-columns: 1fr auto; gap: 6px; }
       .patrol-sensor-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .patrol-device-strip { grid-template-columns: 1fr; }
       .chat-panel { top: 120px; height: calc(100vh - 132px); max-height: calc(100vh - 132px); }
       .chat-message { width: 94%; }
       .chat-compose-row { grid-template-columns: minmax(0, 1fr) 38px; }
@@ -1360,7 +1372,14 @@
           const tone = patrolMetricIsAlert(item, item.reading, pond, finding) ? 'danger' : '';
           return `<span class="patrol-sensor ${tone}"><span>${escapeHtml(item.label)}</span><b class="${tone}">${item.reading ? `${fmtNumber(item.reading.value, item.digits)}${unit}` : '--'}</b></span>`;
         }).join('');
-        return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pond.name)}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div></div>`;
+        const devices = (currentState.devices || []).filter(item => item.pond_id === pond.id);
+        const deviceStrip = devices.map(device => {
+          const online = Boolean(device.healthy);
+          const statusLabel = online ? '在线' : '离线';
+          const stateLabel = device.shadow_state === 'on' ? '已开启' : '已关闭';
+          return `<span class="patrol-device ${online ? '' : 'offline'}" title="${escapeHtml(device.name)}：${statusLabel}，${stateLabel}"><span class="dot ${online ? '' : 'danger'}"></span><span class="patrol-device-name">${escapeHtml(device.name)}</span><b>${statusLabel}</b></span>`;
+        }).join('') || '<span class="patrol-device"><span class="patrol-device-name">暂无设备</span></span>';
+        return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pond.name)}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div><div class="patrol-device-block"><div class="patrol-device-heading">设备在线状态</div><div class="patrol-device-strip">${deviceStrip}</div></div></div>`;
       }).join('') : activeReveal ? `<div class="empty">正在巡查...</div>` : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
       updateCountdown();
     }
@@ -1533,6 +1552,13 @@
     function healthStatusLabel(status) {
       return ({ONLINE: '在线', OFFLINE: '离线', DRIFTING: '漂移', ERROR: '错误'})[status] || status || '未知';
     }
+    function localizedQualityText(value) {
+      return String(value || '')
+        .replace(/\bGOOD\b/g, '正常')
+        .replace(/\bSUSPECT\b/g, '不可信')
+        .replace(/\bSTALE\b/g, '过期')
+        .replace(/\bINVALID\b/g, '无效');
+    }
     function taskStatusLabel(status) {
       return ({OPEN: '待处理', IN_PROGRESS: '处理中', COMPLETED: '已完成', CANCELLED: '已取消'})[status] || status || '未知';
     }
@@ -1567,7 +1593,7 @@
       return sensors.filter(sensor => sensor.status !== 'ONLINE' || health.get(sensor.id)?.status !== 'ONLINE').map(sensor => {
         const state = health.get(sensor.id);
         const metric = (waterMetrics.find(item => item.metric === sensor.metric)?.label || sensor.metric || '未知指标');
-        const note = state?.message ? `，说明：${state.message}` : '';
+        const note = state?.message ? `，说明：${localizedQualityText(state.message)}` : '';
         return `${sensor.name}（${sensor.id}，指标：${metric}，状态：${healthStatusLabel(state?.status || sensor.status)}${note}）`;
       });
     }
@@ -1575,7 +1601,7 @@
       return (currentState.devices || []).filter(item => item.pond_id === pondId && !item.healthy).map(item => deviceAssetLabel(item.id) + '，状态：离线');
     }
     function alertTriggerSummary(evidence) {
-      const raw = String(evidence?.summary || '等待告警证据');
+      const raw = localizedQualityText(evidence?.summary || '等待告警证据');
       const detailedMarker = raw.lastIndexOf('；异常：');
       if (detailedMarker < 0) return raw;
       const snapshot = raw.slice(0, detailedMarker);
@@ -1649,13 +1675,13 @@
       if (step?.action === 'validate_llm_decision') return '结构化处置决策已通过安全校验。';
       if (step?.action === 'request_action_execution') return `设备动作已提交安全策略门：${raw || '等待设备返回结果'}`;
       if (step?.action === 'incident.failed' || step?.action === 'incident.invalid' || step?.action === 'incident.timeout') return '模型决策未能完成，已转人工处理。';
-      return raw || actionLabel(step?.action);
+      return localizedQualityText(raw || actionLabel(step?.action));
     }
     function traceDisplayValue(value) {
       if (Array.isArray(value)) return value.map(traceDisplayValue);
       if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, traceDisplayValue(item)]));
       if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) return fmtDate(value, true);
-      return value;
+      return typeof value === 'string' ? localizedQualityText(value) : value;
     }
     function traceKindLabel(step) {
       const kind = step?.details?.kind;
@@ -1665,10 +1691,11 @@
       const details = step?.details && typeof step.details === 'object' ? step.details : null;
       const detailJson = details && Object.keys(details).length ? JSON.stringify(traceDisplayValue(details), null, 2) : '';
       const errorClass = ['llm.error', 'incident.failed', 'incident.invalid', 'incident.timeout', 'sensor_report.timeout'].includes(step?.action) || details?.success === false ? ' is-error' : '';
-      const message = details?.message?.content ? `<div class="data-stream-message"><strong>Agent → 大模型</strong>　${escapeHtml(details.message.content)}</div>` : '';
+      const message = details?.message?.content ? `<div class="data-stream-message"><strong>Agent → 大模型</strong>　${escapeHtml(localizedQualityText(details.message.content))}</div>` : '';
       const decision = details?.decision ? `<div class="data-stream-message"><strong>大模型 → Agent</strong>　${escapeHtml(JSON.stringify(traceDisplayValue(details.decision)))}</div>` : '';
       const detailsOpen = ['llm.request', 'llm.response', 'llm.error', 'device.command_result'].includes(step?.action) ? ' open' : '';
-      return `<article class="data-stream-item${errorClass}"><time class="data-stream-time">${fmtDate(step?.created_at, true)}</time><div class="data-stream-main"><div class="data-stream-head"><span class="data-stream-agent">${escapeHtml(agentLabel(step?.agent))}</span><span class="data-stream-action">${escapeHtml(actionLabel(step?.action))}</span></div><div class="data-stream-summary"><span class="trace-kind">${escapeHtml(traceKindLabel(step))}</span>　${escapeHtml(localizedStepSummary(step))}</div>${message}${decision}${detailJson ? `<details class="data-stream-details"${detailsOpen}><summary>查看实际数据</summary><pre>${escapeHtml(detailJson)}</pre></details>` : ''}</div></article>`;
+      const summary = localizedQualityText(localizedStepSummary(step));
+      return `<article class="data-stream-item${errorClass}"><time class="data-stream-time">${fmtDate(step?.created_at, true)}</time><div class="data-stream-main"><div class="data-stream-head"><span class="data-stream-agent">${escapeHtml(agentLabel(step?.agent))}</span><span class="data-stream-action">${escapeHtml(actionLabel(step?.action))}</span></div><div class="data-stream-summary"><span class="trace-kind">${escapeHtml(traceKindLabel(step))}</span>　${escapeHtml(summary)}</div>${message}${decision}${detailJson ? `<details class="data-stream-details"${detailsOpen}><summary>查看实际数据</summary><pre>${escapeHtml(detailJson)}</pre></details>` : ''}</div></article>`;
     }
     function runTraceMarkup(run, limit = 200) {
       const steps = (run?.steps || []).slice(-limit);

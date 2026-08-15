@@ -50,6 +50,12 @@ from fishagent.domain.models import (
 )
 
 SENSOR_NAME_BY_METRIC = {item["metric"]: item["name"] for item in DEMO_SENSOR_SPECS}
+READING_QUALITY_LABELS = {
+    "GOOD": "正常",
+    "SUSPECT": "不可信",
+    "STALE": "过期",
+    "INVALID": "无效",
+}
 WATER_QUALITY_HIGH_LIMITS = {
     "AMMONIA": 0.50,
     "NITRITE": 0.20,
@@ -412,6 +418,13 @@ class InMemoryStore:
             return value
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
+    @staticmethod
+    def _localize_quality_message(message: object) -> str:
+        text = str(message or "")
+        for code, label in READING_QUALITY_LABELS.items():
+            text = text.replace(code, label)
+        return text
+
     def restore_snapshot(self, payload: dict) -> None:
         """Restore a JSON-safe state snapshot without emitting seed events."""
         self.farms = {item["id"]: Farm(**item) for item in payload.get("farms", [])}
@@ -426,7 +439,7 @@ class InMemoryStore:
                 last_reading_at=self._datetime(item.get("last_reading_at")),
                 error_count=int(item.get("error_count", 0)),
                 drift_score=float(item.get("drift_score", 0.0)),
-                message=item.get("message", ""),
+                message=self._localize_quality_message(item.get("message", "")),
             )
             for item in payload.get("sensor_health", [])
         }
@@ -834,10 +847,14 @@ class InMemoryStore:
         return candidates[0] if candidates else None
 
     def aeration_device_for_pond(self, pond_id: str) -> Optional[Device]:
+        fallback = None
         for device in self.devices.values():
-            if device.pond_id == pond_id and device.capability == "aeration" and device.healthy:
+            if device.pond_id != pond_id or device.capability != "aeration":
+                continue
+            if device.healthy:
                 return device
-        return None
+            fallback = fallback or device
+        return fallback
 
     def active_incident_for_pond(self, pond_id: str) -> Optional[Incident]:
         # Escalated incidents remain active until the condition is recovered or

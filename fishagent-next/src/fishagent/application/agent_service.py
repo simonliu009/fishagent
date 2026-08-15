@@ -9,7 +9,7 @@ from fishagent.agent_runtime.contracts import IncidentDecision
 from fishagent.agent_runtime.skills.device_control import DeviceControlSkill
 from fishagent.application.demo_data import DEMO_SENSOR_BY_METRIC, DEMO_SENSOR_SPECS, DEMO_WATER_SERIES
 from fishagent.application.policy import evaluate_action
-from fishagent.application.store import WATER_QUALITY_HIGH_LIMITS, WATER_QUALITY_RANGES, InMemoryStore
+from fishagent.application.store import READING_QUALITY_LABELS, WATER_QUALITY_HIGH_LIMITS, WATER_QUALITY_RANGES, InMemoryStore
 from fishagent.domain.models import (
     ActionProposal,
     AgentRun,
@@ -1006,14 +1006,15 @@ class FishAgentSystem:
         health.last_heartbeat_at = utcnow()
         health.last_reading_at = reading.sampled_at
         health.status = HealthStatus.ONLINE if quality == "GOOD" else HealthStatus.ERROR
-        health.message = "" if quality == "GOOD" else "读数质量：%s" % quality
+        quality_label = READING_QUALITY_LABELS[quality]
+        health.message = "" if quality == "GOOD" else "读数质量：%s" % quality_label
         incident = self.store.add_reading(reading)
         if incident is None and quality != "GOOD" and auto_run:
             incident = self.store.active_incident_for_pond(pond_id)
             evidence = Evidence(
                 id=new_id("evi"),
                 type="sensor_health",
-                summary="%s 传感器读数质量异常：%s" % ((spec or {"name": metric})["name"], quality),
+                summary="%s 传感器读数质量异常：%s" % ((spec or {"name": metric})["name"], quality_label),
                 refs=[reading.source_event_id],
             )
             if incident:
@@ -1448,13 +1449,13 @@ class FishAgentSystem:
 
         device = self.store.aeration_device_for_pond(incident.pond_id)
         if device is None:
-            run.step("patrol-analysis-agent", "get_device_capabilities", "未找到可用增氧设备，升级人工处理")
+            run.step("patrol-analysis-agent", "get_device_capabilities", "未找到具备增氧能力的设备，升级人工处理")
             incident.transition(IncidentStatus.ACTION_PROPOSED)
             incident.transition(IncidentStatus.MANUAL_REQUIRED)
             incident.assignee = "现场操作员"
             self.create_manual_task(
                 title="检查 %s 的增氧设备" % incident.title,
-                description="没有找到健康且具备 aeration 能力的设备，请现场确认设备或手动增氧。",
+                description="没有找到具备增氧能力的设备，请现场确认设备或手动增氧。",
                 incident_id=incident.id,
             )
             run.status = "COMPLETED"
