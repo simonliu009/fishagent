@@ -68,6 +68,7 @@ class B01FlowTest(unittest.TestCase):
 
         system = FishAgentSystem(agent_orchestrator=FakeOrchestrator())
         system.initialize_demo()
+        system.store.devices["aerator-b04-1"].healthy = False
         system.ingest_do("B-04", 2.0, source_event_id="llm-unhealthy-device")
         state = system.snapshot()
         command = next(item for item in state["commands"] if item["device_id"] == "aerator-b04-1")
@@ -501,11 +502,10 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual({item["id"] for item in state["ponds"]}, {"B-01", "B-02", "B-03", "B-04"})
         self.assertEqual(len(state["sensors"]), 28)
         self.assertEqual(len(state["devices"]), 28)
-        self.assertEqual(sum(1 for item in state["devices"] if item["healthy"]), 27)
-        self.assertEqual(sum(1 for item in state["devices"] if not item["healthy"]), 1)
-        offline = next(item for item in state["devices"] if not item["healthy"])
-        self.assertEqual(offline["id"], "aerator-b04-1")
-        self.assertEqual(offline["pond_id"], "B-04")
+        self.assertEqual(sum(1 for item in state["devices"] if item["healthy"]), 28)
+        self.assertEqual(sum(1 for item in state["devices"] if not item["healthy"]), 0)
+        self.assertTrue(all(item["status"] == "ONLINE" for item in state["sensor_health"]))
+        self.assertTrue(all(item["quality"] == "GOOD" for item in state["readings"]))
         self.assertEqual(len(state["cameras"]), 8)
         self.assertEqual(len(state["readings"]), 252)
         self.assertEqual(len(state["schedules"]), 1)
@@ -527,6 +527,8 @@ class B01FlowTest(unittest.TestCase):
         self.assertGreaterEqual(len(state["disease_knowledge"]), 3)
         self.assertEqual(len(state["analysis_cases"]), 4)
         self.assertEqual(len(state["camera_observations"]), 8)
+        self.assertTrue(all(item["observation_type"].startswith("NORMAL") or item["observation_type"] == "SURFACE_WATER_STABLE" for item in state["camera_observations"]))
+        self.assertTrue(all(item["rain_probability_pct"] <= 25 for item in state["weather_observations"]))
         self.assertEqual(
             {(item["pond_id"], item["camera_role"]) for item in state["camera_observations"]},
             {
@@ -541,6 +543,17 @@ class B01FlowTest(unittest.TestCase):
             },
         )
         self.assertTrue(all(item["image_url"].startswith("/static/camera-images/") for item in state["camera_observations"]))
+
+    def test_multimodal_demo_injects_abnormal_camera_and_weather_evidence(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+
+        system.store.activate_multimodal_demo_data()
+
+        observations = {item.id: item for item in system.store.camera_observations.values()}
+        self.assertEqual(observations["obs-surface-b01-floating-head"].observation_type, "FLOATING_HEAD_GATHERING")
+        self.assertEqual(observations["obs-underwater-b02-disease"].observation_type, "DISEASE_SUSPECT")
+        self.assertEqual(system.store.weather_observations["weather-B-04"].rain_probability_pct, 86)
 
     def test_multimodal_cases_use_device_policy_and_manual_boundaries(self) -> None:
         class MultimodalOrchestrator:
@@ -583,7 +596,7 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual({item["metric"] for item in state["readings"]}, {item["metric"] for item in state["sensors"]})
         health = {item["sensor_id"]: item["status"] for item in state["sensor_health"]}
         self.assertEqual(health["do-b-01"], "ONLINE")
-        self.assertEqual(health["do-b-04"], "ERROR")
+        self.assertEqual(health["do-b-04"], "ONLINE")
         self.assertEqual(state["events"][0]["event_type"], "system.demo.initialized")
 
     def test_multimodal_case_run_records_real_agent_data_stream(self) -> None:
@@ -762,6 +775,14 @@ class B01FlowTest(unittest.TestCase):
         orchestrator = ManualOrchestrator()
         system = FishAgentSystem(agent_orchestrator=orchestrator)
         system.initialize_demo()
+        system.store.devices["aerator-b04-1"].healthy = False
+        system.ingest_reading(
+            "B-04",
+            4.9,
+            source_event_id="patrol-health-suspect-do",
+            quality="SUSPECT",
+            auto_run=False,
+        )
         patrol = system.run_patrol()
         state = system.snapshot()
         b04 = next(item for item in state["patrol_findings"] if item["pond_id"] == "B-04")
@@ -927,6 +948,15 @@ class B01FlowTest(unittest.TestCase):
     def test_auto_response_demo_rejects_unknown_mode(self) -> None:
         with self.assertRaises(ValueError):
             FishAgentSystem().inject_demo("unknown")
+
+    def test_health_demo_injects_sensor_and_device_faults(self) -> None:
+        state = FishAgentSystem().inject_demo("health")
+
+        device = next(item for item in state["devices"] if item["id"] == "aerator-b04-1")
+        sensor = next(item for item in state["sensor_health"] if item["sensor_id"] == "do-b-04")
+        self.assertFalse(device["healthy"])
+        self.assertEqual(sensor["status"], "ERROR")
+        self.assertTrue(any(item["event_type"] == "demo.injected" for item in state["events"]))
 
     def test_auto_response_demo_uses_mqtt_publisher_for_injected_alerts(self) -> None:
         class ManualOrchestrator:

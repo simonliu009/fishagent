@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional, cast
 
 from fishagent.application.demo_data import (
     DEMO_ANALYSIS_CASES,
+    DEMO_BASELINE_CAMERA_OBSERVATIONS,
+    DEMO_BASELINE_WEATHER,
     DEMO_CAMERA_OBSERVATIONS,
     DEMO_DISEASE_KNOWLEDGE,
     DEMO_INVENTORY,
@@ -194,7 +196,7 @@ class InMemoryStore:
                         if (pond_id == "B-03" and capability == "feeding") or (pond_id == "B-04" and capability == "valve_control")
                         else "off"
                     ),
-                    healthy=not (pond_id == "B-04" and capability == "aeration"),
+                    healthy=True,
                 )
             self.cameras["camera-surface-%s" % pond_slug] = CameraSource(
                 id="camera-surface-%s" % pond_slug,
@@ -224,7 +226,7 @@ class InMemoryStore:
                 last_frame_width=1672,
                 last_frame_height=941,
             )
-        for pond_id, weather in DEMO_WEATHER.items():
+        for pond_id, weather in DEMO_BASELINE_WEATHER.items():
             weather_data = cast(dict[str, Any], weather)
             self.weather_observations["weather-%s" % pond_id] = WeatherObservation(
                 id="weather-%s" % pond_id,
@@ -280,7 +282,7 @@ class InMemoryStore:
                 supplier=str(inventory_data["supplier"]),
                 pond_id=inventory_data.get("pond_id"),
             )
-        for observation in DEMO_CAMERA_OBSERVATIONS:
+        for observation in DEMO_BASELINE_CAMERA_OBSERVATIONS:
             observation_data = cast(dict[str, Any], observation)
             captured_at = utcnow()
             observation_id = str(observation_data["id"])
@@ -344,6 +346,44 @@ class InMemoryStore:
                 "camera_count": len(self.cameras),
                 "analysis_case_count": len(self.analysis_cases),
             },
+        )
+
+    def activate_multimodal_demo_data(self) -> None:
+        """Replace the healthy camera/weather baseline with case evidence."""
+        for pond_id, weather in DEMO_WEATHER.items():
+            weather_data = cast(dict[str, Any], weather)
+            observation = self.weather_observations.get("weather-%s" % pond_id)
+            if observation is None:
+                continue
+            observation.observed_at = utcnow()
+            observation.condition = str(weather_data["condition"])
+            observation.temperature_c = float(weather_data["temperature_c"])
+            observation.wind_speed_mps = float(weather_data["wind_speed_mps"])
+            observation.wind_direction = str(weather_data["wind_direction"])
+            observation.humidity_pct = int(weather_data["humidity_pct"])
+            observation.rain_probability_pct = int(weather_data["rain_probability_pct"])
+            observation.pressure_hpa = float(weather_data["pressure_hpa"])
+            observation.forecast = str(weather_data["forecast"])
+
+        for observation_data in DEMO_CAMERA_OBSERVATIONS:
+            data = cast(dict[str, Any], observation_data)
+            observation = self.camera_observations.get(str(data["id"]))
+            if observation is None:
+                continue
+            observation.observation_type = str(data["observation_type"])
+            observation.status = str(data["status"])
+            observation.summary = str(data["summary"])
+            observation.labels = list(data["labels"])
+            observation.confidence = float(data["confidence"])
+            observation.captured_at = utcnow()
+
+        self.emit(
+            "demo.multimodal.activated",
+            "已注入多模态摄像头与天气异常证据",
+            {"camera_observation_count": len(DEMO_CAMERA_OBSERVATIONS), "weather_observation_count": len(DEMO_WEATHER)},
+            actor_type="user",
+            resource_type="demo",
+            resource_id="multimodal",
         )
 
     def _upgrade_demo_camera_assets(self) -> bool:

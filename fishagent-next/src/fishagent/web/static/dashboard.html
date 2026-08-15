@@ -829,7 +829,6 @@
   <nav class="primary-nav" aria-label="主导航">
     <button class="nav-button active" type="button" data-view="monitor" onclick="switchView('monitor')"><i data-lucide="layout-dashboard"></i><span>监控总览</span></button>
     <button class="nav-button" type="button" data-view="assistant" onclick="switchView('assistant')"><i data-lucide="bot"></i><span>AI 助手</span></button>
-    <button class="nav-button" type="button" data-view="cases" onclick="switchView('cases')"><i data-lucide="route"></i><span>Agent 案例</span></button>
     <button class="nav-button" type="button" data-view="knowledge" onclick="switchView('knowledge')"><i data-lucide="book-open-check"></i><span>知识库</span></button>
     <button class="nav-button" type="button" data-view="inventory" onclick="switchView('inventory')"><i data-lucide="boxes"></i><span>库存补货</span></button>
     <button class="nav-button" type="button" data-view="management" onclick="switchView('management')"><i data-lucide="waves"></i><span>养殖管理</span></button>
@@ -915,36 +914,6 @@
           </section>
         </div>
       </div>
-    </section>
-
-    <section id="view_cases" class="view">
-      <section class="tool-panel">
-        <div class="case-toolbar">
-          <div>
-            <h2 class="section-title"><i data-lucide="route"></i>Agent 案例演示</h2>
-            <p class="eyebrow">传感器触发与多模态证据统一进入真实 Agent 数据流</p>
-          </div>
-          <div class="actions">
-            <span class="status-badge info"><i data-lucide="mouse-pointer-2"></i>请从监控总览注入 Demo</span>
-          </div>
-        </div>
-        <div id="case_sequence_meta" class="message"></div>
-        <div class="section-heading" style="margin-top:16px"><h3 class="section-title"><i data-lucide="radio-tower"></i>传感器触发演示</h3><span class="section-meta">保留核心闭环</span></div>
-        <div id="demo_catalog" class="case-summary-grid"></div>
-        <div class="section-heading" style="margin-top:16px"><h3 class="section-title"><i data-lucide="layers-3"></i>多模态案例</h3><span class="section-meta">可逐个运行</span></div>
-        <div id="case_summary_grid" class="case-summary-grid"></div>
-        <div class="case-flow-layout">
-          <div class="case-flow">
-            <div class="section-heading"><h3 class="section-title"><i data-lucide="workflow"></i><span id="case_flow_title">选择一个案例查看实际数据流</span></h3><span id="case_flow_status" class="section-meta"></span></div>
-            <div id="case_description" class="case-description"></div>
-            <div id="case_flow_track" class="case-data-stream"></div>
-          </div>
-          <div class="case-flow">
-            <div class="section-heading"><h3 class="section-title"><i data-lucide="scan-search"></i>当前证据</h3><span class="section-meta">天气 · 视觉 · 知识库</span></div>
-            <div id="case_evidence_list" class="case-evidence-list"></div>
-          </div>
-        </div>
-      </section>
     </section>
 
     <section id="view_knowledge" class="view">
@@ -1142,6 +1111,7 @@
         <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('dedup')"><i data-lucide="copy-check"></i><span><strong>防重复动作</strong><small>设备已开启时验证幂等控制</small></span></button>
         <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('approval')"><i data-lucide="stamp"></i><span><strong>L2 审批转人工</strong><small>注入高风险异常并提交审批任务</small></span></button>
         <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('multimodal')"><i data-lucide="layers-3"></i><span><strong>多模态案例序列</strong><small>启动摄像头、天气与知识证据流程</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('health')"><i data-lucide="heart-pulse"></i><span><strong>传感器与设备故障</strong><small>注入 B-04 不可信读数和一台离线设备</small></span></button>
         <button class="demo-option reset" type="button" role="menuitem" onclick="initializeDemo()"><i data-lucide="rotate-ccw"></i><span><strong>重置演示数据</strong><small>恢复基础背景数据，不触发自动处置</small></span></button>
       </div>
     </div>
@@ -1179,14 +1149,6 @@
     let trendWindowHours = 12;
     let selectedReportId = null;
     const PATROL_REVEAL_INTERVAL_MS = 700;
-    const demoCatalog = [
-      ['success', '低溶氧自动处置', '传感器阈值', '注入 B-01 低溶氧 → 增氧机开启 → MQTT 确认 → 等待复核'],
-      ['alerts', '双传感器告警', '传感器阈值', '同时注入 B-01 低溶氧与 B-02 氨氮异常'],
-      ['failure', '复核失败升级', '复核流程', '注入低溶氧 → 模拟复核未恢复 → 提交人工任务'],
-      ['dedup', '防重复动作', '设备幂等', '设备已开启 → 注入低溶氧 → 不重复下发开启指令'],
-      ['approval', 'L2 审批转人工', '安全策略', '注入高风险异常 → 生成审批任务'],
-      ['multimodal', '多模态案例序列', '巡塘 SOP', '启动摄像头、天气与知识证据的 Agent 数据流'],
-    ];
     const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
     const llmPresets = [
       {id:'preset:zai', name:'Z.ai', provider:'zai', base_url:'https://api.z.ai/api/paas/v4', model:'glm-4.5'},
@@ -2163,41 +2125,6 @@
     async function generateDailyReport() {
       try { const result = await api('/api/v1/reports/generate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}); selectedReportId = result.report?.id || null; showToast('每日报告已生成'); await refresh(); switchView('reports'); } catch (error) { showToast(`报告生成失败：${error.message}`, true); }
     }
-    let selectedCaseId = null;
-    function renderCases() {
-      const cases = [...(currentState.analysis_cases || [])].sort((a,b) => a.sequence - b.sequence);
-      if (!selectedCaseId || !cases.some(item => item.id === selectedCaseId)) selectedCaseId = cases[0]?.id || null;
-      const selected = cases.find(item => item.id === selectedCaseId) || cases[0];
-      document.getElementById('demo_catalog').innerHTML = demoCatalog.map(item => `<article class="case-card"><div class="case-card-head"><div><span class="case-number">${escapeHtml(item[0].slice(0,1).toUpperCase())}</span><span class="case-title">${escapeHtml(item[1])}</span></div>${badge('NORMAL', '总览注入')}</div><div class="case-category">${escapeHtml(item[2])}</div><div class="case-result">${escapeHtml(item[3])}</div></article>`).join('');
-      document.getElementById('case_summary_grid').innerHTML = cases.length ? cases.map(item => `<article class="case-card ${item.id === selected?.id ? 'active' : ''}" onclick="selectAnalysisCase('${item.id}')"><div class="case-card-head"><div><span class="case-number">${item.sequence}</span><span class="case-title">${escapeHtml(item.title)}</span></div>${badge(item.status === 'READY' ? 'PENDING' : item.status, item.status === 'READY' ? '待注入' : item.status)}</div><div class="case-category">${escapeHtml(item.category)} · ${escapeHtml(item.pond_id)}</div><div class="case-trigger">${escapeHtml(item.trigger)}</div><div class="case-result">${escapeHtml(item.result_summary || item.expected_result)}</div></article>`).join('') : '<div class="empty">暂无分析案例，请从监控总览注入 Demo</div>';
-      if (!selected) {
-        document.getElementById('case_flow_title').textContent = '选择一个案例查看实际数据流';
-        document.getElementById('case_flow_status').textContent = '';
-        document.getElementById('case_flow_track').innerHTML = '<div class="data-stream-empty">暂无案例</div>';
-        document.getElementById('case_evidence_list').innerHTML = '';
-      } else {
-        const selectedRun = (currentState.agent_runs || []).find(item => item.id === selected.agent_run_id);
-        document.getElementById('case_flow_title').textContent = selected.title;
-        document.getElementById('case_flow_status').textContent = selectedRun
-          ? `${selected.category} · ${selected.pond_id} · ${runStatusLabel(selectedRun.status)} · ${fmtDate(selectedRun.steps?.[0]?.created_at, true)}`
-          : `${selected.category} · ${selected.pond_id} · 尚未运行`;
-        document.getElementById('case_description').textContent = `${selected.description} 预期路径仅作参考；下方展示本次 AgentRun 实际经过的巡塘 SOP、模型、策略门和执行数据。`;
-        document.getElementById('case_flow_track').innerHTML = selectedRun ? runTraceMarkup(selectedRun) : '<div class="data-stream-empty">从监控总览注入多模态 Demo 后显示实际数据流</div>';
-        const weather = (currentState.weather_observations || []).find(item => item.id === `weather-${selected.pond_id}`);
-        const observations = (currentState.camera_observations || []).filter(item => item.pond_id === selected.pond_id);
-        const articles = (currentState.disease_knowledge || []).filter(item => selected.evidence_refs?.includes(item.id));
-        const evidence = [];
-        if (weather && selected.evidence_refs?.includes(weather.id)) evidence.push(`<div class="case-evidence-item"><b>天气上下文 · ${escapeHtml(weather.condition)}</b><span>${escapeHtml(weather.forecast)}，风速 ${fmtNumber(weather.wind_speed_mps,1)} m/s，降雨概率 ${weather.rain_probability_pct}%</span></div>`);
-        observations.filter(item => selected.evidence_refs?.includes(item.id)).forEach(item => {
-          const image = item.image_url ? `<img class="case-evidence-image" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.pond_id)} ${item.camera_role === 'UNDERWATER' ? '水下' : '水面'}摄像头现场画面" loading="lazy">` : '';
-          evidence.push(`<div class="case-evidence-item"><b>${escapeHtml(item.camera_role === 'UNDERWATER' ? '水下' : '水面')}摄像头 · 置信度 ${Math.round(item.confidence * 100)}%</b>${image}<span>${escapeHtml(item.summary)}</span></div>`);
-        });
-        articles.forEach(item => evidence.push(`<div class="case-evidence-item"><b>病害知识库 · ${escapeHtml(item.name)}</b><span>${escapeHtml(item.signs)}；${escapeHtml(item.recommended_actions.join('、'))}</span></div>`));
-        document.getElementById('case_evidence_list').innerHTML = evidence.join('') || '<div class="empty">等待案例证据</div>';
-      }
-      if (!selected) document.getElementById('case_description').textContent = '';
-      document.getElementById('case_sequence_meta').textContent = cases.length ? `传感器触发与多模态案例统一由监控总览注入 · ${cases.length} 个多模态案例按真实 AgentRun 显示数据流` : '';
-    }
     function renderCameraObservations() {
       const observations = currentState.camera_observations || [];
       document.getElementById('camera_meta').textContent = `${(currentState.cameras || []).length} 路摄像头 · ${observations.length} 条视觉观察`;
@@ -2205,20 +2132,9 @@
       document.getElementById('camera_observation_grid').innerHTML = orderedObservations.map(item => {
         const roleLabel = item.camera_role === 'UNDERWATER' ? '水下' : '水面';
         const image = item.image_url ? `<img class="camera-observation-image" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.pond_id)} ${roleLabel}摄像头现场画面" loading="lazy">` : '';
-        return `<article class="camera-observation"><div class="camera-observation-head"><b>${escapeHtml(item.pond_id)} · ${roleLabel}</b>${badge('NORMAL', `${Math.round(item.confidence * 100)}%`)}</div>${image}<p>${escapeHtml(item.summary)}</p><div class="camera-tags">${item.labels.map(label => `<span class="camera-tag">${escapeHtml(label)}</span>`).join('')}</div></article>`;
+        const normal = String(item.observation_type || '').startsWith('NORMAL') || item.observation_type === 'SURFACE_WATER_STABLE';
+        return `<article class="camera-observation"><div class="camera-observation-head"><b>${escapeHtml(item.pond_id)} · ${roleLabel}</b>${badge(normal ? 'NORMAL' : 'NEEDS_ATTENTION', `${normal ? '正常' : '需关注'} · ${Math.round(item.confidence * 100)}%`)}</div>${image}<p>${escapeHtml(item.summary)}</p><div class="camera-tags">${item.labels.map(label => `<span class="camera-tag">${escapeHtml(label)}</span>`).join('')}</div></article>`;
       }).join('') || '<div class="empty">暂无摄像头观察</div>';
-    }
-    function selectAnalysisCase(caseId) { selectedCaseId = caseId; renderCases(); iconRefresh(); }
-    async function runAnalysisCase(caseId) {
-      try { await api(`/api/v1/analysis-cases/${caseId}/run`, {method:'POST'}); showToast('案例 Agent 流程已完成'); await refresh(); } catch (error) { showToast(`案例执行失败：${error.message}`, true); }
-    }
-    async function runAllAnalysisCases() {
-      try {
-        await api('/api/v1/analysis-cases/run-all', {method:'POST'});
-        showToast('全部案例已按顺序启动');
-        await refresh();
-        watchAnalysisCases();
-      } catch (error) { showToast(`案例序列启动失败：${error.message}`, true); }
     }
     function setTrendMetric(metric) {
       if (!waterMetrics.some(item => item.metric === metric)) return;
@@ -2332,7 +2248,7 @@
       drawSensorTrendChart();
     }
     function renderAll() {
-      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics(); renderKnowledge(); renderInventory(); renderReports();
+      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderManagement(); renderAnalytics(); renderKnowledge(); renderInventory(); renderReports();
       document.getElementById('footer_status').textContent = '系统运行正常';
       requestAnimationFrame(drawCharts);
       iconRefresh();
@@ -2374,6 +2290,7 @@
         dedup: '已注入防重复动作 Demo',
         approval: '已注入 L2 审批转人工 Demo',
         multimodal: '已启动多模态案例序列 Demo',
+        health: '已注入传感器与设备故障 Demo',
       };
       await mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), messages[mode] || 'Demo 已注入');
       if (mode === 'multimodal') watchAnalysisCases();

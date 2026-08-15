@@ -488,6 +488,7 @@ async def demo_options(request: Request) -> dict:
         "dedup": "注入低溶氧但设备已开启，验证幂等控制",
         "approval": "注入高风险异常，自动提交审批任务",
         "multimodal": "启动水面、水下、天气和知识证据的多模态案例序列",
+        "health": "注入 B-04 不可信溶氧读数和一台离线设备",
     }
     return {
         "options": [

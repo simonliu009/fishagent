@@ -379,7 +379,9 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('id="demo_launcher"', response.text)
         self.assertIn("onclick=\"injectDemo('alerts')\"", response.text)
         self.assertIn("onclick=\"injectDemo('multimodal')\"", response.text)
-        self.assertIn("请从监控总览注入 Demo", response.text)
+        self.assertIn("onclick=\"injectDemo('health')\"", response.text)
+        self.assertNotIn('data-view="cases"', response.text)
+        self.assertNotIn('id="view_cases"', response.text)
         self.assertIn('onclick="toggleAlertCapsule(event)"', response.text)
         self.assertIn('onclick="openAlertView(event)"', response.text)
         self.assertIn("function advanceCountdownTarget", response.text)
@@ -402,7 +404,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         options = response.json()["options"]
         modes = {item["mode"] for item in options}
-        self.assertTrue({"success", "alerts", "failure", "dedup", "approval", "multimodal"}.issubset(modes))
+        self.assertTrue({"success", "alerts", "failure", "dedup", "approval", "multimodal", "health"}.issubset(modes))
         self.assertIn("init", modes)
         self.assertTrue(next(item for item in options if item["mode"] == "alerts")["auto_response"])
         self.assertFalse(next(item for item in options if item["mode"] == "init")["auto_response"])

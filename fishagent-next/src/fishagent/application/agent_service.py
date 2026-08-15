@@ -76,6 +76,7 @@ DEMO_MODE_LABELS = {
     "dedup": "防重复动作",
     "approval": "L2 审批转人工",
     "multimodal": "多模态案例序列",
+    "health": "传感器与设备故障",
 }
 AUTO_RESPONSE_DEMO_MODES = frozenset(DEMO_MODE_LABELS)
 
@@ -132,7 +133,6 @@ class FishAgentSystem:
             for metric, values in series_by_metric.items():
                 spec = DEMO_SENSOR_BY_METRIC[metric]
                 for index, value in enumerate(values):
-                    is_latest_do = metric == "DO" and index == len(values) - 1
                     payloads.append(
                         {
                             "pond_id": pond_id,
@@ -143,7 +143,7 @@ class FishAgentSystem:
                             "source_event_id": "demo-seed-%s-%s-%02d"
                             % (pond_id.lower(), spec["slug"], index + 1),
                             "seconds_old": (len(values) - index - 1) * 3 * 60 * 60,
-                            "quality": "SUSPECT" if pond_id == "B-04" and is_latest_do else "GOOD",
+                            "quality": "GOOD",
                             "auto_run": False,
                         }
                     )
@@ -2509,7 +2509,17 @@ class FishAgentSystem:
                 self._demo_reading("B-01", 2.3, source_event_id="demo-failure-review")
                 self.verify_incident(incident.id, force_escalation=True)
         elif mode == "multimodal":
+            self.store.activate_multimodal_demo_data()
             self.start_analysis_case_sequence()
+        elif mode == "health":
+            device = self.store.devices["aerator-b04-1"]
+            device.healthy = False
+            self._demo_reading(
+                "B-04",
+                4.9,
+                source_event_id="demo-health-suspect-do",
+                quality="SUSPECT",
+            )
         elif mode == "success":
             incident = self._demo_reading("B-01", 2.1, source_event_id="demo-success")
             # Leave the incident in VERIFY_PENDING. DO recovers gradually and
