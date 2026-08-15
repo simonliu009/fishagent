@@ -302,6 +302,7 @@
     .metric-number { margin-left: 5px; color: var(--brand-dark); font-size: 18px; font-weight: 900; }
     .metric-note { margin-top: 6px; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dashboard-grid { display: grid; grid-template-columns: minmax(360px, .8fr) minmax(0, 1.2fr); gap: 14px; margin-top: 14px; }
+    .monitor-stack { display: grid; gap: 14px; margin-top: 14px; }
     .tool-panel { min-width: 0; padding: 16px; }
     .section-heading { align-items: center; margin-bottom: 14px; }
     .section-title { display: flex; align-items: center; gap: 8px; }
@@ -328,6 +329,9 @@
     .pond-name { min-width: 0; font-size: 11px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pond-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 9px; }
     .pond-metric { min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 6px; border-radius: 4px; color: var(--muted); background: var(--surface-alt); font-size: 9px; }
+    .pond-metric.alert-source { border: 1px solid #efb5b5; color: var(--red); background: var(--red-soft); }
+    .pond-metric.alert-source b { color: var(--red); }
+    .pond-metric.alert-source::before { content: '告警'; flex: 0 0 auto; order: 3; padding: 1px 4px; border-radius: 3px; color: var(--red); background: rgba(255,255,255,.72); font-size: 8px; font-weight: 850; }
     .pond-metric b { flex: 0 0 auto; color: var(--ink); font-size: 10px; }
     .pond-metric small { margin-left: 2px; color: var(--muted); font-size: 8px; font-weight: 500; }
     .pond-metric b.warning { color: var(--amber); }
@@ -751,14 +755,20 @@
 
       <div id="metric_grid" class="metric-grid"></div>
 
-      <div class="dashboard-grid">
-        <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="bot"></i>Agent 执行中心</h2><span class="section-meta">审批 · 任务 · 运行</span></div>
-          <div id="execution_kanban" class="kanban"></div>
-        </section>
+      <div class="monitor-stack">
         <section class="tool-panel">
           <div class="section-heading"><h2 class="section-title"><i data-lucide="droplets"></i>水质监控面板</h2><span id="water_meta" class="section-meta"></span></div>
           <div id="pond_grid" class="pond-grid"></div>
+        </section>
+
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="camera"></i>监控画面</h2><span id="camera_meta" class="section-meta"></span></div>
+          <div id="camera_observation_grid" class="camera-observation-grid"></div>
+        </section>
+
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="bot"></i>Agent 执行中心</h2><span class="section-meta">审批 · 任务 · 运行</span></div>
+          <div id="execution_kanban" class="kanban"></div>
         </section>
       </div>
 
@@ -828,14 +838,10 @@
           </div>
         </div>
       </section>
-      <div class="dashboard-grid" style="margin-top:14px">
+      <div class="dashboard-grid single-panel-grid" style="margin-top:14px">
         <section class="tool-panel">
           <div class="section-heading"><h2 class="section-title"><i data-lucide="book-open-check"></i>病害知识库</h2><span id="knowledge_meta" class="section-meta"></span></div>
           <div id="knowledge_grid" class="knowledge-grid"></div>
-        </section>
-        <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="camera"></i>水面 / 水下摄像头</h2><span id="camera_meta" class="section-meta"></span></div>
-          <div id="camera_observation_grid" class="camera-observation-grid"></div>
         </section>
       </div>
     </section>
@@ -1278,6 +1284,32 @@
       if (devices.some(item => !item.healthy)) return {tone:'warning', label:'关注'};
       return {tone:'', label:reading ? '正常' : '待接入'};
     }
+    function latestPondFinding(pondId) {
+      return [...(currentState.patrol_findings || [])]
+        .filter(item => item.pond_id === pondId)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+    }
+    function waterMetricAlertSource(metric, reading, pond, finding, incident) {
+      if (metricIsAbnormal(metric, reading, pond)) return true;
+      const sensorIds = new Set((currentState.sensors || [])
+        .filter(item => item.pond_id === pond.id && item.metric === metric.metric)
+        .map(item => item.id));
+      if ((currentState.sensor_health || []).some(item => sensorIds.has(item.sensor_id) && item.status !== 'ONLINE')) return true;
+      const metricNames = {
+        AMMONIA: ['氨氮'],
+        NITRITE: ['亚硝酸根离子', '亚硝酸盐'],
+        TURBIDITY: ['浊度'],
+        CHLOROPHYLL: ['叶绿素'],
+        DO: ['溶解氧', '溶氧'],
+        PH: ['pH', 'PH'],
+        TEMPERATURE: ['水温', '温度']
+      }[metric.metric] || [metric.label];
+      const evidenceText = [
+        finding?.status !== 'NORMAL' ? finding.summary : '',
+        ...(incident?.evidence || []).map(item => item.summary || '')
+      ].join('；');
+      return metricNames.some(name => evidenceText.includes(name));
+    }
     function renderPatrol() {
       const runs = currentState.agent_runs || [];
       const patrolRuns = runs.filter(run => String(run.goal).includes('巡查'));
@@ -1395,11 +1427,15 @@
         const health = (currentState.sensor_health || []).filter(item => sensorIds.has(item.sensor_id));
         const online = health.filter(item => item.status === 'ONLINE').length;
         const device = (currentState.devices || []).find(item => item.pond_id === pond.id);
+        const finding = latestPondFinding(pond.id);
+        const incident = activeIncident(pond.id);
         const metrics = waterMetrics.map(item => {
           const value = latestMetricReading(pond.id, item.metric);
-          const metricTone = metricIsAbnormal(item, value, pond) ? 'danger' : '';
+          const alertSource = waterMetricAlertSource(item, value, pond, finding, incident);
+          const metricTone = alertSource ? 'danger' : '';
           const unit = value && !item.hideUnit ? `<small>${escapeHtml(value.unit || '')}</small>` : '';
-          return `<span class="pond-metric">${item.label}<b class="${metricTone}">${value ? fmtNumber(value.value, item.digits) : '--'}${unit}</b></span>`;
+          const sourceTitle = alertSource ? `${item.label}是当前池塘告警来源` : '';
+          return `<span class="pond-metric${alertSource ? ' alert-source' : ''}"${sourceTitle ? ` title="${escapeHtml(sourceTitle)}"` : ''}>${escapeHtml(item.label)}<b class="${metricTone}">${value ? fmtNumber(value.value, item.digits) : '--'}${unit}</b></span>`;
         }).join('');
         const deviceStatus = !device ? '--' : device.healthy ? device.shadow_state : '离线';
         return `<article class="pond-card"><div class="pond-head"><span class="pond-name"><span class="dot ${condition.tone}"></span>　${escapeHtml(pond.id)}　<span style="font-weight:500;color:var(--muted)">${escapeHtml(pond.species || '')}</span></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}</div><div class="pond-metrics">${metrics}</div><div class="pond-foot"><span>传感器 ${online}/${sensors.length} 在线</span><span>增氧机 ${escapeHtml(deviceStatus)}</span></div></article>`;
@@ -1828,8 +1864,9 @@
         document.getElementById('case_evidence_list').innerHTML = evidence.join('') || '<div class="empty">等待案例证据</div>';
       }
       if (!selected) document.getElementById('case_description').textContent = '';
-      document.getElementById('knowledge_meta').textContent = `${(currentState.disease_knowledge || []).length} 篇参考条目`;
-      document.getElementById('knowledge_grid').innerHTML = (currentState.disease_knowledge || []).map(item => `<article class="knowledge-card"><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.species)} · ${escapeHtml(item.signs)}</p><p>可检索特征：${escapeHtml(item.visual_cues.join('、'))}</p></article>`).join('') || '<div class="empty">暂无知识条目</div>';
+      document.getElementById('case_sequence_meta').textContent = cases.length ? `传感器触发 1 个 · 多模态 ${cases.length} 个 · 案例运行后按真实 AgentRun 显示数据流` : '';
+    }
+    function renderCameraObservations() {
       const observations = currentState.camera_observations || [];
       document.getElementById('camera_meta').textContent = `${(currentState.cameras || []).length} 路摄像头 · ${observations.length} 条视觉观察`;
       const orderedObservations = [...observations].sort((a, b) => `${a.pond_id}-${a.camera_role}`.localeCompare(`${b.pond_id}-${b.camera_role}`));
@@ -1838,7 +1875,6 @@
         const image = item.image_url ? `<img class="camera-observation-image" src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.pond_id)} ${roleLabel}摄像头现场画面" loading="lazy">` : '';
         return `<article class="camera-observation"><div class="camera-observation-head"><b>${escapeHtml(item.pond_id)} · ${roleLabel}</b>${badge('NORMAL', `${Math.round(item.confidence * 100)}%`)}</div>${image}<p>${escapeHtml(item.summary)}</p><div class="camera-tags">${item.labels.map(label => `<span class="camera-tag">${escapeHtml(label)}</span>`).join('')}</div></article>`;
       }).join('') || '<div class="empty">暂无摄像头观察</div>';
-      document.getElementById('case_sequence_meta').textContent = cases.length ? `传感器触发 1 个 · 多模态 ${cases.length} 个 · 案例运行后按真实 AgentRun 显示数据流` : '';
     }
     function selectAnalysisCase(caseId) { selectedCaseId = caseId; renderCases(); iconRefresh(); }
     async function runAnalysisCase(caseId) {
@@ -1969,7 +2005,7 @@
       drawSensorTrendChart();
     }
     function renderAll() {
-      renderPatrol(); renderMetrics(); renderExecution(); renderWater(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics();
+      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics();
       document.getElementById('footer_status').textContent = '系统运行正常';
       requestAnimationFrame(drawCharts);
       iconRefresh();
