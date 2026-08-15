@@ -1,3 +1,4 @@
+import json
 import re
 import time
 from datetime import datetime, timedelta
@@ -9,7 +10,13 @@ from fishagent.agent_runtime.contracts import IncidentDecision
 from fishagent.agent_runtime.skills.device_control import DeviceControlSkill
 from fishagent.application.demo_data import DEMO_SENSOR_BY_METRIC, DEMO_SENSOR_SPECS, DEMO_WATER_SERIES
 from fishagent.application.policy import evaluate_action
-from fishagent.application.store import READING_QUALITY_LABELS, WATER_QUALITY_HIGH_LIMITS, WATER_QUALITY_RANGES, InMemoryStore
+from fishagent.application.reporting import build_daily_report, report_timezone
+from fishagent.application.store import (
+    READING_QUALITY_LABELS,
+    WATER_QUALITY_HIGH_LIMITS,
+    WATER_QUALITY_RANGES,
+    InMemoryStore,
+)
 from fishagent.domain.models import (
     ActionProposal,
     AgentRun,
@@ -18,6 +25,7 @@ from fishagent.domain.models import (
     ApprovalStatus,
     CameraSource,
     CommandStatus,
+    DailyReport,
     Device,
     DeviceCommand,
     Escalation,
@@ -30,6 +38,7 @@ from fishagent.domain.models import (
     ManualTask,
     PatrolFinding,
     Pond,
+    RestockOrder,
     RiskLevel,
     ScheduleDefinition,
     ScheduledJob,
@@ -47,6 +56,7 @@ from fishagent.domain.models import (
 from fishagent.infrastructure.gateways import DeviceGateway, SimulatorDeviceGateway
 from fishagent.infrastructure.persistence import PostgresStateRepository
 from fishagent.infrastructure.realtime import RedisEventPublisher
+from fishagent.infrastructure.weather import MockWeatherApi
 
 
 class _AnalysisCaseCancelled(RuntimeError):
@@ -77,6 +87,7 @@ class FishAgentSystem:
         self.agent_orchestrator = agent_orchestrator
         self.telemetry_publisher = telemetry_publisher
         self.agent_decision_timeout_seconds = max(1, int(agent_decision_timeout_seconds))
+        self.weather_api = MockWeatherApi()
         self.device_control_skill = DeviceControlSkill(self)
         self._job_lock = RLock()
         self._analysis_case_lock = RLock()
@@ -958,7 +969,6 @@ class FishAgentSystem:
             existing.earliest_at = due_at
             existing.latest_at = due_at + timedelta(seconds=60)
             return existing
-        pond = self.store.ponds[incident.pond_id]
         plan = VerificationPlan(
             id=new_id("verify-plan"),
             incident_id=incident.id,
@@ -1350,6 +1360,117 @@ class FishAgentSystem:
             auto_run=auto_run,
         )
 
+    def search_knowledge(self, query: str = "", species: str = "", metric: str = "") -> list[dict[str, Any]]:
+        """Perform deterministic keyword retrieval over the demo knowledge base."""
+        snapshot = self._snapshot(persist=False)
+        query_text = str(query or "").strip().lower()
+        terms = [term for term in re.split(r"[\s,，。；;、/]+", query_text) if term]
+        documents: list[dict[str, Any]] = []
+        for item in snapshot.get("knowledge_documents", []):
+            haystack = json.dumps(item, ensure_ascii=False).lower()
+            score = sum(2 for term in terms if term in haystack)
+            score += sum(1 for keyword in item.get("keywords", []) if keyword.lower() in query_text)
+            if metric and item.get("metric") == metric:
+                score += 3
+            if species and species in item.get("species", ""):
+                score += 1
+            documents.append({**item, "match_score": score})
+        documents.sort(key=lambda item: (-int(item.get("match_score", 0)), item.get("title", "")))
+        matched = [item for item in documents if item.get("match_score", 0) > 0]
+        selected = matched or documents
+        return selected[:8]
+
+    def inventory_snapshot(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": item.id,
+                "name": item.name,
+                "category": item.category,
+                "unit": item.unit,
+                "stock_quantity": item.stock_quantity,
+                "minimum_quantity": item.minimum_quantity,
+                "reorder_quantity": item.reorder_quantity,
+                "supplier": item.supplier,
+                "pond_id": item.pond_id,
+                "updated_at": item.updated_at.isoformat(),
+                "low_stock": item.stock_quantity <= item.minimum_quantity,
+            }
+            for item in self.store.inventory.values()
+        ]
+
+    def draft_restock_order(self, inventory_id: str, quantity: float, rationale: str, created_by: str = "action-planning-agent") -> RestockOrder:
+        item = self.store.inventory.get(inventory_id)
+        if item is None:
+            raise KeyError("inventory item does not exist")
+        if quantity <= 0:
+            raise ValueError("restock quantity must be positive")
+        order = RestockOrder(
+            id=new_id("restock"),
+            status="PENDING_CONFIRMATION",
+            supplier=item.supplier,
+            items=[
+                {
+                    "inventory_id": item.id,
+                    "name": item.name,
+                    "quantity": quantity,
+                    "unit": item.unit,
+                    "pond_id": item.pond_id,
+                }
+            ],
+            rationale=rationale,
+            created_by=created_by,
+        )
+        self.store.restock_orders[order.id] = order
+        self.store.emit(
+            "procurement.restock_draft.created",
+            "已生成补货草案，等待人工确认",
+            {"order_id": order.id, "inventory_id": inventory_id, "quantity": quantity},
+        )
+        self.snapshot()
+        return order
+
+    def approve_restock_order(self, order_id: str, approver: str) -> RestockOrder:
+        order = self.store.restock_orders[order_id]
+        if order.status != "PENDING_CONFIRMATION":
+            raise ValueError("补货单不在待确认状态")
+        order.status = "SUBMITTED"
+        order.approved_by = approver
+        order.approved_at = utcnow()
+        self.store.emit(
+            "procurement.restock_order.submitted",
+            "补货单已提交模拟采购接口",
+            {"order_id": order.id, "approver": approver},
+        )
+        self.snapshot()
+        return order
+
+    def generate_daily_report(self, report_date: Optional[str] = None) -> DailyReport:
+        generated_at = utcnow()
+        selected_date = datetime.now(report_timezone()).date()
+        if report_date:
+            try:
+                selected_date = datetime.fromisoformat(report_date).date()
+            except ValueError as exc:
+                raise ValueError("report_date must use YYYY-MM-DD") from exc
+        summary, data, html_content = build_daily_report(self._snapshot(persist=False), selected_date, generated_at)
+        report = DailyReport(
+            id=new_id("report"),
+            report_date=selected_date.isoformat(),
+            title="今日渔场巡检与操作建议报告 · %s" % selected_date.isoformat(),
+            generated_at=generated_at,
+            summary=summary,
+            html_content=html_content,
+            data=data,
+        )
+        self.store.daily_reports[report.id] = report
+        self.store.emit(
+            "daily_report.generated",
+            report.title,
+            {"report_id": report.id, "report_date": report.report_date},
+        )
+        self.snapshot()
+        return report
+
     def run_incident_flow(self, incident_id: str, risk_override: Optional[RiskLevel] = None) -> AgentRun:
         if self.agent_orchestrator is not None:
             return self._run_llm_incident_flow(incident_id)
@@ -1481,6 +1602,8 @@ class FishAgentSystem:
         )
         run.status = "COMPLETED"
         run.stop_reason = reason
+        if run.plan:
+            run.plan[-1]["status"] = "WAITING_HUMAN"
         self.store.emit("agent.run.completed", summary, {"run_id": run.id, "reason": reason}, correlation_id=run.id)
         return run
 
@@ -1507,6 +1630,11 @@ class FishAgentSystem:
         incident = self.store.incidents[incident_id]
         run = AgentRun(id=new_id("run"), goal="模型驱动处理 %s" % incident.title, incident_id=incident_id, status="RUNNING")
         run.budget["seconds"] = self.agent_decision_timeout_seconds
+        run.plan = [
+            {"id": "diagnose", "title": "诊断水质异常原因", "status": "RUNNING"},
+            {"id": "knowledge", "title": "检索行业知识并形成参考建议", "status": "PENDING"},
+            {"id": "confirm", "title": "高风险动作人工确认", "status": "PENDING"},
+        ]
         self.store.agent_runs[run.id] = run
         self.store.emit("agent.run.started", run.goal, {"run_id": run.id, "mode": "llm"}, correlation_id=run.id)
         incident.transition(IncidentStatus.INVESTIGATING)
@@ -1541,6 +1669,8 @@ class FishAgentSystem:
                 },
             )
         context = self._incident_llm_context(incident_id)
+        run.plan[0]["status"] = "COMPLETED"
+        run.plan[1]["status"] = "RUNNING"
         run.step(
             "supervisor-agent",
             "llm.request",
@@ -1600,6 +1730,8 @@ class FishAgentSystem:
             return self._llm_manual_stop(incident, run, "LLM_UNAVAILABLE", "模型不可用，已转人工确认")
         for agent, action, summary in result.steps:
             run.step(agent, action, summary)
+        run.plan[1]["status"] = "COMPLETED"
+        run.plan[2]["status"] = "RUNNING"
         for trace in getattr(result, "trace", []) or []:
             if not isinstance(trace, dict):
                 continue
@@ -1691,6 +1823,7 @@ class FishAgentSystem:
                 )
                 run.status = "WAITING_APPROVAL" if proposal_risk == RiskLevel.L2 else "COMPLETED"
                 run.stop_reason = "WAITING_APPROVAL" if proposal_risk == RiskLevel.L2 else "MANUAL_REQUIRED"
+                run.plan[-1]["status"] = "WAITING_HUMAN"
                 return run
             if decision.action != "EXECUTE" or risk != RiskLevel.L1:
                 return self._llm_manual_stop(incident, run, "LLM_ACTION_REQUIRES_REVIEW", decision.rationale)
@@ -1712,6 +1845,8 @@ class FishAgentSystem:
                 incident.transition(IncidentStatus.RESOLVED)
             run.status = "COMPLETED"
             run.stop_reason = "LLM_ACTION_EXECUTED"
+            if run.plan:
+                run.plan[-1]["status"] = "COMPLETED"
             self.store.emit("agent.run.completed", decision.rationale, {"run_id": run.id, "command_id": command.id}, correlation_id=run.id)
         else:
             self._escalate_command_failure(incident, run, command, "LLM_ACTION_EXECUTION_FAILED")
@@ -2462,6 +2597,51 @@ class FishAgentSystem:
                 }
                 for article in self.store.disease_knowledge.values()
             ],
+            "knowledge_documents": [
+                {
+                    "id": document.id,
+                    "title": document.title,
+                    "source": document.source,
+                    "version": document.version,
+                    "section": document.section,
+                    "content": document.content,
+                    "keywords": document.keywords,
+                    "species": document.species,
+                    "metric": document.metric,
+                    "reference_dose": document.reference_dose,
+                    "risk_notes": document.risk_notes,
+                    "withdrawal_period": document.withdrawal_period,
+                    "updated_at": document.updated_at.isoformat(),
+                }
+                for document in self.store.knowledge_documents.values()
+            ],
+            "inventory": self.inventory_snapshot(),
+            "restock_orders": [
+                {
+                    "id": order.id,
+                    "status": order.status,
+                    "supplier": order.supplier,
+                    "items": order.items,
+                    "rationale": order.rationale,
+                    "created_by": order.created_by,
+                    "created_at": order.created_at.isoformat(),
+                    "approved_by": order.approved_by,
+                    "approved_at": order.approved_at.isoformat() if order.approved_at else None,
+                }
+                for order in self.store.restock_orders.values()
+            ],
+            "daily_reports": [
+                {
+                    "id": report.id,
+                    "report_date": report.report_date,
+                    "title": report.title,
+                    "generated_at": report.generated_at.isoformat(),
+                    "summary": report.summary,
+                    "html_content": report.html_content,
+                    "data": report.data,
+                }
+                for report in list(self.store.daily_reports.values())[-30:]
+            ],
             "analysis_cases": [
                 {
                     "id": case.id,
@@ -2638,6 +2818,7 @@ class FishAgentSystem:
                         for step in run.steps
                     ],
                     "budget": run.budget,
+                    "plan": run.plan,
                 }
                 for run in self.store.agent_runs.values()
             ],

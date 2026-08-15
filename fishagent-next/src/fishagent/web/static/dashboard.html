@@ -99,7 +99,7 @@
     }
     .primary-nav {
       display: grid;
-      grid-template-columns: repeat(9, minmax(0, 1fr));
+      grid-template-columns: repeat(10, minmax(0, 1fr));
       background: var(--surface);
       border-bottom: 1px solid var(--line);
     }
@@ -119,6 +119,13 @@
     .nav-button:hover { color: var(--ink); background: var(--surface-alt); }
     .nav-button.active { color: var(--brand-dark); border-color: var(--brand); }
     .nav-button svg { width: 17px; height: 17px; }
+    .report-layout { display: grid; grid-template-columns: minmax(220px, .32fr) minmax(0, 1fr); gap: 14px; }
+    .report-history { display: grid; gap: 8px; align-content: start; max-height: 680px; overflow: auto; }
+    .report-history-item { width: 100%; text-align: left; padding: 11px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+    .report-history-item.active { border-color: var(--brand); background: var(--brand-soft); }
+    .report-history-item strong, .report-history-item span { display: block; }
+    .report-history-item span { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .report-preview { width: 100%; min-height: 720px; border: 1px solid var(--line); background: #f5f7fb; }
     .app-main { width: min(1500px, 100%); margin: 0 auto; padding: 22px; }
     .view { display: none; }
     .view.active { display: block; }
@@ -676,7 +683,7 @@
     }
     .system-ok { display: flex; align-items: center; gap: 6px; }
     @media (max-width: 1080px) {
-      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout, .case-flow-layout { grid-template-columns: 1fr; }
+      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout, .case-flow-layout, .report-layout { grid-template-columns: 1fr; }
       .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .case-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -688,7 +695,7 @@
       .brand-subtitle { display: none; }
       .brand { min-width: 0; }
       .brand-name { font-size: 16px; }
-      .primary-nav { overflow-x: auto; grid-template-columns: repeat(9, minmax(120px, 1fr)); }
+      .primary-nav { overflow-x: auto; grid-template-columns: repeat(10, minmax(120px, 1fr)); }
       .nav-button { min-height: 44px; }
       .app-main { padding: 12px; }
       .patrol-panel, .tool-panel { padding: 12px; }
@@ -743,6 +750,7 @@
     <button class="nav-button" type="button" data-view="work" onclick="switchView('work')"><i data-lucide="clipboard-check"></i><span>审批任务</span></button>
     <button class="nav-button" type="button" data-view="schedules" onclick="switchView('schedules')"><i data-lucide="calendar-clock"></i><span>调度中心</span></button>
     <button class="nav-button" type="button" data-view="audit" onclick="switchView('audit')"><i data-lucide="scroll-text"></i><span>系统审计</span></button>
+    <button class="nav-button" type="button" data-view="reports" onclick="switchView('reports')"><i data-lucide="file-chart-column"></i><span>每日报告</span></button>
   </nav>
 
   <main class="app-main">
@@ -940,6 +948,19 @@
         </section>
       </div>
     </section>
+
+    <section id="view_reports" class="view">
+      <section class="tool-panel">
+        <div class="section-heading">
+          <div><h2 class="section-title"><i data-lucide="file-chart-column"></i>每日报告</h2><p class="eyebrow">保留历史版本，趋势、知识建议、库存和 Agent 操作日志可独立下载</p></div>
+          <div class="actions"><button class="button" type="button" onclick="generateDailyReport()"><i data-lucide="file-plus-2"></i>生成今日报告</button><a id="report_download" class="button secondary" href="#" download hidden><i data-lucide="download"></i>下载 HTML</a></div>
+        </div>
+      </section>
+      <div class="report-layout" style="margin-top:14px">
+        <section class="tool-panel"><div class="section-heading"><h3 class="section-title"><i data-lucide="history"></i>历史报告</h3><span id="report_meta" class="section-meta">0 份</span></div><div id="report_history" class="report-history"></div></section>
+        <section class="tool-panel"><div class="section-heading"><h3 id="report_title" class="section-title">请选择报告</h3><span id="report_generated_at" class="section-meta"></span></div><p id="report_summary" class="message"></p><iframe id="report_preview" class="report-preview" title="每日报告预览"></iframe></section>
+      </div>
+    </section>
   </main>
 
   <footer class="app-footer"><span>© 2026 智渔 Agent 2.0 · 智能监控与闭环处置系统</span><span class="system-ok"><span class="dot"></span><span id="footer_status">系统运行正常</span></span></footer>
@@ -1009,6 +1030,7 @@
     let lastPatrolRunId = null;
     let selectedTrendMetric = 'DO';
     let trendWindowHours = 12;
+    let selectedReportId = null;
     const PATROL_REVEAL_INTERVAL_MS = 700;
     const demoCatalog = [
       ['success', '低溶氧处置中 · 待复核', '传感器阈值', '增氧机开启 → MQTT 确认 → 等待自动巡塘复核'],
@@ -1325,7 +1347,7 @@
         TEMPERATURE: ['水温', '温度']
       }[metric.metric] || [metric.label];
       const evidenceText = [
-        finding?.status !== 'NORMAL' ? abnormalEvidenceText(finding.summary) : '',
+        finding && finding.status !== 'NORMAL' ? abnormalEvidenceText(finding.summary) : '',
         ...(incident?.evidence || []).map(item => abnormalEvidenceText(item.summary))
       ].join('；');
       return metricNames.some(name => evidenceText.includes(name));
@@ -1890,6 +1912,32 @@
       document.getElementById('event_meta').textContent = `${currentState.events?.length || 0} 条事件`;
       document.getElementById('raw_state').textContent = JSON.stringify(currentState, null, 2);
     }
+    function renderReports() {
+      const reports = [...(currentState.daily_reports || [])].reverse();
+      if (!selectedReportId || !reports.some(item => item.id === selectedReportId)) selectedReportId = reports[0]?.id || null;
+      const selected = reports.find(item => item.id === selectedReportId) || reports[0];
+      document.getElementById('report_meta').textContent = `${reports.length} 份`;
+      document.getElementById('report_history').innerHTML = reports.length ? reports.map(item => `<button class="report-history-item ${item.id === selected?.id ? 'active' : ''}" type="button" onclick="selectReport('${item.id}')"><strong>${escapeHtml(item.report_date)} · ${escapeHtml(item.title)}</strong><span>${escapeHtml(item.summary || '')}</span><span>生成于 ${fmtDate(item.generated_at)}</span></button>`).join('') : '<div class="empty">尚未生成报告</div>';
+      const title = document.getElementById('report_title');
+      const generated = document.getElementById('report_generated_at');
+      const summary = document.getElementById('report_summary');
+      const preview = document.getElementById('report_preview');
+      const download = document.getElementById('report_download');
+      if (!selected) {
+        title.textContent = '请选择报告'; generated.textContent = ''; summary.textContent = '生成后将在这里保留报告历史和独立 HTML 预览。'; preview.srcdoc = '<p style="font-family:system-ui;padding:24px;color:#68748a">暂无报告</p>'; download.hidden = true;
+        return;
+      }
+      title.textContent = selected.title;
+      generated.textContent = `生成于 ${fmtDate(selected.generated_at)}`;
+      summary.textContent = selected.summary || '';
+      preview.srcdoc = selected.html_content || '<p style="font-family:system-ui;padding:24px;color:#68748a">报告内容为空</p>';
+      download.href = `/api/v1/reports/${encodeURIComponent(selected.id)}/download`;
+      download.hidden = false;
+    }
+    function selectReport(reportId) { selectedReportId = reportId; renderReports(); iconRefresh(); }
+    async function generateDailyReport() {
+      try { const result = await api('/api/v1/reports/generate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}); selectedReportId = result.report?.id || null; showToast('每日报告已生成'); await refresh(); switchView('reports'); } catch (error) { showToast(`报告生成失败：${error.message}`, true); }
+    }
     let selectedCaseId = null;
     function renderCases() {
       const cases = [...(currentState.analysis_cases || [])].sort((a,b) => a.sequence - b.sequence);
@@ -2064,7 +2112,7 @@
       drawSensorTrendChart();
     }
     function renderAll() {
-      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics();
+      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics(); renderReports();
       document.getElementById('footer_status').textContent = '系统运行正常';
       requestAnimationFrame(drawCharts);
       iconRefresh();

@@ -265,6 +265,13 @@ class CrewAIOrchestrator:
             self._record_tool_trace(trace, "patrol-analysis-agent", "get_weather_context", {"pond": pond}, result)
             return result
 
+        @self._tool("get_weather_forecast")
+        def get_weather_forecast(pond: str = pond_id or "", horizon: str = "明日") -> str:
+            """调用模拟气象 API 获取指定池塘的短时天气预测，只读工具。"""
+            result = json.dumps(self.system.weather_api.forecast(pond, horizon), ensure_ascii=False)
+            self._record_tool_trace(trace, "weather-analysis-agent", "get_weather_forecast", {"pond": pond, "horizon": horizon}, result)
+            return result
+
         @self._tool("get_camera_observations")
         def get_camera_observations(pond: str = pond_id or "") -> str:
             """读取水面和水下摄像头的结构化观察结果，只读工具。"""
@@ -277,17 +284,23 @@ class CrewAIOrchestrator:
         @self._tool("search_disease_knowledge")
         def search_disease_knowledge(query: str = "") -> str:
             """检索病害知识库，只读工具；不得替代人工确诊或自行投药。"""
-            snapshot = self.system.snapshot()
-            articles = snapshot.get("disease_knowledge", [])
-            terms = [term for term in query.lower().split() if term]
-            if terms:
-                articles = [
-                    article
-                    for article in articles
-                    if any(term in json.dumps(article, ensure_ascii=False).lower() for term in terms)
-                ]
+            articles = self.system.search_knowledge(query)
             result = json.dumps(articles, ensure_ascii=False)
             self._record_tool_trace(trace, "vision-analysis-agent", "search_disease_knowledge", {"query": query}, result)
+            return result
+
+        @self._tool("search_knowledge_base")
+        def search_knowledge_base(query: str = "", species: str = "", metric: str = "") -> str:
+            """检索行业知识库并返回来源、参考边界和风险提示。"""
+            documents = self.system.search_knowledge(query, species, metric)
+            result = json.dumps(documents, ensure_ascii=False)
+            self._record_tool_trace(
+                trace,
+                "knowledge-retrieval-agent",
+                "search_knowledge_base",
+                {"query": query, "species": species, "metric": metric},
+                result,
+            )
             return result
 
         @self._tool("propose_action")
@@ -311,6 +324,39 @@ class CrewAIOrchestrator:
             )
             return result
 
+        @self._tool("check_inventory")
+        def check_inventory(query: str = "", category: str = "") -> str:
+            """读取模拟库存和补货线，只读工具。"""
+            items = self.system.inventory_snapshot()
+            lowered = query.lower()
+            if query or category:
+                items = [
+                    item
+                    for item in items
+                    if (not query or lowered in item["name"].lower() or lowered in item["category"].lower())
+                    and (not category or item["category"] == category)
+                ]
+            result = json.dumps(items, ensure_ascii=False)
+            self._record_tool_trace(trace, "procurement-agent", "check_inventory", {"query": query, "category": category}, result)
+            return result
+
+        @self._tool("draft_restock_order")
+        def draft_restock_order(inventory_id: str, quantity: float, rationale: str) -> str:
+            """生成模拟补货草案；不会直接下单，必须人工确认。"""
+            order = self.system.draft_restock_order(inventory_id, quantity, rationale)
+            result = json.dumps(
+                {
+                    "id": order.id,
+                    "status": order.status,
+                    "supplier": order.supplier,
+                    "items": order.items,
+                    "next": "等待人工确认后提交模拟采购接口",
+                },
+                ensure_ascii=False,
+            )
+            self._record_tool_trace(trace, "procurement-agent", "draft_restock_order", {"inventory_id": inventory_id, "quantity": quantity}, result)
+            return result
+
         return [
             get_pond_snapshot,
             get_device_shadow_state,
@@ -319,6 +365,10 @@ class CrewAIOrchestrator:
             get_camera_observations,
             search_disease_knowledge,
             propose_action,
+            get_weather_forecast,
+            search_knowledge_base,
+            check_inventory,
+            draft_restock_order,
         ]
 
     @staticmethod
@@ -384,7 +434,7 @@ class CrewAIOrchestrator:
             goal="关联池塘、设备影子状态和活动事件，识别证据缺口",
             backstory="负责跨资产核对，不执行动作。",
             llm=llm,
-            tools=[tools[1], tools[2], tools[5]],
+            tools=[tools[1], tools[2], tools[5], tools[7], tools[9]],
             allow_delegation=False,
             max_iter=member_iterations,
             max_retry_limit=retry_limit,
@@ -395,7 +445,7 @@ class CrewAIOrchestrator:
             goal="分析水面、水下摄像头和天气上下文，检索病害知识并给出风险判断",
             backstory="只使用结构化视觉观察和知识库证据；不得自行确诊、投药或越过人工复核边界。",
             llm=llm,
-            tools=[tools[3], tools[4], tools[5]],
+            tools=[tools[3], tools[4], tools[7], tools[8]],
             allow_delegation=False,
             max_iter=member_iterations,
             max_retry_limit=retry_limit,
@@ -406,7 +456,7 @@ class CrewAIOrchestrator:
             goal="提出带风险、依据和复核条件的可审计动作建议",
             backstory="只提出建议，不调用任何设备写接口。",
             llm=llm,
-            tools=[tools[-1]],
+            tools=[tools[6], tools[8], tools[9], tools[10]],
             allow_delegation=False,
             max_iter=member_iterations,
             max_retry_limit=retry_limit,
@@ -443,6 +493,8 @@ class CrewAIOrchestrator:
                 "用户目标：{goal}\n池塘：{pond_id}\n"
                 "优先基于运行上下文中的新鲜证据作出决定，仅在关键证据缺失时调用工具；"
                 "自主选择必要的传感器、巡查、视觉病害和行动规划专职 Agent，避免重复调查。"
+                "任务规划必须按顺序覆盖：1. 诊断水质异常原因；2. 检索知识库，给出参考用量边界和风险提示而不是直接处方；3. 对用药或高风险动作提交人工确认。"
+                "天气判断应调用 get_weather_forecast，库存不足时调用 check_inventory，补货只能调用 draft_restock_order 生成待确认草案。"
                 "最多 8 次委派和 20 次工具调用。"
                 "最终严格输出一个 JSON 对象，字段只能是 action、device_id、target_state、risk、rationale、"
                 "verification_delay_seconds、evidence_refs；不要输出 delegated_agents、evidence_summary、"

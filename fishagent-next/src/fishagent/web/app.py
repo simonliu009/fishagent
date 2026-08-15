@@ -991,6 +991,82 @@ async def agent_chat_stream(request: Request, payload: AgentChatPayload) -> Stre
     )
 
 
+def report_payload(item: dict[str, Any], include_html: bool = False) -> dict[str, Any]:
+    payload = {
+        "id": item["id"],
+        "report_date": item.get("report_date", ""),
+        "title": item.get("title", "每日报告"),
+        "generated_at": item.get("generated_at"),
+        "summary": item.get("summary", ""),
+        "data": item.get("data", {}),
+    }
+    if include_html:
+        payload["html_content"] = item.get("html_content", "")
+    return payload
+
+
+@app.get("/api/v1/inventory")
+async def inventory(request: Request) -> dict:
+    authenticate(request, request.url.path)
+    return {"inventory": SYSTEM.read_snapshot().get("inventory", [])}
+
+
+@app.get("/api/v1/restock-orders")
+async def restock_orders(request: Request) -> dict:
+    authenticate(request, request.url.path)
+    return {"restock_orders": SYSTEM.read_snapshot().get("restock_orders", [])}
+
+
+@app.post("/api/v1/restock-orders/{order_id}/approve")
+async def approve_restock_order(request: Request, order_id: str, payload: JsonPayload) -> Any:
+    session = authenticate(request, request.url.path, write=True)
+    data = payload.model_dump()
+    try:
+        order = SYSTEM.approve_restock_order(order_id, str(data.get("approver") or getattr(session, "username", "现场负责人")))
+    except (KeyError, ValueError) as exc:
+        return problem(409, "Restock approval unavailable", str(exc))
+    return encoded_response(200, {"restock_order": order.__dict__, "state": SYSTEM.snapshot()})
+
+
+@app.get("/api/v1/reports")
+async def reports(request: Request) -> dict:
+    authenticate(request, request.url.path)
+    items = SYSTEM.read_snapshot().get("daily_reports", [])
+    return {"reports": [report_payload(item) for item in reversed(items)]}
+
+
+@app.post("/api/v1/reports/generate")
+async def generate_report(request: Request, payload: JsonPayload) -> Any:
+    authenticate(request, request.url.path, write=True)
+    try:
+        report = SYSTEM.generate_daily_report(payload.model_dump().get("report_date"))
+    except ValueError as exc:
+        return problem(400, "Invalid report date", str(exc))
+    state = SYSTEM.snapshot()
+    item = next(item for item in state["daily_reports"] if item["id"] == report.id)
+    return encoded_response(201, {"report": report_payload(item, include_html=True), "state": state})
+
+
+@app.get("/api/v1/reports/{report_id}/download")
+async def download_report(request: Request, report_id: str) -> Response:
+    authenticate(request, request.url.path)
+    item = state_item("daily_reports", report_id)
+    if item is None:
+        return problem(404, "Report not found")
+    response = HTMLResponse(content=item.get("html_content", ""))
+    response.headers["Content-Disposition"] = 'attachment; filename="fishagent-daily-report-%s.html"' % report_id
+    return response
+
+
+@app.get("/api/v1/reports/{report_id}")
+async def report_detail(request: Request, report_id: str) -> Any:
+    authenticate(request, request.url.path)
+    item = state_item("daily_reports", report_id)
+    if item is None:
+        return problem(404, "Report not found")
+    return {"report": report_payload(item, include_html=True)}
+
+
 @app.get("/api/v1/{collection}")
 async def list_assets(request: Request, collection: str) -> Any:
     authenticate(request, request.url.path)

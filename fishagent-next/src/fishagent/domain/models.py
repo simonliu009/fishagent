@@ -237,6 +237,61 @@ class DiseaseKnowledgeArticle:
 
 
 @dataclass
+class KnowledgeDocument:
+    id: str
+    title: str
+    source: str
+    version: str
+    section: str
+    content: str
+    keywords: List[str] = field(default_factory=list)
+    species: str = ""
+    metric: str = ""
+    reference_dose: str = ""
+    risk_notes: str = ""
+    withdrawal_period: str = ""
+    updated_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class InventoryItem:
+    id: str
+    name: str
+    category: str
+    unit: str
+    stock_quantity: float
+    minimum_quantity: float
+    reorder_quantity: float
+    supplier: str
+    pond_id: Optional[str] = None
+    updated_at: datetime = field(default_factory=utcnow)
+
+
+@dataclass
+class RestockOrder:
+    id: str
+    status: str
+    supplier: str
+    items: List[Dict[str, Any]] = field(default_factory=list)
+    rationale: str = ""
+    created_by: str = "action-planning-agent"
+    created_at: datetime = field(default_factory=utcnow)
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+
+
+@dataclass
+class DailyReport:
+    id: str
+    report_date: str
+    title: str
+    generated_at: datetime
+    summary: str
+    html_content: str
+    data: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class AnalysisCase:
     id: str
     sequence: int
@@ -466,6 +521,7 @@ class AgentRun:
     steps: List[AgentStep] = field(default_factory=list)
     delegated_agents: List[str] = field(default_factory=list)
     budget: Dict[str, int] = field(default_factory=lambda: {"delegations": 8, "tool_calls": 20, "seconds": 300})
+    plan: List[Dict[str, Any]] = field(default_factory=list)
 
     def step(self, agent: str, action: str, summary: str, details: Optional[Dict[str, Any]] = None) -> None:
         if agent not in self.delegated_agents:

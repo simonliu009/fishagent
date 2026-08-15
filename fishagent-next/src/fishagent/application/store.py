@@ -5,6 +5,8 @@ from fishagent.application.demo_data import (
     DEMO_ANALYSIS_CASES,
     DEMO_CAMERA_OBSERVATIONS,
     DEMO_DISEASE_KNOWLEDGE,
+    DEMO_INVENTORY,
+    DEMO_KNOWLEDGE_DOCUMENTS,
     DEMO_SENSOR_SPECS,
     DEMO_WEATHER,
 )
@@ -19,6 +21,7 @@ from fishagent.domain.models import (
     CameraObservation,
     CameraSource,
     CommandStatus,
+    DailyReport,
     Device,
     DeviceCommand,
     DiseaseKnowledgeArticle,
@@ -28,10 +31,13 @@ from fishagent.domain.models import (
     HealthStatus,
     Incident,
     IncidentStatus,
+    InventoryItem,
     JobStatus,
+    KnowledgeDocument,
     ManualTask,
     PatrolFinding,
     Pond,
+    RestockOrder,
     RiskLevel,
     ScheduleDefinition,
     ScheduledJob,
@@ -79,6 +85,10 @@ class InMemoryStore:
         self.weather_observations: Dict[str, WeatherObservation] = {}
         self.camera_observations: Dict[str, CameraObservation] = {}
         self.disease_knowledge: Dict[str, DiseaseKnowledgeArticle] = {}
+        self.knowledge_documents: Dict[str, KnowledgeDocument] = {}
+        self.inventory: Dict[str, InventoryItem] = {}
+        self.restock_orders: Dict[str, RestockOrder] = {}
+        self.daily_reports: Dict[str, DailyReport] = {}
         self.analysis_cases: Dict[str, AnalysisCase] = {}
         self.readings: List[SensorReading] = []
         self.incidents: Dict[str, Incident] = {}
@@ -111,6 +121,10 @@ class InMemoryStore:
         self.weather_observations.clear()
         self.camera_observations.clear()
         self.disease_knowledge.clear()
+        self.knowledge_documents.clear()
+        self.inventory.clear()
+        self.restock_orders.clear()
+        self.daily_reports.clear()
         self.analysis_cases.clear()
         self.readings.clear()
         self.incidents.clear()
@@ -235,6 +249,36 @@ class InMemoryStore:
                 visual_cues=list(article_data["visual_cues"]),
                 recommended_actions=list(article_data["recommended_actions"]),
                 severity=str(article_data["severity"]),
+            )
+        for document in DEMO_KNOWLEDGE_DOCUMENTS:
+            document_data = cast(dict[str, Any], document)
+            self.knowledge_documents[str(document_data["id"])] = KnowledgeDocument(
+                id=str(document_data["id"]),
+                title=str(document_data["title"]),
+                source=str(document_data["source"]),
+                version=str(document_data["version"]),
+                section=str(document_data["section"]),
+                content=str(document_data["content"]),
+                keywords=list(document_data.get("keywords", [])),
+                species=str(document_data.get("species", "")),
+                metric=str(document_data.get("metric", "")),
+                reference_dose=str(document_data.get("reference_dose", "")),
+                risk_notes=str(document_data.get("risk_notes", "")),
+                withdrawal_period=str(document_data.get("withdrawal_period", "")),
+            )
+        for inventory in DEMO_INVENTORY:
+            inventory_data = cast(dict[str, Any], inventory)
+            inventory_id = str(inventory_data["id"])
+            self.inventory[inventory_id] = InventoryItem(
+                id=inventory_id,
+                name=str(inventory_data["name"]),
+                category=str(inventory_data["category"]),
+                unit=str(inventory_data["unit"]),
+                stock_quantity=float(inventory_data["stock_quantity"]),
+                minimum_quantity=float(inventory_data["minimum_quantity"]),
+                reorder_quantity=float(inventory_data["reorder_quantity"]),
+                supplier=str(inventory_data["supplier"]),
+                pond_id=inventory_data.get("pond_id"),
             )
         for observation in DEMO_CAMERA_OBSERVATIONS:
             observation_data = cast(dict[str, Any], observation)
@@ -520,6 +564,65 @@ class InMemoryStore:
             )
             for item in payload.get("disease_knowledge", [])
         }
+        self.knowledge_documents = {
+            item["id"]: KnowledgeDocument(
+                id=item["id"],
+                title=item["title"],
+                source=item.get("source", ""),
+                version=item.get("version", ""),
+                section=item.get("section", ""),
+                content=item.get("content", ""),
+                keywords=item.get("keywords", []),
+                species=item.get("species", ""),
+                metric=item.get("metric", ""),
+                reference_dose=item.get("reference_dose", ""),
+                risk_notes=item.get("risk_notes", ""),
+                withdrawal_period=item.get("withdrawal_period", ""),
+                updated_at=self._datetime(item.get("updated_at")) or utcnow(),
+            )
+            for item in payload.get("knowledge_documents", [])
+        }
+        self.inventory = {
+            item["id"]: InventoryItem(
+                id=item["id"],
+                name=item["name"],
+                category=item.get("category", ""),
+                unit=item.get("unit", ""),
+                stock_quantity=float(item.get("stock_quantity", 0)),
+                minimum_quantity=float(item.get("minimum_quantity", 0)),
+                reorder_quantity=float(item.get("reorder_quantity", 0)),
+                supplier=item.get("supplier", ""),
+                pond_id=item.get("pond_id"),
+                updated_at=self._datetime(item.get("updated_at")) or utcnow(),
+            )
+            for item in payload.get("inventory", [])
+        }
+        self.restock_orders = {
+            item["id"]: RestockOrder(
+                id=item["id"],
+                status=item.get("status", "PENDING_CONFIRMATION"),
+                supplier=item.get("supplier", ""),
+                items=item.get("items", []),
+                rationale=item.get("rationale", ""),
+                created_by=item.get("created_by", "action-planning-agent"),
+                created_at=self._datetime(item.get("created_at")) or utcnow(),
+                approved_by=item.get("approved_by"),
+                approved_at=self._datetime(item.get("approved_at")),
+            )
+            for item in payload.get("restock_orders", [])
+        }
+        self.daily_reports = {
+            item["id"]: DailyReport(
+                id=item["id"],
+                report_date=item["report_date"],
+                title=item.get("title", "每日报告"),
+                generated_at=self._datetime(item.get("generated_at")) or utcnow(),
+                summary=item.get("summary", ""),
+                html_content=item.get("html_content", ""),
+                data=item.get("data", {}),
+            )
+            for item in payload.get("daily_reports", [])
+        }
         self.analysis_cases = {
             item["id"]: AnalysisCase(
                 id=item["id"],
@@ -701,6 +804,7 @@ class InMemoryStore:
                 stop_reason=item.get("stop_reason"),
                 delegated_agents=item.get("delegated_agents", []),
                 budget=item.get("budget", {"delegations": 8, "tool_calls": 20, "seconds": 300}),
+                plan=item.get("plan", []),
             )
             run.steps = [
                 AgentStep(

@@ -127,6 +127,88 @@ DEMO_DISEASE_KNOWLEDGE = (
     },
 )
 
+# Mock excerpts are deliberately labelled as references. They help the Agent
+# demonstrate retrieval and safety review without pretending to be a clinical
+# prescription or replacing the product label and an aquaculture specialist.
+DEMO_KNOWLEDGE_DOCUMENTS = (
+    {
+        "id": "kb-water-quality-standard",
+        "title": "水产养殖水质调控技术规范：溶解氧与复核",
+        "source": "《水质调控技术规范》（模拟摘录）",
+        "version": "2026.1-demo",
+        "section": "溶解氧异常处置",
+        "content": "溶解氧异常时应先核对传感器质量、设备状态和人工观察，再采取增氧措施；设备启动后应等待一段时间再复核，复核达标后再停机。",
+        "keywords": ["溶解氧", "低溶氧", "增氧", "复核", "水质"],
+        "species": "鱼类、对虾",
+        "metric": "DO",
+        "reference_dose": "不涉及用药；增氧机运行时长和停机条件需按现场复核结果确定。",
+        "risk_notes": "读数质量为不可信或设备状态异常时，不应仅凭单点数据停机；需人工复核。",
+        "withdrawal_period": "不适用",
+    },
+    {
+        "id": "kb-ammonia-control",
+        "title": "养殖池氨氮异常的参考处置",
+        "source": "《水产养殖病害防治手册》（模拟摘录）",
+        "version": "2026.1-demo",
+        "section": "水质异常与底质管理",
+        "content": "氨氮升高应结合 pH、水温、亚硝酸根离子和底部有机负荷综合判断，必要时复测并减少额外负荷。",
+        "keywords": ["氨氮", "氨氮超标", "pH", "水温", "底质", "复测"],
+        "species": "鱼类、对虾",
+        "metric": "AMMONIA",
+        "reference_dose": "演示参考：不得由 Agent 直接给出投药量；任何产品用量必须按产品标签、水体体积和专业人员复核结果计算。",
+        "risk_notes": "pH 和水温会影响氨的毒性判断；错误投加可能造成二次应激。",
+        "withdrawal_period": "如涉及药品，必须记录产品标签要求的休药期。",
+    },
+    {
+        "id": "kb-disease-review",
+        "title": "病害疑似事件的取样与用药安全",
+        "source": "《水产养殖病害防治手册》（模拟摘录）",
+        "version": "2026.1-demo",
+        "section": "病害诊断与人工确认",
+        "content": "视觉或行为异常只能作为疑似证据，应采样、镜检或由养殖专家确认；用药前需核对对象、适应证、剂量、休药期和环境风险。",
+        "keywords": ["浮头", "水色", "病害", "取样", "镜检", "用药", "休药期"],
+        "species": "鱼类、对虾",
+        "metric": "",
+        "reference_dose": "演示参考：不提供未经确认的药物剂量；待人工确认产品和适应证后按标签核算。",
+        "risk_notes": "疑似病害不能直接等同于确诊；对虾和鱼类的适用药品、风险和休药要求不同。",
+        "withdrawal_period": "必须以具体产品标签和当地监管要求为准。",
+    },
+)
+
+DEMO_INVENTORY = (
+    {
+        "id": "inventory-feed-bass",
+        "name": "加州鲈膨化饲料",
+        "category": "饲料",
+        "unit": "kg",
+        "stock_quantity": 420.0,
+        "minimum_quantity": 300.0,
+        "reorder_quantity": 600.0,
+        "supplier": "渔丰供应链（模拟）",
+    },
+    {
+        "id": "inventory-shrimp-feed",
+        "name": "对虾标粗配合饲料",
+        "category": "饲料",
+        "unit": "kg",
+        "stock_quantity": 86.0,
+        "minimum_quantity": 120.0,
+        "reorder_quantity": 300.0,
+        "supplier": "海源饲料（模拟）",
+        "pond_id": "B-04",
+    },
+    {
+        "id": "inventory-water-test",
+        "name": "便携式水质复核试剂盒",
+        "category": "检测耗材",
+        "unit": "盒",
+        "stock_quantity": 3.0,
+        "minimum_quantity": 5.0,
+        "reorder_quantity": 10.0,
+        "supplier": "清源检测（模拟）",
+    },
+)
+
 DEMO_CAMERA_OBSERVATIONS = (
     {
         "id": "obs-surface-b01-floating-head",
