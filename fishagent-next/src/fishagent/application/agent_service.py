@@ -707,6 +707,14 @@ class FishAgentSystem:
             if active and not reasons:
                 reasons.append("存在未关闭异常事件")
             status = "NEEDS_ATTENTION" if reasons or active else "NORMAL"
+            recommendations = self._patrol_recommendations(
+                pond,
+                latest_readings,
+                available,
+                reasons,
+                unhealthy_sensors,
+                unhealthy_devices,
+            )
             run.step("sensor-monitor-agent", "inspect_pond", "%s：%s" % (pond.name, summary))
             finding = PatrolFinding(
                 id=new_id("finding"),
@@ -720,8 +728,15 @@ class FishAgentSystem:
                     "；异常：%s" % "、".join(reasons) if reasons else "",
                 ),
                 evidence_refs=[reading.source_event_id for reading in available],
+                recommendations=recommendations,
             )
             self.store.patrol_findings[finding.id] = finding
+            run.step(
+                "patrol-analysis-agent",
+                "patrol.advice",
+                "已形成巡查建议：%s" % "；".join(recommendations),
+                details={"kind": "patrol_advice", "pond_id": pond.id, "recommendations": recommendations},
+            )
             if status == "NEEDS_ATTENTION" and active is None:
                 active = Incident(
                     id=new_id("inc"),
@@ -843,6 +858,42 @@ class FishAgentSystem:
             (device for device in self.store.devices.values() if device.pond_id == pond_id and device.capability == "aeration"),
             None,
         )
+
+    def _patrol_recommendations(
+        self,
+        pond: Pond,
+        latest_readings: list[Optional[SensorReading]],
+        available: list[SensorReading],
+        reasons: list[str],
+        unhealthy_sensors: list[SensorHealth],
+        unhealthy_devices: list[Device],
+    ) -> list[str]:
+        """Give every patrol finding an actionable next step, including normal ones."""
+        latest_do = next((reading for reading in available if reading.metric == "DO"), None)
+        if reasons:
+            recommendations: list[str] = []
+            if latest_do and latest_do.value < pond.dissolved_oxygen_min:
+                recommendations.append("优先复核溶氧读数和增氧机状态，按处置流程执行后等待下一次巡塘复核。")
+            if any("高于安全线" in reason or "超出安全范围" in reason for reason in reasons):
+                recommendations.append("对超限指标安排现场复测，结合投喂、换水和天气记录研判，复测前不要直接投药。")
+            if unhealthy_sensors:
+                recommendations.append("现场检查异常传感器的供电、通讯和校准状态，恢复可信读数后再作进一步调整。")
+            if unhealthy_devices:
+                recommendations.append("现场检查离线设备的供电、网络和运行状态，设备恢复前保留人工处置边界。")
+            if not recommendations:
+                recommendations.append("保持当前事件跟踪，补充现场证据后再决定是否调整设备或作业。")
+            return recommendations
+
+        recommendations = ["当前各项指标均在安全范围内，保持现有设备和养殖策略，不额外下发控制指令。"]
+        if latest_do:
+            do_margin = latest_do.value - pond.dissolved_oxygen_min
+            if do_margin <= 0.8:
+                recommendations.append("溶氧距安全线 %.2f mg/L，建议重点观察夜间和清晨趋势，下一次巡塘优先复核。" % do_margin)
+            else:
+                recommendations.append("建议继续观察溶氧、pH 和水温趋势，重点关注天气与投喂变化带来的波动。")
+        if len(available) == len(latest_readings):
+            recommendations.append("建议记录本轮天气、投喂和换水情况，供下一轮 Agent 巡查进行趋势对比。")
+        return recommendations
 
     def run_chat(
         self,
@@ -2918,6 +2969,7 @@ class FishAgentSystem:
                     "status": finding.status,
                     "summary": finding.summary,
                     "evidence_refs": finding.evidence_refs,
+                    "recommendations": finding.recommendations,
                     "confidence": finding.confidence,
                     "created_at": finding.created_at.isoformat(),
                 }

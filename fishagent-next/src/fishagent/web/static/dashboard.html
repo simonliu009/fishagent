@@ -266,6 +266,10 @@
     .patrol-device-block { grid-column: 1 / -1; }
     .patrol-device-heading { margin-bottom: 3px; color: var(--muted); font-size: 9px; font-weight: 750; }
     .patrol-device-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+    .patrol-advice { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 7px; padding: 7px 8px; border: 1px solid #c6e3d8; border-radius: 4px; color: var(--brand-dark); background: #f2fbf7; font-size: 10px; line-height: 1.55; }
+    .patrol-advice svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 1px; }
+    .patrol-advice strong { margin-right: 6px; color: var(--ink); font-size: 10px; }
+    .patrol-advice span { display: inline; }
     .patrol-device { min-width: 0; display: flex; align-items: center; gap: 4px; padding: 4px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--surface); font-size: 8px; line-height: 1.25; }
     .patrol-device .dot { width: 6px; height: 6px; flex: 0 0 auto; }
     .patrol-device-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1520,7 +1524,11 @@
           const stateLabel = device.shadow_state === 'on' ? '已开启' : '已关闭';
           return `<span class="patrol-device ${online ? '' : 'offline'}" title="${escapeHtml(device.name)}：${statusLabel}，${stateLabel}"><span class="dot ${online ? '' : 'danger'}"></span><span class="patrol-device-name">${escapeHtml(device.name)}</span><b>${statusLabel}</b></span>`;
         }).join('') || '<span class="patrol-device"><span class="patrol-device-name">暂无设备</span></span>';
-        return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pond.name)}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div><div class="patrol-device-block"><div class="patrol-device-heading">设备在线状态</div><div class="patrol-device-strip">${deviceStrip}</div></div></div>`;
+        const recommendations = finding?.recommendations || [];
+        const adviceMarkup = recommendations.length
+          ? `<div class="patrol-advice"><i data-lucide="lightbulb"></i><div><strong>巡查建议</strong><span>${recommendations.map(item => escapeHtml(item)).join('；')}</span></div></div>`
+          : '';
+        return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pond.name)}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div><div class="patrol-device-block"><div class="patrol-device-heading">设备在线状态</div><div class="patrol-device-strip">${deviceStrip}</div></div>${adviceMarkup}</div>`;
       }).join('') : activeReveal ? `<div class="empty">正在巡查...</div>` : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
       updateCountdown();
     }

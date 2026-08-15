@@ -865,6 +865,7 @@ class InMemoryStore:
                 status=item["status"],
                 summary=item["summary"],
                 evidence_refs=item.get("evidence_refs", []),
+                recommendations=item.get("recommendations", []),
                 confidence=item.get("confidence"),
                 created_at=self._datetime(item.get("created_at")) or utcnow(),
             )

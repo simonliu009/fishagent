@@ -429,6 +429,7 @@ class PatrolFinding:
     status: str
     summary: str
     evidence_refs: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
     confidence: Optional[float] = None
     created_at: datetime = field(default_factory=utcnow)
 

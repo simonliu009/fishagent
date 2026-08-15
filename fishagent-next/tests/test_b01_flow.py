@@ -805,6 +805,20 @@ class B01FlowTest(unittest.TestCase):
         self.assertIn("读数质量：不可信", task_description)
         self.assertNotIn("SUSPECT", task_description)
 
+    def test_normal_patrol_produces_recommendations_for_each_pond(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+
+        system.run_patrol()
+
+        state = system.snapshot()
+        findings = [item for item in state["patrol_findings"] if item["patrol_run_id"] == state["agent_runs"][-1]["id"]]
+        self.assertEqual(len(findings), 4)
+        self.assertTrue(all(item["status"] == "NORMAL" for item in findings))
+        self.assertTrue(all(item["recommendations"] for item in findings))
+        self.assertTrue(any("保持现有设备和养殖策略" in item for item in findings[0]["recommendations"]))
+        self.assertTrue(any(step["action"] == "patrol.advice" for step in state["agent_runs"][-1]["steps"]))
+
     def test_patrol_requests_fresh_sensor_reports_before_inspection(self) -> None:
         class LoopbackPublisher:
             def __init__(self) -> None:

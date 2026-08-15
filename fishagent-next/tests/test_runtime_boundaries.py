@@ -393,6 +393,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('onclick="openAlertView(event)"', response.text)
         self.assertIn("function advanceCountdownTarget", response.text)
         self.assertIn("巡检 ${fmtDate(markedAt)}", response.text)
+        self.assertIn("class=\"patrol-advice\"", response.text)
+        self.assertIn("巡查建议", response.text)
         self.assertIn("24 * 60 * 60 * 1000", response.text)
         self.assertIn('class="alert-item ${closed ? \'resolved\' : \'active\'}"', response.text)
         self.assertIn("VERIFY_PENDING: '处置中 · 待复核'", response.text)
