@@ -2,14 +2,16 @@
 
 根据上级目录 `智渔Agent-CrewAI-Python绿地开发计划.md` 落地的绿地垂直切片。
 
-当前版本使用 `uv` 管理 Python 版本和项目元数据，采用 FastAPI + NiceGUI Web、Celery Worker/Beat 和模块化领域服务，重点覆盖：
+当前版本使用 `uv` 管理 Python 版本和项目元数据，采用 FastAPI/Uvicorn Web、Celery Worker/Beat 和模块化领域服务，重点覆盖：
 
 - 养殖资产、传感器读数、设备影子状态。
-- 四池塘演示场景：B-01 至 B-04 各配套氨氮、亚硝酸根离子、浊度、叶绿素、溶解氧、pH、水温传感器，以及增氧机、投喂机、阀门、摄像头和 24 小时趋势 mock 数据；总计 28 台设备中 27 台在线。
-- 水面/水下摄像头、天气上下文和病害知识库 mock 数据，支持浮头、病害、摄食异常和天气防护四个多模态 Agent 案例。
-- 成功、复核失败、防重复、人工审批，以及多模态自动执行/人工转派五类演示路径。
+- 四池塘演示场景：B-01 至 B-04 各配套氨氮、亚硝酸根离子、浊度、叶绿素、溶解氧、pH、水温传感器，以及增氧机、投喂机、阀门、摄像头和 24 小时趋势模拟数据；总计 28 台设备中 27 台在线。
+- 默认初始化页面保持正常，异常通过监控总览右下角的 Agent Demo 浮动入口注入；常规演示保留低溶氧和双传感器失效，多模态案例纳入巡塘 SOP。
+- 水面/水下摄像头、天气上下文和病害知识库模拟数据，支持浮头、病害、摄食异常和天气防护四个多模态 Agent 案例。
 - 只读/低风险自动/中高风险阻断的安全策略。
-- HTTP API 与浏览器控制台，当前前端端口 `3000`；`3001` 保留给 nginx。
+- HTTP API 与浏览器控制台，当前端口 `3000`；`3001` 保留给 Nginx。
+- 智渔 AI 流式聊天、Agent 运行轨迹、告警闭环、人工任务、主动传感器上报和 MQTT 设备控制。
+- 每日报告手动生成、历史版本管理、HTML 下载与删除；调度服务每天本地时间 `23:59` 自动生成当日报告。
 - PostgreSQL 持久化快照与 Outbox，Redis 实时事件发布，MinIO 健康探针。
 - Celery Beat 到期任务分发、默认 Worker 执行和 MQTT 遥测适配器。
 - CrewAI/LLM 主决策运行时，设备写操作仍只能经过确定性策略门。
@@ -55,6 +57,22 @@ cp .env.example .env
 
 应用进程通过 Docker 发布到 `0.0.0.0:3000`，可由公网和 Tailscale 直接访问；nginx 入口监听 `3001` 并反代到 `127.0.0.1:3000`。配置模板位于 `deploy/nginx/fishagent-3001.conf`。公网部署应启用认证并在云安全列表中只放行必要来源。
 
+完整 Compose 启动后，`beat` 和 `worker-default` 会持续运行后台调度；每日 `23:59` 自动日报依赖这两个服务。只使用 `./start.sh` 启动 Web 进程时，页面和 API 可用，但不会单独启动 Celery Beat/Worker。
+
+## 控制台视图
+
+浏览器控制台当前包含以下主要入口：
+
+- **监控总览**：四个池塘的水质卡片、监控画面、告警列表、Agent 执行中心、逐塘巡检和 Agent Demo 注入。
+- **智渔 AI**：与 CrewAI Agent 对话，支持流式输出、池塘范围选择和 Agent 运行轨迹查看。
+- **库存补货**：浏览库存、低库存项和待确认补货单。
+- **养殖管理**：人工任务、审批和设备执行情况。
+- **数据分析**：水质监控面板和按传感器切换的 12/24 小时趋势图。
+- **资产录入**：管理养殖场、区域、池塘、传感器、设备和摄像头。
+- **调度中心 / 系统审计 / 每日报告 / 知识库**：分别管理周期作业、审计事件、日报历史和行业知识文档。
+
+页面右上角的大模型设置入口用于管理供应商、模型、Base URL、API Key、空响应重试次数和启用状态。API Key 只保存脱敏状态，不会在普通状态接口中返回完整值。
+
 ## 运行时基础设施
 
 - **PostgreSQL**：业务状态的最终来源，保存养殖资产、读数、事件闭环、审批、命令和调度状态；同时记录 Outbox 事件，重启后可恢复。当前兼容快照和关系投影在同一事务内写入，领域表由 Alembic 管理。
@@ -89,7 +107,7 @@ FISHAGENT_ADMIN_PASSWORD=change-me
 
 ### 多模态案例与决策流程
 
-控制台的“Agent 案例”视图可以单独或按顺序演示以下场景：
+监控总览右下角的 Agent Demo 浮动入口可以单独或按顺序演示以下场景：
 
 1. 水面摄像头发现 B-01 浮头，Agent 结合低风速天气判断缺氧风险，策略门允许打开 B-01 增氧机并进入复核。
 2. 水下摄像头发现 B-02 鳃部异常，Agent 检索病害知识库，因不能自动确诊或投药而提交人工任务。
@@ -100,7 +118,7 @@ FISHAGENT_ADMIN_PASSWORD=change-me
 
 OpenRouter 免费路由预设写在 `.env.example`。复制为 `.env` 后，将 `FISHAGENT_LLM_API_KEY=sk-or-v1-REPLACE_WITH_YOUR_KEY` 替换为真实 Key；提供商使用 `openrouter`，模型使用 `openrouter/free`。Base URL 为 `https://openrouter.ai/api/v1`，也可以在右上角模型设置中粘贴完整的 `https://openrouter.ai/api/v1/chat/completions`，系统会自动规范化路径。
 
-Celery Beat 每 5 秒调用 `dispatch_due_jobs`，通过 PostgreSQL 状态和业务幂等键领取到期复核/巡查作业，再交给 Worker 执行。Redis 只负责队列和实时加速，Outbox 事件号由 PostgreSQL 全局序列分配，支持多进程并发写入；Web 读请求会刷新最新快照但不回写，避免轮询覆盖 Worker 状态。
+Celery Beat 每 5 秒调用 `dispatch_due_jobs`，通过 PostgreSQL 状态和业务幂等键领取到期复核/巡查作业，再交给 Worker 执行。相同调度循环会在本地时间每天 `23:59` 检查并生成当日报告；自动报告带有生成标记，同一日期不会因 Beat 的重复轮询而重复生成。Redis 只负责队列和实时加速，Outbox 事件号由 PostgreSQL 全局序列分配，支持多进程并发写入；Web 读请求会刷新最新快照但不回写，避免轮询覆盖 Worker 状态。
 
 MQTT 主题格式为 `farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`，消息示例：
 
@@ -116,9 +134,28 @@ MQTT 主题格式为 `farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`，消
 
 ## 演示接口
 
+默认演示数据通过显式初始化或注入产生，不会在每次 Web 启动时隐式覆盖数据库状态。控制台推荐从监控总览右下角的浮动入口操作：
+
+1. **重置演示数据**：恢复四个池塘的正常背景数据，不触发自动处置。
+2. **低溶氧自动处置**：注入 B-01 低溶氧，Agent 决策开启增氧机，随后进入延迟复核。
+3. **双传感器失效**：同时注入溶解氧和氨氮异常，演示异常证据聚合和人工任务转派。
+4. **多模态案例**：将水面/水下图片、天气、知识库和传感器数据纳入巡塘 SOP，形成真实 Agent 运行轨迹。
+
+Demo 注入后页面会显示注入反馈并触发逐塘巡检；告警列表按事件逐条展示，决策、执行和复核结果会随着流程推进显示。
+
+也可以通过 API 操作：
+
 ```bash
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/init
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/success
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/alerts
+curl --noproxy localhost,127.0.0.1 http://localhost:3000/api/v1/demo/options
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/analysis-cases/case-floating-head-weather/run
+```
+
+用于回归测试的其它路径仍可通过 Demo API 调用：
+
+```bash
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/failure
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/dedup
 ```
@@ -152,22 +189,35 @@ curl --noproxy localhost,127.0.0.1 http://localhost:3000/api/v1/manual-tasks
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/scheduled-jobs:dispatch
 ```
 
-`POST /api/v1/action-proposals/{id}/approve` 只允许已创建的 L2 提案进入设备执行；L3 只会创建人工任务。服务进程每 5 秒运行一次轻量调度循环，复核和巡查作业也可以通过 `scheduled-jobs:dispatch` 显式触发。
+每日报告接口：
+
+```bash
+curl --noproxy localhost,127.0.0.1 http://localhost:3000/api/v1/reports
+curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/reports/generate \
+  -H 'Content-Type: application/json' -d '{}'
+curl --noproxy localhost,127.0.0.1 http://localhost:3000/api/v1/reports/<report_id>/download -o daily-report.html
+curl --noproxy localhost,127.0.0.1 -X DELETE http://localhost:3000/api/v1/reports/<report_id>
+```
+
+`POST /api/v1/reports/generate` 生成当前本地日期的报告；报告正文包含真实快照趋势图、告警、自动操作、人工任务和设备操作日志，不包含知识库正文。知识文档在独立的知识库视图中管理。
+
+`POST /api/v1/action-proposals/{id}/approve` 只允许已创建的 L2 提案进入设备执行；L3 只会创建人工任务。完整 Compose 中的 Celery Beat 每 5 秒触发一次调度，复核和巡查作业也可以通过 `scheduled-jobs:dispatch` 显式触发。
 
 ## 测试
 
 ```bash
-python3 -m unittest discover -s tests
+uv run pytest -q
+uv run ruff check src tests migrations
 ```
 
-或：
+如需只运行报告和自动日报测试：
 
 ```bash
-PYTHONPATH=src uv run python -m unittest discover -s tests
+uv run pytest -q tests/test_reports.py
 ```
 
 ## 边界说明
 
-当前是可运行的模块化单体：PostgreSQL、Redis、MinIO、FastAPI、NiceGUI、Celery Worker/Beat、MQTT 和 CrewAI/LLM 已接入运行时；HTTP Snapshot/RTSP 抽帧、视觉上传校验和视觉 Worker 已接入，真实厂商设备协议、模型评测与提示词版本治理、疾病/投喂分析和多用户持久化目录仍是后续扩展。
+当前是可运行的模块化单体：PostgreSQL、Redis、MinIO、FastAPI、Celery Worker/Beat、MQTT 和 CrewAI/LLM 已接入运行时；HTTP Snapshot/RTSP 抽帧、视觉上传校验和视觉 Worker 已接入。天气、摄像头、设备和传感器默认使用模拟适配器，真实厂商设备协议、模型评测与提示词版本治理、疾病/投喂专业规则和多用户持久化目录仍是后续扩展。
 
-当前实现不在启动时隐式 seed；演示数据通过页面按钮、`/api/v1/demo/init` 或 demo 命令显式初始化。大模型配置保存到 `data/runtime_config.json`，API 响应不会回显完整密钥。
+当前实现不在启动时隐式 seed；演示数据通过页面按钮、`/api/v1/demo/init` 或 Demo API 显式初始化。大模型配置保存到 `data/runtime_config.json`，API 响应不会回显完整密钥。不要将 `.env`、真实 API Key、运行时数据或备份文件提交到 Git。
