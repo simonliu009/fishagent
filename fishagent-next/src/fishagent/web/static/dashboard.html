@@ -1423,7 +1423,8 @@
       const patrolRuns = runs.filter(run => String(run.goal).includes('巡查'));
       const lastRun = patrolRuns.at(-1);
       const findings = currentState.patrol_findings || [];
-      const abnormal = findings.filter(item => item.status !== 'NORMAL').length;
+      const latestFindings = lastRun ? findings.filter(item => item.patrol_run_id === lastRun.id) : [];
+      const abnormal = latestFindings.filter(item => item.status !== 'NORMAL').length;
       const commands = currentState.commands || [];
       const confirmed = commands.filter(item => item.status === 'CONFIRMED').length;
       const schedules = (currentState.schedules || []).filter(item => item.status === 'ACTIVE' && item.job_type === 'patrol');
@@ -1434,7 +1435,7 @@
       document.getElementById('demo_data_badge').hidden = currentState.dataset?.source_classification !== 'simulated_persistent';
       document.getElementById('patrol_summary').innerHTML = [
         ['clock-3','上次巡查', lastRun ? fmtDate(lastRun.steps?.at(-1)?.created_at) : '尚未执行', lastRun?.stop_reason || '等待自动触发'],
-        ['triangle-alert','巡查结果', abnormal ? `发现 ${abnormal} 处异常` : '未发现新异常', `已形成 ${findings.length} 条巡查结论`],
+        ['triangle-alert','巡查结果', abnormal ? `发现 ${abnormal} 处异常` : '未发现新异常', `本轮已形成 ${latestFindings.length} 条巡查结论`],
         ['activity','执行情况', `${confirmed} 次自动处置`, `${commands.length - confirmed} 项待确认或失败`]
       ].map((item, index) => `<div class="summary-block"><div class="summary-label"><i data-lucide="${item[0]}"></i>${item[1]}</div><div class="summary-value">${escapeHtml(item[2])}</div><div class="summary-note">${escapeHtml(item[3])}${index === 0 && countdownTarget ? `<span class="summary-inline-next"><i data-lucide="calendar-clock"></i>下次 ${fmtDate(countdownTarget)} · <span id="countdown_number">-- 分 -- 秒</span></span>` : ''}</div></div>`).join('');
       const ponds = currentState.ponds || [];
