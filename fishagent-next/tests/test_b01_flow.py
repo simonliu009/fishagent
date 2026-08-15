@@ -928,6 +928,46 @@ class B01FlowTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             FishAgentSystem().inject_demo("unknown")
 
+    def test_auto_response_demo_uses_mqtt_publisher_for_injected_alerts(self) -> None:
+        class ManualOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="演示异常需要人工复核。",
+                    ),
+                    summary="演示转人工",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["sensor-monitor-agent"],
+                    steps=[],
+                )
+
+        published = []
+
+        class LoopbackPublisher:
+            def __init__(self) -> None:
+                self.system = None
+
+            def publish_reading(self, **payload):
+                published.append(payload.copy())
+                payload.pop("defer_persist", None)
+                self.system.ingest_reading(**payload)
+                return True
+
+        publisher = LoopbackPublisher()
+        system = FishAgentSystem(agent_orchestrator=ManualOrchestrator(), telemetry_publisher=publisher)
+        publisher.system = system
+        state = system.inject_demo("alerts")
+
+        self.assertEqual(len(published), 254)
+        self.assertTrue(any(item["source_event_id"] == "demo-alert-do" and item["auto_run"] for item in published))
+        self.assertTrue(any(item["source_event_id"] == "demo-alert-ammonia" and item["auto_run"] for item in published))
+        self.assertEqual(len(state["agent_runs"]), 2)
+        self.assertTrue(any(item["event_type"] == "demo.injected" for item in state["events"]))
+
     def test_crewai_chat_turn_is_audited_as_agent_run(self) -> None:
         class ChatOrchestrator:
             available = True
