@@ -417,53 +417,40 @@ def make_slides():
     text(slide, "复现入口：POST /api/v1/demo/success\n交付入口：GET /api/v1/reports/{id}/download", 8.86, 6.17, 3.5, 0.4, size=8.2, color=WHITE, font="Noto Sans Mono CJK SC", margin=0)
     source_note(slide, "截图：当前本地运行实例；报告包含真实快照趋势图、告警、自动操作、人工任务和设备操作日志。")
 
-    # 9. Data flow / architecture
+    # 9. CrewAI architecture
     slide = presentation.slides.add_slide(blank)
-    base(slide, "模型、Agent 与工具接口：谁负责什么", "08 / 工程架构", number=9)
-    text(slide, "系统把每一次输入、模型消息、决策、Skill 调用、设备回执和复核结果写入可观察轨迹。", 0.68, 1.78, 12, 0.4, size=14, color=INK, bold=True, margin=0)
-    lanes = [
-        ("感知层", "传感器 / 摄像头 / 天气", BLUE, PALE_BLUE),
-        ("消息层", "本地 MQTT Broker\n上报 + 控制", CYAN, PALE_BLUE),
-        ("Agent 层", "CrewAI Supervisor\n专职 Agent 协作", PURPLE, rgb("F0EDFF")),
-        ("工具层", "RAG / Weather /\nDeviceControlSkill", YELLOW, PALE_YELLOW),
-        ("执行层", "MQTT 控制消息\n模拟设备回执", MINT, PALE_MINT),
-        ("验证层", "主动巡塘 / 复核\n告警状态更新", CORAL, PALE_CORAL),
-        ("交付层", "页面 / 聊天 / 日报\n审计与人工任务", BLUE, PALE_BLUE),
+    base(slide, "CrewAI Agent 架构：1 个 Manager + 4 个专职 Agent", "08 / CrewAI 架构", number=9)
+    text(slide, "事件 / 巡塘模式使用 hierarchical Crew：1 个 Manager 动态委派 4 个专职 Agent，共 5 个 CrewAI Agent；聊天模式另用 1 个顺序 Agent。", 0.68, 1.78, 12, 0.4, size=13.2, color=INK, bold=True, margin=0)
+
+    card(slide, 4.35, 2.28, 4.65, 0.86, rgb("F0EDFF"), PURPLE)
+    text(slide, "supervisor / 主决策 Agent", 4.62, 2.47, 4.1, 0.2, size=15, color=INK, bold=True, align=PP_ALIGN.CENTER, margin=0)
+    text(slide, "Crew(process=hierarchical, allow_delegation=True)\n校验目标、委派调查、汇总结构化 JSON；不持有设备写工具", 4.62, 2.76, 4.1, 0.28, size=8.2, color=MUTED, align=PP_ALIGN.CENTER, font="Noto Sans Mono CJK SC", margin=0)
+
+    workers = [
+        ("sensor-monitor-agent", "传感器监控 Agent", "读数、新鲜度、质量\n工具：snapshot / weather / camera", BLUE, PALE_BLUE),
+        ("patrol-analysis-agent", "巡查分析 Agent", "池塘、设备影子、活跃事件\n工具：device / incident / disease / forecast / inventory", CYAN, PALE_MINT),
+        ("vision-analysis-agent", "视觉与病害 Agent", "水面 / 水下图像、天气、知识\n工具：camera / weather / knowledge", PURPLE, rgb("F0EDFF")),
+        ("action-planning-agent", "行动规划 Agent", "风险、依据、复核条件\n工具：propose / knowledge / inventory / restock", YELLOW, PALE_YELLOW),
     ]
-    for idx, (label, body, accent, fill) in enumerate(lanes):
-        left = 0.68 + idx * 1.78
-        card(slide, left, 2.48, 1.5, 1.52, fill, accent)
-        text(slide, label, left + 0.12, 2.75, 1.26, 0.24, size=11, color=INK, bold=True, align=PP_ALIGN.CENTER, margin=0)
-        text(slide, body, left + 0.12, 3.16, 1.26, 0.48, size=8.2, color=MUTED, align=PP_ALIGN.CENTER, margin=0)
-        if idx < len(lanes) - 1:
-            line(slide, left + 1.52, 3.23, left + 1.72, 3.23, accent, 1.5, True)
-    card(slide, 0.68, 4.32, 7.05, 2.02, WHITE, LINE)
-    text(slide, "Agent 角色分工", 0.96, 4.57, 2.0, 0.24, size=15, color=INK, bold=True, margin=0)
-    roles = [
-        ("supervisor-agent", "校验触发目标，委派 Agent，汇总模型结果", PURPLE),
-        ("sensor-monitor-agent", "请求 REPORT_NOW，读取池塘新鲜快照", BLUE),
-        ("patrol-analysis-agent", "分析水质、设备影子、天气与活跃告警", CYAN),
-        ("action-planning-agent", "检索知识库，形成 action / rationale", YELLOW),
-        ("execution / verification", "Skill 下发 MQTT；复核、重试或转人工", MINT),
-    ]
-    for idx, (agent, responsibility, accent) in enumerate(roles):
-        y = 4.92 + idx * 0.27
-        add_shape(slide, MSO_SHAPE.OVAL, 0.98, y + 0.02, 0.16, 0.16, accent, accent, False)
-        text(slide, agent, 1.25, y, 2.25, 0.18, size=8.7, color=INK, bold=True, font="Noto Sans Mono CJK SC", margin=0)
-        text(slide, responsibility, 3.62, y, 3.65, 0.18, size=8.7, color=MUTED, margin=0)
-    card(slide, 7.94, 4.32, 4.74, 2.02, PALE_YELLOW, YELLOW)
-    text(slide, "工具接口与协议", 8.22, 4.57, 2.2, 0.24, size=15, color=INK, bold=True, margin=0)
-    tools = [
-        "只读  get_pond_snapshot(pond_id)",
-        "只读  get_weather_context(pond_id)",
-        "RAG   search_knowledge_base(query, species, metric)",
-        "只读  get_device_shadow_state(pond_id)",
-        "写入  DeviceControlSkill → MQTT set_state",
-    ]
-    for idx, item in enumerate(tools):
-        text(slide, item, 8.22, 4.94 + idx * 0.26, 4.05, 0.18, size=8.2, color=INK if idx == 4 else MUTED, bold=idx == 4, font="Noto Sans Mono CJK SC", margin=0)
-    card(slide, 0.68, 6.58, 12.0, 0.38, NAVY, NAVY)
-    text(slide, "协议：传感器 commands → REPORT_NOW；设备 fishagent/ponds/{pond_id}/devices/{device_id}/commands → set_state；证据落地 agent_runs / events / commands / verification_results", 0.9, 6.68, 11.55, 0.18, size=8.1, color=WHITE, bold=True, align=PP_ALIGN.CENTER, margin=0)
+    worker_lefts = [0.68, 3.75, 6.82, 9.89]
+    for left, (agent, role, body, accent, fill) in zip(worker_lefts, workers):
+        card(slide, left, 3.58, 2.75, 1.55, fill, accent)
+        text(slide, agent, left + 0.14, 3.82, 2.47, 0.18, size=8.2, color=INK, bold=True, font="Noto Sans Mono CJK SC", align=PP_ALIGN.CENTER, margin=0)
+        text(slide, role, left + 0.14, 4.1, 2.47, 0.2, size=11.5, color=INK, bold=True, align=PP_ALIGN.CENTER, margin=0)
+        text(slide, body, left + 0.14, 4.43, 2.47, 0.44, size=7.3, color=MUTED, align=PP_ALIGN.CENTER, margin=0)
+        line(slide, 6.675, 3.14, left + 1.375, 3.54, accent, 1.25, True)
+
+    card(slide, 0.68, 5.34, 5.9, 1.34, WHITE, LINE)
+    text(slide, "CrewAI 组织方式", 0.94, 5.66, 2.1, 0.22, size=14, color=INK, bold=True, margin=0)
+    text(slide, "事件 / 巡塘：Crew(agents=[4 workers], manager_agent=supervisor, process=hierarchical)\n输入：任务 + pond_id + 工具证据；输出：action / device_id / target_state / risk / rationale JSON\n聊天：Crew(agents=[智渔AI 养殖运营助手], process=sequential, tools=[])；多模态复用事件 Crew", 0.94, 5.99, 5.3, 0.56, size=7.35, color=MUTED, font="Noto Sans Mono CJK SC", margin=0)
+
+    card(slide, 6.82, 5.34, 5.86, 1.34, PALE_YELLOW, YELLOW)
+    text(slide, "11 个 CrewAI 工具接口", 7.08, 5.66, 2.7, 0.22, size=14, color=INK, bold=True, margin=0)
+    text(slide, "get_pond_snapshot(pond) · get_device_shadow_state(pond) · list_active_incidents()\nget_weather_context(pond) · get_weather_forecast(pond, horizon) · get_camera_observations(pond)\nsearch_disease_knowledge(query) · search_knowledge_base(query, species, metric)\ncheck_inventory(query, category) · propose_action(device_id, target_state, rationale)\ndraft_restock_order(inventory_id, quantity, rationale)", 7.08, 5.98, 5.25, 0.68, size=6.75, color=MUTED, font="Noto Sans Mono CJK SC", margin=0)
+
+    card(slide, 0.68, 6.78, 12.0, 0.38, NAVY, NAVY)
+    text(slide, "CrewAI 不持有写设备工具：propose_action 只产建议；应用层 execution-agent 调 DeviceControlSkill → MQTT set_state；verification-agent / 应用逻辑负责复核、重试或转人工。工具调用 trace 进入 agent_runs / events。", 0.9, 6.88, 11.55, 0.18, size=7.8, color=WHITE, bold=True, align=PP_ALIGN.CENTER, margin=0)
+    source_note(slide, "代码：src/fishagent/agent_runtime/crewai_runtime.py；事件 Crew 为 5 个 Agent，聊天 Crew 为 1 个 Agent；11 个工具均通过 CrewAI tool 注册。")
 
     # 10. Safety
     slide = presentation.slides.add_slide(blank)
