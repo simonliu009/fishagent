@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
 from fishagent.application.agent_service import AUTO_RESPONSE_DEMO_MODES, DEMO_MODE_LABELS, FishAgentSystem
+from fishagent.application.demo_data import DEMO_ANALYSIS_CASES
 from fishagent.core import AppConfig, LLMConfig, RuntimeConfigStore, new_llm_profile_id
 from fishagent.domain.models import RiskLevel, ScheduleStatus, VisionFrame, new_id, utcnow
 from fishagent.infrastructure.auth import auth_from_config
@@ -483,18 +484,27 @@ async def demo_options(request: Request) -> dict:
     authenticate(request, request.url.path)
     descriptions = {
         "success": "注入 B-01 低溶氧读数，自动进入增氧和复核流程",
-        "alerts": "同时注入 B-01 低溶氧与 B-02 氨氮异常",
-        "failure": "注入低溶氧并模拟复核未恢复，升级人工任务",
-        "dedup": "注入低溶氧但设备已开启，验证幂等控制",
-        "approval": "注入高风险异常，自动提交审批任务",
-        "multimodal": "启动水面、水下、天气和知识证据的多模态案例序列",
-        "health": "注入 B-04 不可信溶氧读数和一台离线设备",
+        "alerts": "同时注入溶解氧与氨氮异常证据，演示双传感器告警闭环",
     }
+    ordinary_modes = ("success", "alerts")
+    multimodal_options = [
+        {
+            "mode": "analysis_case:%s" % case["id"],
+            "case_id": case["id"],
+            "label": case["title"],
+            "description": case["description"],
+            "category": case["category"],
+            "auto_response": False,
+            "agent_driven": True,
+        }
+        for case in DEMO_ANALYSIS_CASES
+    ]
     return {
         "options": [
             {"mode": mode, "label": DEMO_MODE_LABELS[mode], "description": descriptions[mode], "auto_response": True}
-            for mode in DEMO_MODE_LABELS
+            for mode in ordinary_modes
         ]
+        + multimodal_options
         + [{"mode": "init", "label": "重置演示数据", "description": "恢复四个池塘的基础背景数据，不触发自动处置", "auto_response": False}],
     }
 
@@ -535,9 +545,13 @@ async def run_analysis_case(request: Request, case_id: str) -> Any:
     authenticate(request, request.url.path, write=True)
     if case_id not in SYSTEM.store.analysis_cases:
         return problem(404, "Analysis case not found")
+    SYSTEM.store.activate_multimodal_demo_data()
     run = await asyncio.to_thread(SYSTEM.run_analysis_case, case_id)
     state = SYSTEM.snapshot()
-    return encoded_response(202, {"run": next(item for item in state["agent_runs"] if item["id"] == run.id), "state": state})
+    run_data = next((item for item in state["agent_runs"] if item["id"] == run.id), None)
+    if run_data is None:
+        return encoded_response(409, {"detail": "案例执行期间演示数据已被重置，执行结果已作废", "state": state})
+    return encoded_response(202, {"run": run_data, "state": state})
 
 
 @app.get("/api/v1/incidents")

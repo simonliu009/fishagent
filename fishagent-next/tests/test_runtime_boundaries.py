@@ -396,8 +396,18 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('data-stream-text=', response.text)
         self.assertIn("scrollIntoView({behavior:'smooth', block:'center'})", response.text)
         self.assertIn("onclick=\"injectDemo('alerts')\"", response.text)
-        self.assertIn("onclick=\"injectDemo('multimodal')\"", response.text)
-        self.assertIn("onclick=\"injectDemo('health')\"", response.text)
+        self.assertIn('双传感器失效', response.text)
+        self.assertIn("runMultimodalCase('case-floating-head-weather'", response.text)
+        self.assertIn("runMultimodalCase('case-underwater-disease'", response.text)
+        self.assertIn("runMultimodalCase('case-weak-feeding-response'", response.text)
+        self.assertIn("runMultimodalCase('case-weather-front-protection'", response.text)
+        self.assertIn('function keepDemoLauncherOpen()', response.text)
+        self.assertIn('}, 1200);', response.text)
+        self.assertNotIn("injectDemo('failure')", response.text)
+        self.assertNotIn("injectDemo('dedup')", response.text)
+        self.assertNotIn("injectDemo('approval')", response.text)
+        self.assertNotIn("injectDemo('multimodal')", response.text)
+        self.assertNotIn("injectDemo('health')", response.text)
         self.assertNotIn('data-view="cases"', response.text)
         self.assertNotIn('id="view_cases"', response.text)
         self.assertGreater(response.text.index('data-view="knowledge"'), response.text.index('data-view="reports"'))
@@ -433,8 +443,18 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         options = response.json()["options"]
         modes = {item["mode"] for item in options}
-        self.assertTrue({"success", "alerts", "failure", "dedup", "approval", "multimodal", "health"}.issubset(modes))
-        self.assertIn("init", modes)
+        self.assertEqual(
+            modes,
+            {
+                "success",
+                "alerts",
+                "analysis_case:case-floating-head-weather",
+                "analysis_case:case-underwater-disease",
+                "analysis_case:case-weak-feeding-response",
+                "analysis_case:case-weather-front-protection",
+                "init",
+            },
+        )
         self.assertTrue(next(item for item in options if item["mode"] == "alerts")["auto_response"])
         self.assertFalse(next(item for item in options if item["mode"] == "init")["auto_response"])
 

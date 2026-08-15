@@ -756,7 +756,7 @@
     .demo-launcher-menu {
       position: absolute;
       right: 0;
-      bottom: 58px;
+      bottom: 48px;
       width: min(330px, calc(100vw - 24px));
       padding: 10px;
       border: 1px solid var(--line-strong);
@@ -769,6 +769,8 @@
       transform: translateY(7px);
       transition: opacity .14s ease, transform .14s ease, visibility .14s ease;
     }
+    .demo-launcher.is-hover-open .demo-launcher-menu,
+    .demo-launcher.is-pinned .demo-launcher-menu,
     .demo-launcher:hover .demo-launcher-menu,
     .demo-launcher:focus-within .demo-launcher-menu {
       opacity: 1;
@@ -779,6 +781,8 @@
     .demo-launcher-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 3px 8px; }
     .demo-launcher-head strong { font-size: 13px; }
     .demo-launcher-head span { color: var(--muted); font-size: 10px; }
+    .demo-section-label { padding: 5px 3px 2px; color: var(--brand-dark); font-size: 10px; font-weight: 850; }
+    .demo-section-label + .demo-option { margin-top: 2px; }
     .demo-option-list { display: grid; gap: 5px; }
     .demo-option {
       width: 100%;
@@ -1146,21 +1150,22 @@
       <div class="auth-actions"><button class="button secondary" type="button" onclick="testLlm()"><i data-lucide="plug-zap"></i>测试连接</button><button class="button" type="button" onclick="saveLlm()"><i data-lucide="save"></i>保存</button></div>
     </section>
   </div>
-  <aside id="demo_launcher" class="demo-launcher" aria-label="自动响应 Demo 注入">
+  <aside id="demo_launcher" class="demo-launcher" aria-label="Agent Demo 场景" onmouseenter="keepDemoLauncherOpen()" onmouseleave="scheduleDemoLauncherClose()">
     <div class="demo-launcher-menu" role="menu" aria-label="Demo 场景选项">
-      <div class="demo-launcher-head"><strong>自动响应 Demo</strong><span>悬浮选择并注入</span></div>
+      <div class="demo-launcher-head"><strong>Agent Demo 场景</strong><span>悬浮选择并注入</span></div>
       <div class="demo-option-list">
+        <div class="demo-section-label">常规响应</div>
         <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('success')"><i data-lucide="wind"></i><span><strong>低溶氧自动处置</strong><small>注入 B-01 异常，开启增氧并等待复核</small></span></button>
-        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('alerts')"><i data-lucide="triangle-alert"></i><span><strong>双传感器告警</strong><small>同时注入低溶氧与氨氮异常</small></span></button>
-        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('failure')"><i data-lucide="shield-alert"></i><span><strong>复核失败升级</strong><small>模拟复核未恢复并提交人工任务</small></span></button>
-        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('dedup')"><i data-lucide="copy-check"></i><span><strong>防重复动作</strong><small>设备已开启时验证幂等控制</small></span></button>
-        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('approval')"><i data-lucide="stamp"></i><span><strong>L2 审批转人工</strong><small>注入高风险异常并提交审批任务</small></span></button>
-        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('multimodal')"><i data-lucide="layers-3"></i><span><strong>多模态案例序列</strong><small>启动摄像头、天气与知识证据流程</small></span></button>
-        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('health')"><i data-lucide="heart-pulse"></i><span><strong>传感器与设备故障</strong><small>注入 B-04 不可信读数和一台离线设备</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('alerts')"><i data-lucide="triangle-alert"></i><span><strong>双传感器失效</strong><small>同时注入溶解氧与氨氮异常证据</small></span></button>
+        <div class="demo-section-label">多模态案例</div>
+        <button class="demo-option" type="button" role="menuitem" onclick="runMultimodalCase('case-floating-head-weather','浮头聚集 × 晴热少风')"><i data-lucide="cloud-sun"></i><span><strong>浮头聚集 × 晴热少风</strong><small>水面视觉与天气交叉验证</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="runMultimodalCase('case-underwater-disease','水下白点 × 病害知识匹配')"><i data-lucide="microscope"></i><span><strong>水下白点 × 病害知识匹配</strong><small>水下视觉与病害知识库研判</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="runMultimodalCase('case-weak-feeding-response','摄食响应弱 × 残饵滞留')"><i data-lucide="fish"></i><span><strong>摄食响应弱 × 残饵滞留</strong><small>摄食行为与投喂设备联动</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="runMultimodalCase('case-weather-front-protection','强降雨前兆 × 进排水保护')"><i data-lucide="cloud-rain"></i><span><strong>强降雨前兆 × 进排水保护</strong><small>天气预警与进排水设施风险</small></span></button>
         <button class="demo-option reset" type="button" role="menuitem" onclick="initializeDemo()"><i data-lucide="rotate-ccw"></i><span><strong>重置演示数据</strong><small>恢复基础背景数据，不触发自动处置</small></span></button>
       </div>
     </div>
-    <button class="demo-launcher-toggle" type="button" title="自动响应 Demo 注入" aria-label="自动响应 Demo 注入"><i data-lucide="flask-conical"></i></button>
+    <button class="demo-launcher-toggle" type="button" title="Agent Demo 场景" aria-label="Agent Demo 场景" aria-expanded="false" onclick="toggleDemoLauncher(event)"><i data-lucide="flask-conical"></i></button>
   </aside>
   <aside id="alert_capsule" class="alert-capsule" hidden aria-label="活跃告警" onmouseleave="releaseAlertCapsuleHover()">
     <div class="alert-capsule-head">
@@ -1188,6 +1193,7 @@
     let assistantChatBusy = false;
     let assistantChatContextVersion = 0;
     let demoInjectionBusy = false;
+    let demoLauncherCloseTimer = null;
     let alertRevealRequested = false;
     let alertRevealToken = 0;
     let alertRevealTimeouts = new Set();
@@ -1248,6 +1254,28 @@
     function hideDemoFeedback() {
       clearTimeout(demoFeedbackTimer);
       document.getElementById('demo_feedback').hidden = true;
+    }
+    function keepDemoLauncherOpen() {
+      clearTimeout(demoLauncherCloseTimer);
+      document.getElementById('demo_launcher').classList.add('is-hover-open');
+    }
+    function scheduleDemoLauncherClose() {
+      clearTimeout(demoLauncherCloseTimer);
+      demoLauncherCloseTimer = setTimeout(() => {
+        const launcher = document.getElementById('demo_launcher');
+        if (!launcher.classList.contains('is-pinned') && !launcher.matches(':hover') && !launcher.matches(':focus-within')) {
+          launcher.classList.remove('is-hover-open');
+        }
+      }, 1200);
+    }
+    function toggleDemoLauncher(event) {
+      event.stopPropagation();
+      const launcher = document.getElementById('demo_launcher');
+      const pinned = launcher.classList.toggle('is-pinned');
+      launcher.classList.toggle('is-hover-open', pinned);
+      launcher.querySelector('.demo-launcher-toggle').setAttribute('aria-expanded', String(pinned));
+      if (pinned) clearTimeout(demoLauncherCloseTimer);
+      else scheduleDemoLauncherClose();
     }
     function clearAlertRevealTimers() {
       alertRevealTimeouts.forEach(timer => clearTimeout(timer));
@@ -1537,6 +1565,11 @@
     }
     function switchView(name) {
       currentView = name;
+      if (name !== 'monitor') {
+        const launcher = document.getElementById('demo_launcher');
+        launcher.classList.remove('is-hover-open', 'is-pinned');
+        launcher.querySelector('.demo-launcher-toggle').setAttribute('aria-expanded', 'false');
+      }
       document.querySelectorAll('.view').forEach(node => node.classList.toggle('active', node.id === `view_${name}`));
       document.querySelectorAll('.nav-button').forEach(node => node.classList.toggle('active', node.dataset.view === name));
       document.getElementById('demo_launcher').hidden = name !== 'monitor';
@@ -2490,12 +2523,7 @@
       setDemoInjectionBusy(true);
       const messages = {
         success: '已注入低溶氧自动处置 Demo',
-        alerts: '已注入溶解氧 + 氨氮双传感器告警 Demo',
-        failure: '已注入复核失败升级 Demo',
-        dedup: '已注入防重复动作 Demo',
-        approval: '已注入 L2 审批转人工 Demo',
-        multimodal: '已启动多模态案例序列 Demo',
-        health: '已注入传感器与设备故障 Demo',
+        alerts: '已注入溶解氧 + 氨氮双传感器失效 Demo',
       };
       try {
         requestAlertReveal();
@@ -2505,6 +2533,29 @@
         if (succeeded) {
           showDemoFeedback(`${messages[mode] || 'Demo 已注入'}，正在展示告警流程`);
           if (mode === 'multimodal') watchAnalysisCases();
+        } else {
+          cancelAlertReveal();
+          hideDemoFeedback();
+        }
+      } finally {
+        setDemoInjectionBusy(false);
+      }
+    }
+    async function runMultimodalCase(caseId, title) {
+      if (demoInjectionBusy) return;
+      setDemoInjectionBusy(true);
+      try {
+        requestAlertReveal();
+        resetAssistantChatContext();
+        showDemoFeedback(`正在运行多模态案例：${title}，请稍候`, 300000);
+        const succeeded = await mutate(
+          () => api(`/api/v1/analysis-cases/${encodeURIComponent(caseId)}/run`, {method:'POST'}),
+          `${title} 已完成`,
+          {successToast:false},
+        );
+        if (succeeded) {
+          showDemoFeedback(`${title} 已完成，正在展示 Agent 数据流`);
+          watchAnalysisCases();
         } else {
           cancelAlertReveal();
           hideDemoFeedback();

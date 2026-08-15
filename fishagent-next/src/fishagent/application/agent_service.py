@@ -71,7 +71,7 @@ VERIFICATION_RETRY_SECONDS = 300
 
 DEMO_MODE_LABELS = {
     "success": "低溶氧自动处置",
-    "alerts": "双传感器告警",
+    "alerts": "双传感器失效",
     "failure": "复核失败升级",
     "dedup": "防重复动作",
     "approval": "L2 审批转人工",
