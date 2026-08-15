@@ -419,7 +419,15 @@
     .alert-flow-label { color: var(--brand-dark); font-size: 10px; font-weight: 850; }
     .alert-flow-agent { margin-top: 4px; color: var(--ink); font-size: 10px; font-weight: 750; }
     .alert-flow-summary { position: relative; z-index: 1; display: -webkit-box; max-height: 2.9em; margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.45; white-space: pre-line; -webkit-box-orient: vertical; -webkit-line-clamp: 2; cursor: zoom-in; }
+    .alert-item.reveal-hidden { opacity: 0; transform: translateY(10px); pointer-events: none; }
+    .alert-item.reveal-visible { animation: alert-item-reveal .28s ease-out both; }
+    .alert-flow-node.reveal-hidden { opacity: 0; transform: translateX(18px); }
+    .alert-flow-node.reveal-visible { animation: alert-flow-node-reveal .28s ease-out both; }
+    .alert-flow-summary.is-streaming::after { content: '▋'; display: inline-block; margin-left: 2px; color: var(--brand); animation: alert-stream-caret .8s steps(1, end) infinite; }
     .alert-flow-summary:hover { z-index: 10; display: block; width: min(420px, calc(100vw - 44px)); max-width: calc(100vw - 44px); max-height: none; margin: -2px 0 -8px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--ink); background: var(--surface); box-shadow: 0 9px 24px rgba(24, 48, 42, .18); font-size: 11px; line-height: 1.55; }
+    @keyframes alert-item-reveal { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes alert-flow-node-reveal { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes alert-stream-caret { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
     .chart-wrap { position: relative; min-height: 310px; }
     .trend-canvas { width: 100%; height: 280px; display: block; }
     .sensor-trend-panel { margin-bottom: 14px; }
@@ -595,7 +603,7 @@
       background: rgba(11, 23, 19, .58);
       backdrop-filter: blur(5px);
     }
-    .auth-layer[hidden], .toast[hidden] { display: none; }
+    .auth-layer[hidden], .toast[hidden], .demo-feedback[hidden] { display: none; }
     .auth-dialog {
       width: min(390px, 100%);
       padding: 22px;
@@ -627,6 +635,27 @@
       font-size: 11px;
     }
     .toast.error { color: var(--red); border-color: #efb5b5; background: var(--red-soft); }
+    .demo-feedback {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      z-index: 65;
+      width: min(430px, calc(100vw - 36px));
+      padding: 18px 22px;
+      transform: translate(-50%, -50%);
+      border: 1px solid #8dd6be;
+      border-radius: 9px;
+      color: var(--brand-dark);
+      background: rgba(242, 251, 247, .97);
+      box-shadow: 0 18px 48px rgba(24, 48, 42, .2);
+      text-align: center;
+      font-size: 14px;
+      font-weight: 850;
+      line-height: 1.5;
+      pointer-events: none;
+      animation: demo-feedback-in .2s ease-out both;
+    }
+    @keyframes demo-feedback-in { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); } to { opacity: 1; transform: translate(-50%, -50%); } }
     .alert-capsule {
       --capsule-collapsed-width: 56px;
       position: fixed;
@@ -1141,6 +1170,7 @@
     </div>
   </aside>
   <div id="toast" class="toast" hidden></div>
+  <div id="demo_feedback" class="demo-feedback" role="status" aria-live="polite" hidden></div>
 
   <script>
     let csrfToken = sessionStorage.getItem('fishagent_csrf') || '';
@@ -1158,6 +1188,11 @@
     let assistantChatBusy = false;
     let assistantChatContextVersion = 0;
     let demoInjectionBusy = false;
+    let alertRevealRequested = false;
+    let alertRevealToken = 0;
+    let alertRevealTimeouts = new Set();
+    let alertRevealIntervals = new Set();
+    let demoFeedbackTimer = null;
     let lastDemoInitializationEventId = null;
     let analysisCasePollTimer = null;
     let patrolRevealState = null;
@@ -1168,6 +1203,7 @@
     let trendWindowHours = 12;
     let selectedReportId = null;
     const PATROL_REVEAL_INTERVAL_MS = 700;
+    const ALERT_REVEAL_INTERVAL_MS = 2000;
     const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
     const llmPresets = [
       {id:'preset:zai', name:'Z.ai', provider:'zai', base_url:'https://api.z.ai/api/paas/v4', model:'glm-4.5'},
@@ -1201,6 +1237,106 @@
       node.hidden = false;
       clearTimeout(showToast.timer);
       showToast.timer = setTimeout(() => { node.hidden = true; }, 4200);
+    }
+    function showDemoFeedback(message, duration = 3000) {
+      const node = document.getElementById('demo_feedback');
+      node.textContent = message;
+      node.hidden = false;
+      clearTimeout(demoFeedbackTimer);
+      demoFeedbackTimer = setTimeout(() => { node.hidden = true; }, duration);
+    }
+    function hideDemoFeedback() {
+      clearTimeout(demoFeedbackTimer);
+      document.getElementById('demo_feedback').hidden = true;
+    }
+    function clearAlertRevealTimers() {
+      alertRevealTimeouts.forEach(timer => clearTimeout(timer));
+      alertRevealIntervals.forEach(timer => clearInterval(timer));
+      alertRevealTimeouts.clear();
+      alertRevealIntervals.clear();
+    }
+    function cancelAlertReveal() {
+      clearAlertRevealTimers();
+      alertRevealToken += 1;
+      alertRevealRequested = false;
+      document.querySelectorAll('#alert_list .alert-item, #alert_list .alert-flow-node').forEach(node => node.classList.remove('reveal-hidden', 'reveal-visible'));
+      document.querySelectorAll('#alert_list .alert-flow-summary[data-stream-text]').forEach(node => {
+        node.classList.remove('is-streaming');
+        node.textContent = node.dataset.streamText || '';
+      });
+    }
+    function requestAlertReveal() {
+      cancelAlertReveal();
+      alertRevealRequested = true;
+    }
+    function scheduleAlertReveal(callback, delay) {
+      const timer = setTimeout(() => {
+        alertRevealTimeouts.delete(timer);
+        callback();
+      }, delay);
+      alertRevealTimeouts.add(timer);
+    }
+    function streamAlertNode(node, token) {
+      const summary = node.querySelector('.alert-flow-summary');
+      if (!summary) return;
+      const text = summary.dataset.streamText || '';
+      summary.textContent = '';
+      summary.classList.add('is-streaming');
+      if (!text) {
+        summary.classList.remove('is-streaming');
+        return;
+      }
+      let offset = 0;
+      const increment = Math.max(1, Math.ceil(text.length / 52));
+      const timer = setInterval(() => {
+        if (token !== alertRevealToken) {
+          clearInterval(timer);
+          alertRevealIntervals.delete(timer);
+          return;
+        }
+        offset = Math.min(text.length, offset + increment);
+        summary.textContent = text.slice(0, offset);
+        if (offset >= text.length) {
+          clearInterval(timer);
+          alertRevealIntervals.delete(timer);
+          summary.classList.remove('is-streaming');
+        }
+      }, 28);
+      alertRevealIntervals.add(timer);
+    }
+    function startAlertReveal() {
+      clearAlertRevealTimers();
+      const token = ++alertRevealToken;
+      const items = [...document.querySelectorAll('#alert_list .alert-item')];
+      if (!items.length) return;
+      let itemIndex = 0;
+      const revealItem = () => {
+        if (token !== alertRevealToken || itemIndex >= items.length) return;
+        const item = items[itemIndex];
+        item.classList.remove('reveal-hidden');
+        item.classList.add('reveal-visible');
+        const nodes = [...item.querySelectorAll('.alert-flow-node')];
+        let nodeIndex = 0;
+        const revealNode = () => {
+          if (token !== alertRevealToken || nodeIndex >= nodes.length) {
+            itemIndex += 1;
+            if (itemIndex < items.length) scheduleAlertReveal(revealItem, ALERT_REVEAL_INTERVAL_MS);
+            return;
+          }
+          const node = nodes[nodeIndex];
+          node.classList.remove('reveal-hidden');
+          node.classList.add('reveal-visible');
+          streamAlertNode(node, token);
+          nodeIndex += 1;
+          if (nodeIndex < nodes.length) scheduleAlertReveal(revealNode, ALERT_REVEAL_INTERVAL_MS);
+          else {
+            itemIndex += 1;
+            if (itemIndex < items.length) scheduleAlertReveal(revealItem, ALERT_REVEAL_INTERVAL_MS);
+          }
+        };
+        revealNode();
+      };
+      revealItem();
     }
     async function api(path, options = {}) {
       const request = {...options, headers: {...(options.headers || {})}};
@@ -1883,6 +2019,8 @@
       const tasks = currentState.manual_tasks || [];
       const proposals = currentState.action_proposals || [];
       const approvals = currentState.approvals || [];
+      const shouldRevealAlerts = alertRevealRequested && incidents.length > 0;
+      if (alertRevealRequested && !incidents.length) alertRevealRequested = false;
       document.getElementById('alert_meta').textContent = `${incidents.length} 条/24h · ${activeIncidents.length} 条活跃`;
       const capsule = document.getElementById('alert_capsule');
       capsule.hidden = activeIncidents.length === 0;
@@ -1899,6 +2037,7 @@
         }).join('')}</div>`;
         startAlertCarousel(activeIncidents.length);
       }
+      const revealClass = shouldRevealAlerts ? ' reveal-hidden' : '';
       document.getElementById('alert_list').innerHTML = incidents.length ? incidents.map(item => {
         const evidence = item.evidence?.at(-1);
         const closed = closedIncidents.has(item.status);
@@ -1921,7 +2060,7 @@
         const terminalCommand = command && ['CONFIRMED','REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
         const commandSucceeded = command?.status === 'CONFIRMED';
         const commandFailed = command && ['REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
-        const flowNode = (label, agent, summary, state = 'done') => `<div class="alert-flow-node ${state}"><i class="alert-flow-check" data-lucide="${state === 'done' ? 'check-circle-2' : state === 'failed' ? 'circle-x' : 'circle'}"></i><div class="alert-flow-label">${escapeHtml(label)}</div><div class="alert-flow-agent">${escapeHtml(agentLabel(agent))}</div><div class="alert-flow-summary">${escapeHtml(summary)}</div></div>`;
+        const flowNode = (label, agent, summary, state = 'done') => `<div class="alert-flow-node ${state}${revealClass}" data-stream-text="${escapeHtml(summary)}"><i class="alert-flow-check" data-lucide="${state === 'done' ? 'check-circle-2' : state === 'failed' ? 'circle-x' : 'circle'}"></i><div class="alert-flow-label">${escapeHtml(label)}</div><div class="alert-flow-agent">${escapeHtml(agentLabel(agent))}</div><div class="alert-flow-summary" data-stream-text="${escapeHtml(summary)}">${shouldRevealAlerts ? '' : escapeHtml(summary)}</div></div>`;
         const flow = [
           flowNode('告警原因', evidence?.type === 'sensor_snapshot' ? 'sensor-monitor-agent' : '事件证据', alertCauseSummary(item, evidence)),
         ];
@@ -1963,9 +2102,16 @@
         const verificationMeta = (plan || verificationResult || item.status === 'VERIFY_PENDING')
           ? `<div class="alert-verification-meta"><span>复核计划</span><span>上次：${fmtDate(verificationResult?.created_at, false)}</span><span>结果：${escapeHtml(latestVerification)}</span><span>下次：${escapeHtml(nextVerification)}${closed ? '' : '（自动或手动巡塘）'}</span></div>`
           : '';
-        return `<article class="alert-item ${closed ? 'resolved' : 'active'}"><div class="alert-head"><div class="alert-title">${badge(item.status, `${statusLabel} · ${item.risk}`)}　${escapeHtml(item.title)}</div><div class="alert-head-actions"><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span>${dismissAction}</div></div>${verificationMeta}<div class="alert-flow">${flow.join('')}</div></article>`;
+        return `<article class="alert-item ${closed ? 'resolved' : 'active'}${revealClass}" data-alert-id="${escapeHtml(item.id)}"><div class="alert-head"><div class="alert-title">${badge(item.status, `${statusLabel} · ${item.risk}`)}　${escapeHtml(item.title)}</div><div class="alert-head-actions"><span class="alert-time">${fmtDate(evidence?.created_at, false)}</span>${dismissAction}</div></div>${verificationMeta}<div class="alert-flow">${flow.join('')}</div></article>`;
       }).join('') : '<div class="empty">过去 24 小时没有告警事件</div>';
       iconRefresh();
+      if (shouldRevealAlerts) {
+        alertRevealRequested = false;
+        requestAnimationFrame(() => {
+          document.getElementById('alert_panel').scrollIntoView({behavior:'smooth', block:'center'});
+          startAlertReveal();
+        });
+      }
     }
     function renderRuns() {
       const runs = [...(currentState.agent_runs || [])].reverse();
@@ -2317,9 +2463,9 @@
         if (error.status !== 401) { document.getElementById('footer_status').textContent = '数据刷新异常'; showToast(`刷新失败：${error.message}`, true); }
       }
     }
-    async function mutate(action, success) {
-      try { await action(); showToast(success); await refresh(); }
-      catch (error) { showToast(error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message, true); if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false; }
+    async function mutate(action, success, options = {}) {
+      try { await action(); if (options.successToast !== false) showToast(success); await refresh(); return true; }
+      catch (error) { showToast(error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message, true); if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false; return false; }
     }
     function setDemoInjectionBusy(busy) {
       demoInjectionBusy = busy;
@@ -2329,8 +2475,12 @@
       if (demoInjectionBusy) return;
       setDemoInjectionBusy(true);
       try {
+        cancelAlertReveal();
         resetAssistantChatContext();
-        await mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化');
+        showDemoFeedback('正在恢复演示数据，请稍候', 300000);
+        const succeeded = await mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化', {successToast:false});
+        if (succeeded) showDemoFeedback('演示数据已恢复正常');
+        else hideDemoFeedback();
       } finally {
         setDemoInjectionBusy(false);
       }
@@ -2348,9 +2498,17 @@
         health: '已注入传感器与设备故障 Demo',
       };
       try {
+        requestAlertReveal();
         resetAssistantChatContext();
-        await mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), messages[mode] || 'Demo 已注入');
-        if (mode === 'multimodal') watchAnalysisCases();
+        showDemoFeedback(`${messages[mode] || 'Demo 已注入'}，正在处理，请稍候`, 300000);
+        const succeeded = await mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), messages[mode] || 'Demo 已注入', {successToast:false});
+        if (succeeded) {
+          showDemoFeedback(`${messages[mode] || 'Demo 已注入'}，正在展示告警流程`);
+          if (mode === 'multimodal') watchAnalysisCases();
+        } else {
+          cancelAlertReveal();
+          hideDemoFeedback();
+        }
       } finally {
         setDemoInjectionBusy(false);
       }
