@@ -765,6 +765,7 @@
       text-align: left;
     }
     .demo-option:hover { border-color: var(--brand); background: var(--brand-soft); }
+    .demo-option:disabled, .demo-launcher-toggle:disabled { cursor: wait; opacity: .55; }
     .demo-option svg { width: 16px; height: 16px; margin: auto; color: var(--brand-dark); }
     .demo-option strong { display: block; font-size: 11px; line-height: 1.35; }
     .demo-option small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; line-height: 1.35; }
@@ -1156,6 +1157,7 @@
     let assistantChatHistory = [];
     let assistantChatBusy = false;
     let assistantChatContextVersion = 0;
+    let demoInjectionBusy = false;
     let lastDemoInitializationEventId = null;
     let analysisCasePollTimer = null;
     let patrolRevealState = null;
@@ -2319,11 +2321,23 @@
       try { await action(); showToast(success); await refresh(); }
       catch (error) { showToast(error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message, true); if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false; }
     }
-    function initializeDemo() {
-      resetAssistantChatContext();
-      return mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化');
+    function setDemoInjectionBusy(busy) {
+      demoInjectionBusy = busy;
+      document.querySelectorAll('#demo_launcher .demo-option, #demo_launcher .demo-launcher-toggle').forEach(button => { button.disabled = busy; });
+    }
+    async function initializeDemo() {
+      if (demoInjectionBusy) return;
+      setDemoInjectionBusy(true);
+      try {
+        resetAssistantChatContext();
+        await mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化');
+      } finally {
+        setDemoInjectionBusy(false);
+      }
     }
     async function injectDemo(mode) {
+      if (demoInjectionBusy) return;
+      setDemoInjectionBusy(true);
       const messages = {
         success: '已注入低溶氧自动处置 Demo',
         alerts: '已注入溶解氧 + 氨氮双传感器告警 Demo',
@@ -2333,9 +2347,13 @@
         multimodal: '已启动多模态案例序列 Demo',
         health: '已注入传感器与设备故障 Demo',
       };
-      resetAssistantChatContext();
-      await mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), messages[mode] || 'Demo 已注入');
-      if (mode === 'multimodal') watchAnalysisCases();
+      try {
+        resetAssistantChatContext();
+        await mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), messages[mode] || 'Demo 已注入');
+        if (mode === 'multimodal') watchAnalysisCases();
+      } finally {
+        setDemoInjectionBusy(false);
+      }
     }
     function watchAnalysisCases() {
       clearInterval(analysisCasePollTimer);

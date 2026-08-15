@@ -385,6 +385,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertGreater(response.text.index('id="pond_grid"'), response.text.index('id="view_analytics"'))
         self.assertLess(response.text.index('id="pond_grid"'), response.text.index('id="sensor_trend_tabs"'))
         self.assertIn('id="demo_launcher"', response.text)
+        self.assertIn('function setDemoInjectionBusy', response.text)
+        self.assertIn('if (demoInjectionBusy) return;', response.text)
         self.assertIn("onclick=\"injectDemo('alerts')\"", response.text)
         self.assertIn("onclick=\"injectDemo('multimodal')\"", response.text)
         self.assertIn("onclick=\"injectDemo('health')\"", response.text)

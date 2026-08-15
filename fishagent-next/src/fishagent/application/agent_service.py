@@ -102,6 +102,7 @@ class FishAgentSystem:
         self.weather_api = MockWeatherApi()
         self.device_control_skill = DeviceControlSkill(self)
         self._job_lock = RLock()
+        self._demo_lock = RLock()
         self._analysis_case_lock = RLock()
         self._analysis_case_thread: Optional[Thread] = None
         self._analysis_case_generation = 0
@@ -118,9 +119,10 @@ class FishAgentSystem:
                     self.snapshot()
 
     def initialize_demo(self) -> dict:
-        self._cancel_analysis_case_sequence()
-        self._reset_demo_with_telemetry()
-        return self.snapshot()
+        with self._demo_lock:
+            self._cancel_analysis_case_sequence()
+            self._reset_demo_with_telemetry()
+            return self.snapshot()
 
     def _cancel_analysis_case_sequence(self) -> None:
         with self._analysis_case_lock:
@@ -2534,6 +2536,10 @@ class FishAgentSystem:
             return job
 
     def run_demo(self, mode: str) -> dict:
+        with self._demo_lock:
+            return self._run_demo(mode)
+
+    def _run_demo(self, mode: str) -> dict:
         if mode not in AUTO_RESPONSE_DEMO_MODES:
             raise ValueError("unknown demo mode: %s" % mode)
         self._cancel_analysis_case_sequence()
@@ -2579,27 +2585,28 @@ class FishAgentSystem:
 
     def inject_demo(self, mode: str) -> dict:
         """Inject an operator-selected scenario and let the normal flow respond."""
-        if mode == "init":
-            return self.initialize_demo()
-        if mode not in AUTO_RESPONSE_DEMO_MODES:
-            raise ValueError("unknown demo mode: %s" % mode)
-        state = self.run_demo(mode)
-        incident_ids = [item["id"] for item in state.get("incidents", [])]
-        self.store.emit(
-            "demo.injected",
-            "已注入自动响应 Demo：%s" % DEMO_MODE_LABELS[mode],
-            {
-                "mode": mode,
-                "label": DEMO_MODE_LABELS[mode],
-                "auto_response": True,
-                "transport": "mqtt",
-                "incident_ids": incident_ids,
-            },
-            actor_type="user",
-            resource_type="demo",
-            resource_id=mode,
-        )
-        return self.snapshot()
+        with self._demo_lock:
+            if mode == "init":
+                return self.initialize_demo()
+            if mode not in AUTO_RESPONSE_DEMO_MODES:
+                raise ValueError("unknown demo mode: %s" % mode)
+            state = self.run_demo(mode)
+            incident_ids = [item["id"] for item in state.get("incidents", [])]
+            self.store.emit(
+                "demo.injected",
+                "已注入自动响应 Demo：%s" % DEMO_MODE_LABELS[mode],
+                {
+                    "mode": mode,
+                    "label": DEMO_MODE_LABELS[mode],
+                    "auto_response": True,
+                    "transport": "mqtt",
+                    "incident_ids": incident_ids,
+                },
+                actor_type="user",
+                resource_type="demo",
+                resource_id=mode,
+            )
+            return self.snapshot()
 
     def snapshot(self) -> dict:
         return self._snapshot(persist=True)

@@ -1,7 +1,7 @@
 import json
 import unittest
 from tempfile import TemporaryDirectory
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -16,6 +16,39 @@ from fishagent.infrastructure.gateways import GatewayResult, MqttDeviceGateway
 
 
 class B01FlowTest(unittest.TestCase):
+    def test_auto_response_demo_serializes_concurrent_runs(self) -> None:
+        system = FishAgentSystem()
+        entered = Event()
+        release = Event()
+        counter_lock = Lock()
+        active = 0
+        max_active = 0
+
+        def fake_run_demo(mode):
+            nonlocal active, max_active
+            with counter_lock:
+                active += 1
+                max_active = max(max_active, active)
+            entered.set()
+            release.wait(timeout=2)
+            with counter_lock:
+                active -= 1
+            return {"incidents": []}
+
+        with patch.object(system, "_run_demo", side_effect=fake_run_demo):
+            first = Thread(target=system.run_demo, args=("success",))
+            second = Thread(target=system.run_demo, args=("success",))
+            first.start()
+            self.assertTrue(entered.wait(timeout=1))
+            second.start()
+            second.join(timeout=0.05)
+            self.assertTrue(second.is_alive())
+            release.set()
+            first.join(timeout=1)
+            second.join(timeout=1)
+
+        self.assertEqual(max_active, 1)
+
     def test_llm_decision_drives_incident_execution(self) -> None:
         class FakeOrchestrator:
             available = True
