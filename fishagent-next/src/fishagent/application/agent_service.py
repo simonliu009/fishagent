@@ -946,6 +946,7 @@ class FishAgentSystem:
         assignee: str = "现场操作员",
         priority: str = "HIGH",
     ) -> ManualTask:
+        description = self._manual_task_description(incident_id, title, description)
         task = ManualTask(
             id=new_id("task"),
             incident_id=incident_id,
@@ -966,6 +967,182 @@ class FishAgentSystem:
         task.completed_at = utcnow()
         self.store.emit("manual_task.completed", task.title, {"task_id": task.id})
         return task
+
+    @staticmethod
+    def _localize_manual_task_text(value: str) -> str:
+        for quality, label in READING_QUALITY_LABELS.items():
+            value = value.replace(quality, label)
+        return value
+
+    def _manual_task_description(self, incident_id: Optional[str], title: str, reason: str) -> str:
+        """Turn a terse escalation into an operator-ready field checklist."""
+        original = self._localize_manual_task_text(str(reason or "未提供转人工原因").strip())
+        if not incident_id or incident_id not in self.store.incidents:
+            return original
+        if "【人工执行清单】" in original:
+            return original
+
+        incident = self.store.incidents[incident_id]
+        pond = self.store.ponds.get(incident.pond_id)
+        pond_label = pond.name if pond else incident.pond_id
+        latest_by_metric: dict[str, SensorReading] = {}
+        for reading in self.store.readings:
+            if reading.pond_id != incident.pond_id:
+                continue
+            previous = latest_by_metric.get(reading.metric)
+            if previous is None or reading.sampled_at > previous.sampled_at:
+                latest_by_metric[reading.metric] = reading
+
+        evidence = incident.evidence[-1] if incident.evidence else None
+        evidence_summary = self._localize_manual_task_text(str(evidence.summary if evidence else "暂无现场证据").strip())
+        if len(evidence_summary) > 360:
+            evidence_summary = evidence_summary[:360] + "..."
+
+        abnormal_metrics: list[str] = []
+        abnormal_metric_keys: set[str] = set()
+        for metric, reading in latest_by_metric.items():
+            metric_name = DEMO_SENSOR_BY_METRIC.get(metric, {"name": metric}).get("name", metric)
+            if reading.quality != "GOOD":
+                abnormal_metric_keys.add(metric)
+                abnormal_metrics.append("%s %.2f%s（读数质量：%s）" % (metric_name, reading.value, reading.unit, READING_QUALITY_LABELS.get(reading.quality, reading.quality)))
+                continue
+            if metric == "DO" and pond and reading.value < pond.dissolved_oxygen_min:
+                abnormal_metric_keys.add(metric)
+                abnormal_metrics.append("%s %.2f%s（低于安全线 %.2f%s）" % (metric_name, reading.value, reading.unit, pond.dissolved_oxygen_min, reading.unit))
+                continue
+            high_limit = WATER_QUALITY_HIGH_LIMITS.get(metric)
+            if high_limit is not None and reading.value > high_limit:
+                abnormal_metric_keys.add(metric)
+                abnormal_metrics.append("%s %.2f%s（高于安全线 %.2f%s）" % (metric_name, reading.value, reading.unit, high_limit, reading.unit))
+                continue
+            safe_range = WATER_QUALITY_RANGES.get(metric)
+            if safe_range and not safe_range[0] <= reading.value <= safe_range[1]:
+                abnormal_metric_keys.add(metric)
+                abnormal_metrics.append("%s %.2f（超出安全范围 %.2f-%.2f）" % (metric_name, reading.value, safe_range[0], safe_range[1]))
+
+        sensor_health = []
+        for sensor in self.store.sensors.values():
+            if sensor.pond_id != incident.pond_id:
+                continue
+            health = self.store.sensor_health.get(sensor.id)
+            if health and health.status != HealthStatus.ONLINE:
+                state_label = {
+                    HealthStatus.OFFLINE: "离线",
+                    HealthStatus.DRIFTING: "漂移",
+                    HealthStatus.ERROR: "错误",
+                }.get(health.status, health.status.value)
+                detail = "%s（%s，%s" % (sensor.name, sensor.id, state_label)
+                if health.message:
+                    detail += "，%s" % health.message
+                sensor_health.append(detail + "）")
+
+        devices = [item for item in self.store.devices.values() if item.pond_id == incident.pond_id]
+        proposed_devices = []
+        for proposal_id in incident.action_proposal_ids:
+            proposal = self.store.action_proposals.get(proposal_id)
+            device = self.store.devices.get(proposal.device_id) if proposal else None
+            if device and device not in proposed_devices:
+                proposed_devices.append(device)
+        relevant_capabilities: set[str] = set()
+        if "DO" in abnormal_metric_keys or "溶氧" in incident.title or "低氧" in evidence_summary:
+            relevant_capabilities.add("aeration")
+        if "投喂" in incident.title or "投喂" in evidence_summary:
+            relevant_capabilities.add("feeding")
+        if "天气" in evidence_summary or "强降雨" in evidence_summary:
+            relevant_capabilities.add("valve_control")
+        relevant_devices = [item for item in devices if not item.healthy or item.capability in relevant_capabilities]
+        for item in proposed_devices:
+            if item not in relevant_devices:
+                relevant_devices.append(item)
+        device_details = [
+            "%s（能力：%s，%s，当前%s）" % (
+                item.name,
+                {"aeration": "增氧", "valve_control": "阀门", "feeding": "投喂"}.get(item.capability, item.capability),
+                "在线" if item.healthy else "离线",
+                "开启" if item.shadow_state == "on" else "关闭",
+            )
+            for item in relevant_devices
+        ]
+
+        metric_names = abnormal_metric_keys
+        checklist: list[str] = []
+        if "DO" in metric_names or "溶氧" in incident.title or "低氧" in evidence_summary:
+            safety_line = pond.dissolved_oxygen_min if pond else 4.0
+            recovery_threshold = safety_line + DO_RECOVERY_MARGIN
+            plan = self.store.verification_plans.get(incident.verification_plan_id or "")
+            if plan:
+                recovery_threshold = plan.threshold
+            checklist.extend([
+                "使用已校准的便携式溶氧仪，在池塘表层、中层、底层各复测 1 次，记录测量位置、时间和值；不要只依据异常传感器读数。",
+                "检查增氧设备的电源、断路器、控制箱、线路、叶轮或曝气盘，以及现场气泡和水流；设备离线时先确认能否现场手动启动。",
+                "若复测仍低于安全线 %.2f mg/L，立即启动可用增氧设备或备用设备，并记录启动时间；设备故障时联系维修并持续人工观察虾群活动。" % safety_line,
+                "增氧启动后不要立即停机；下一次复测达到 %.2f mg/L 且设备运行稳定后，才评估停机，停机后再次确认设备状态。" % recovery_threshold,
+            ])
+        if "AMMONIA" in metric_names or "氨氮" in incident.title:
+            checklist.extend([
+                "现场取水样复测氨氮，至少记录池中心和进水口两个点位的结果，并拍照留存试剂或仪器读数。",
+                "核对最近 24 小时投喂量、残饵、死亡个体和换水记录，检查底部有机物和进排水是否正常。",
+                "在复测和养殖负责人确认前，不得自行投药或大幅改变换水量；将复测结果和建议处理方案回填任务。",
+            ])
+        if "NITRITE" in metric_names or "亚硝酸" in incident.title:
+            checklist.extend([
+                "现场取水样复测亚硝酸根离子，记录池中心、进水口和底层水样的结果。",
+                "检查增氧、循环水和换水设备运行情况，核对近期投喂、残饵及底泥变化；异常设备拍照并记录。",
+                "复测结果未确认前，不自行投药；将水样结果、设备状态和处理建议提交养殖负责人审核。",
+            ])
+        if "TURBIDITY" in metric_names or "浊度" in incident.title:
+            checklist.extend([
+                "现场观察并记录水色、悬浮物和底部扰动，在池中心和进排水口各取样复测浊度。",
+                "检查进水、排水、循环泵和池边施工或降雨影响，确认是否存在持续泥沙或泡沫来源。",
+            ])
+        if "CHLOROPHYLL" in metric_names or "叶绿素" in incident.title:
+            checklist.extend([
+                "复测叶绿素并观察水色、藻团和水面分布，记录池中心与边缘差异。",
+                "核对近期光照、投喂和换水情况；未经负责人确认，不直接采取杀藻或投药措施。",
+            ])
+        if "PH" in metric_names or "pH" in incident.title:
+            checklist.extend([
+                "使用校准 pH 仪在池中心、进水口和底层各复测 1 次，并记录校准时间和读数。",
+                "检查传感器探头清洁、线缆和安装位置；复测异常时先更换或校准探头，再判断水体处置。",
+            ])
+        if "TEMPERATURE" in metric_names or "水温" in incident.title:
+            checklist.extend([
+                "用独立温度计在表层、中层和底层复测水温，记录各点读数和测量时间。",
+                "检查遮阳、进排水和循环设备状态，确认温差来源后再决定是否调整运行方案。",
+            ])
+        if sensor_health:
+            checklist.append("处理异常传感器：检查探头清洁、供电、线缆、网关和 MQTT 上报；与便携仪结果对比后校准或更换，并记录恢复时间。")
+        if evidence and evidence.type == "multimodal_analysis":
+            checklist.append("复核对应水面或水下摄像头画面，确认模型指出的现象是否仍存在；记录发现的位置、数量、持续时间并留存现场照片或视频。")
+            checklist.append("涉及病害、死亡或明显行为异常时，按养殖负责人要求采样或隔离；未完成复核前不得自行投药或跨池转运。")
+        if not checklist:
+            checklist.extend([
+                "按告警证据到现场复核池塘、水体、摄像头观察到的现象及相关设备状态，记录时间、位置、数值和照片。",
+                "对涉及设备先确认电源、网络、控制箱和当前状态；未经人工审批不得执行高风险动作。",
+            ])
+        if any(item.capability == "valve_control" for item in relevant_devices) or "天气" in evidence_summary or "强降雨" in evidence_summary:
+            checklist.append("检查进排水口、阀门位置、漂浮物和防雨固定；需要改变阀门状态时，先按审批要求确认后再现场执行。")
+        if any(item.capability == "feeding" for item in relevant_devices) or "投喂" in evidence_summary:
+            checklist.append("核对投喂机当前状态、下一轮计划和残饵；未完成现场确认前暂停下一轮投喂，不要继续增加水体负荷。")
+
+        lines = [
+            "处理背景：%s" % original,
+            "告警位置：%s" % pond_label,
+            "告警证据：%s" % evidence_summary,
+        ]
+        if abnormal_metrics:
+            lines.append("异常指标：%s" % "；".join(abnormal_metrics))
+        if sensor_health:
+            lines.append("异常传感器：%s" % "；".join(sensor_health))
+        if device_details:
+            lines.append("相关设备：%s" % "；".join(device_details))
+        lines.append("【人工执行清单】")
+        lines.extend("%d. %s" % (index, item) for index, item in enumerate(dict.fromkeys(checklist), 1))
+        lines.extend([
+            "【完成回报】记录复测数据、设备实际状态、已执行动作、执行时间和现场照片；告警条件未消失时不要仅将任务标记为完成。",
+            "【任务来源】%s" % title,
+        ])
+        return "\n".join(lines)
 
     def ingest_reading(
         self,
@@ -2297,7 +2474,7 @@ class FishAgentSystem:
                     "id": item.id,
                     "incident_id": item.incident_id,
                     "title": item.title,
-                    "description": item.description,
+                    "description": self._manual_task_description(item.incident_id, item.title, item.description),
                     "assignee": item.assignee,
                     "priority": item.priority,
                     "status": item.status.value,

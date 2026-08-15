@@ -632,6 +632,9 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
         self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_MANUAL_REQUIRED")
         self.assertEqual(state["manual_tasks"][0]["incident_id"], state["incidents"][0]["id"])
+        self.assertIn("现场取水样复测氨氮", state["manual_tasks"][0]["description"])
+        self.assertIn("核对最近 24 小时投喂量", state["manual_tasks"][0]["description"])
+        self.assertIn("不得自行投药", state["manual_tasks"][0]["description"])
 
     def test_bad_sensor_quality_is_routed_to_agent(self) -> None:
         class ManualOrchestrator:
@@ -667,6 +670,8 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(len(state["manual_tasks"]), 1)
         self.assertIn("不可信", state["incidents"][0]["evidence"][0]["summary"])
         self.assertNotIn("SUSPECT", state["incidents"][0]["evidence"][0]["summary"])
+        self.assertIn("处理异常传感器", state["manual_tasks"][0]["description"])
+        self.assertIn("校准或更换", state["manual_tasks"][0]["description"])
 
     def test_patrol_records_all_sensor_metrics_and_dispatches_anomaly(self) -> None:
         class ManualOrchestrator:
@@ -703,6 +708,13 @@ class B01FlowTest(unittest.TestCase):
         self.assertTrue(any(step.action == "dispatch_incident" for step in patrol.steps))
         self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
         self.assertEqual(len(state["manual_tasks"]), 1)
+        task_description = state["manual_tasks"][0]["description"]
+        self.assertIn("【人工执行清单】", task_description)
+        self.assertIn("B-04 一号增氧机", task_description)
+        self.assertIn("离线", task_description)
+        self.assertIn("便携式溶氧仪", task_description)
+        self.assertIn("读数质量：不可信", task_description)
+        self.assertNotIn("SUSPECT", task_description)
 
     def test_patrol_requests_fresh_sensor_reports_before_inspection(self) -> None:
         class LoopbackPublisher:
