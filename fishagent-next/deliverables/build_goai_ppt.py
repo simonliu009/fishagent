@@ -437,24 +437,33 @@ def make_slides():
         text(slide, body, left + 0.12, 3.16, 1.26, 0.48, size=8.2, color=MUTED, align=PP_ALIGN.CENTER, margin=0)
         if idx < len(lanes) - 1:
             line(slide, left + 1.52, 3.23, left + 1.72, 3.23, accent, 1.5, True)
-    card(slide, 0.68, 4.42, 12.0, 1.42, WHITE, LINE)
-    text(slide, "可观察证据", 0.98, 4.7, 1.4, 0.25, size=15, color=INK, bold=True, margin=0)
-    observable = [
-        ("时间", "本地时区 Agent 轨迹", BLUE),
-        ("消息", "大模型请求 / 回复摘要", PURPLE),
-        ("决策", "结构化 action / rationale", YELLOW),
-        ("动作", "Skill 结果 / MQTT 回执", MINT),
-        ("复核", "上次结果 / 下次复核", CORAL),
+    card(slide, 0.68, 4.32, 7.05, 2.02, WHITE, LINE)
+    text(slide, "Agent 角色分工", 0.96, 4.57, 2.0, 0.24, size=15, color=INK, bold=True, margin=0)
+    roles = [
+        ("supervisor-agent", "校验触发目标，委派 Agent，汇总模型结果", PURPLE),
+        ("sensor-monitor-agent", "请求 REPORT_NOW，读取池塘新鲜快照", BLUE),
+        ("patrol-analysis-agent", "分析水质、设备影子、天气与活跃告警", CYAN),
+        ("action-planning-agent", "检索知识库，形成 action / rationale", YELLOW),
+        ("execution / verification", "Skill 下发 MQTT；复核、重试或转人工", MINT),
     ]
-    for idx, (label, body, accent) in enumerate(observable):
-        left = 2.52 + idx * 1.93
-        add_shape(slide, MSO_SHAPE.OVAL, left, 4.7, 0.34, 0.34, accent, accent, False)
-        text(slide, label, left + 0.44, 4.68, 1.1, 0.2, size=9.5, color=INK, bold=True, margin=0)
-        text(slide, body, left + 0.44, 4.96, 1.35, 0.33, size=8.2, color=MUTED, margin=0)
-    text(slide, "核心工具接口：get_pond_snapshot · get_weather_context · search_knowledge_base · get_device_shadow_state · DeviceControlSkill", 0.98, 5.48, 11.0, 0.18, size=7.8, color=MUTED, margin=0)
-    text(slide, "基础设施：PostgreSQL 持久化 · Redis 事件加速 · MinIO 媒体 / 文件 · Celery 调度 · FastAPI Web", 0.98, 5.72, 11.0, 0.18, size=8.5, color=MUTED, margin=0)
-    card(slide, 0.68, 6.1, 12.0, 0.48, NAVY, NAVY)
-    text(slide, "数据流不是 PPT 假流程：前端直接读取 agent_runs / events / commands / verification_results 的真实运行快照。", 0.92, 6.24, 11.5, 0.18, size=10.5, color=WHITE, bold=True, align=PP_ALIGN.CENTER, margin=0)
+    for idx, (agent, responsibility, accent) in enumerate(roles):
+        y = 4.92 + idx * 0.27
+        add_shape(slide, MSO_SHAPE.OVAL, 0.98, y + 0.02, 0.16, 0.16, accent, accent, False)
+        text(slide, agent, 1.25, y, 2.25, 0.18, size=8.7, color=INK, bold=True, font="Noto Sans Mono CJK SC", margin=0)
+        text(slide, responsibility, 3.62, y, 3.65, 0.18, size=8.7, color=MUTED, margin=0)
+    card(slide, 7.94, 4.32, 4.74, 2.02, PALE_YELLOW, YELLOW)
+    text(slide, "工具接口与协议", 8.22, 4.57, 2.2, 0.24, size=15, color=INK, bold=True, margin=0)
+    tools = [
+        "只读  get_pond_snapshot(pond_id)",
+        "只读  get_weather_context(pond_id)",
+        "RAG   search_knowledge_base(query, species, metric)",
+        "只读  get_device_shadow_state(pond_id)",
+        "写入  DeviceControlSkill → MQTT set_state",
+    ]
+    for idx, item in enumerate(tools):
+        text(slide, item, 8.22, 4.94 + idx * 0.26, 4.05, 0.18, size=8.2, color=INK if idx == 4 else MUTED, bold=idx == 4, font="Noto Sans Mono CJK SC", margin=0)
+    card(slide, 0.68, 6.58, 12.0, 0.38, NAVY, NAVY)
+    text(slide, "协议：传感器 commands → REPORT_NOW；设备 fishagent/ponds/{pond_id}/devices/{device_id}/commands → set_state；证据落地 agent_runs / events / commands / verification_results", 0.9, 6.68, 11.55, 0.18, size=8.1, color=WHITE, bold=True, align=PP_ALIGN.CENTER, margin=0)
 
     # 10. Safety
     slide = presentation.slides.add_slide(blank)
