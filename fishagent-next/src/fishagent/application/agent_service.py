@@ -35,6 +35,7 @@ from fishagent.domain.models import (
     Incident,
     IncidentStatus,
     JobStatus,
+    KnowledgeDocument,
     ManualTask,
     PatrolFinding,
     Pond,
@@ -1379,6 +1380,45 @@ class FishAgentSystem:
         matched = [item for item in documents if item.get("match_score", 0) > 0]
         selected = matched or documents
         return selected[:8]
+
+    def create_knowledge_document(self, payload: dict[str, Any]) -> KnowledgeDocument:
+        title = str(payload.get("title") or "").strip()
+        content = str(payload.get("content") or "").strip()
+        if not title or not content:
+            raise ValueError("知识文档标题和正文不能为空")
+        keywords = payload.get("keywords", [])
+        if isinstance(keywords, str):
+            keywords = [item.strip() for item in re.split(r"[,，、;；]+", keywords) if item.strip()]
+        if not isinstance(keywords, list):
+            raise ValueError("keywords must be a list or comma-separated string")
+        document = KnowledgeDocument(
+            id=str(payload.get("id") or new_id("knowledge")),
+            title=title,
+            source=str(payload.get("source") or "养殖运营知识库").strip(),
+            version=str(payload.get("version") or "1.0").strip(),
+            section=str(payload.get("section") or "").strip(),
+            content=content,
+            keywords=[str(item).strip() for item in keywords if str(item).strip()],
+            species=str(payload.get("species") or "").strip(),
+            metric=str(payload.get("metric") or "").strip(),
+            reference_dose=str(payload.get("reference_dose") or "").strip(),
+            risk_notes=str(payload.get("risk_notes") or "").strip(),
+            withdrawal_period=str(payload.get("withdrawal_period") or "").strip(),
+        )
+        if document.id in self.store.knowledge_documents:
+            raise ValueError("知识文档 ID 已存在")
+        self.store.knowledge_documents[document.id] = document
+        self.store.emit("knowledge.document.created", "知识文档已添加", {"document_id": document.id})
+        self.snapshot()
+        return document
+
+    def delete_knowledge_document(self, document_id: str) -> KnowledgeDocument:
+        document = self.store.knowledge_documents.pop(document_id, None)
+        if document is None:
+            raise KeyError("knowledge document does not exist")
+        self.store.emit("knowledge.document.deleted", "知识文档已删除", {"document_id": document_id})
+        self.snapshot()
+        return document
 
     def inventory_snapshot(self) -> list[dict[str, Any]]:
         return [

@@ -99,7 +99,7 @@
     }
     .primary-nav {
       display: grid;
-      grid-template-columns: repeat(10, minmax(0, 1fr));
+      grid-template-columns: repeat(11, minmax(0, 1fr));
       background: var(--surface);
       border-bottom: 1px solid var(--line);
     }
@@ -126,6 +126,13 @@
     .report-history-item strong, .report-history-item span { display: block; }
     .report-history-item span { margin-top: 3px; color: var(--muted); font-size: 11px; }
     .report-preview { width: 100%; min-height: 720px; border: 1px solid var(--line); background: #f5f7fb; }
+    .knowledge-management { display: grid; grid-template-columns: minmax(340px, .82fr) minmax(0, 1.18fr); gap: 14px; }
+    .knowledge-admin-list { display: grid; gap: 8px; max-height: 720px; overflow: auto; }
+    .knowledge-admin-card { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
+    .knowledge-admin-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .knowledge-admin-head strong { font-size: 12px; }
+    .knowledge-admin-card p { margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
+    .knowledge-admin-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 7px; color: var(--muted); font-size: 10px; }
     .app-main { width: min(1500px, 100%); margin: 0 auto; padding: 22px; }
     .view { display: none; }
     .view.active { display: block; }
@@ -683,7 +690,7 @@
     }
     .system-ok { display: flex; align-items: center; gap: 6px; }
     @media (max-width: 1080px) {
-      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout, .case-flow-layout, .report-layout { grid-template-columns: 1fr; }
+      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout, .case-flow-layout, .report-layout, .knowledge-management { grid-template-columns: 1fr; }
       .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .case-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -695,7 +702,7 @@
       .brand-subtitle { display: none; }
       .brand { min-width: 0; }
       .brand-name { font-size: 16px; }
-      .primary-nav { overflow-x: auto; grid-template-columns: repeat(10, minmax(120px, 1fr)); }
+      .primary-nav { overflow-x: auto; grid-template-columns: repeat(11, minmax(120px, 1fr)); }
       .nav-button { min-height: 44px; }
       .app-main { padding: 12px; }
       .patrol-panel, .tool-panel { padding: 12px; }
@@ -744,6 +751,7 @@
     <button class="nav-button active" type="button" data-view="monitor" onclick="switchView('monitor')"><i data-lucide="layout-dashboard"></i><span>监控总览</span></button>
     <button class="nav-button" type="button" data-view="assistant" onclick="switchView('assistant')"><i data-lucide="bot"></i><span>AI 助手</span></button>
     <button class="nav-button" type="button" data-view="cases" onclick="switchView('cases')"><i data-lucide="route"></i><span>Agent 案例</span></button>
+    <button class="nav-button" type="button" data-view="knowledge" onclick="switchView('knowledge')"><i data-lucide="book-open-check"></i><span>知识库</span></button>
     <button class="nav-button" type="button" data-view="management" onclick="switchView('management')"><i data-lucide="waves"></i><span>养殖管理</span></button>
     <button class="nav-button" type="button" data-view="analytics" onclick="switchView('analytics')"><i data-lucide="chart-no-axes-combined"></i><span>数据分析</span></button>
     <button class="nav-button" type="button" data-view="assets" onclick="switchView('assets')"><i data-lucide="square-plus"></i><span>资产录入</span></button>
@@ -859,10 +867,31 @@
           </div>
         </div>
       </section>
-      <div class="dashboard-grid single-panel-grid" style="margin-top:14px">
+    </section>
+
+    <section id="view_knowledge" class="view">
+      <div class="knowledge-management">
         <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="book-open-check"></i>病害知识库</h2><span id="knowledge_meta" class="section-meta"></span></div>
-          <div id="knowledge_grid" class="knowledge-grid"></div>
+          <div class="section-heading"><div><h2 class="section-title"><i data-lucide="book-open-check"></i>知识库管理</h2><p class="eyebrow">管理 Agent 检索使用的行业文档、参考边界和风险提示</p></div><span id="knowledge_meta" class="section-meta"></span></div>
+          <div class="form-grid" style="margin-top:14px">
+            <label class="field">标题<input id="knowledge_title" placeholder="例如：高温期溶解氧调控"></label>
+            <label class="field">来源<input id="knowledge_source" value="养殖运营知识库"></label>
+            <label class="field">版本<input id="knowledge_version" value="1.0"></label>
+            <label class="field">章节<input id="knowledge_section" placeholder="例如：水质异常处置"></label>
+            <label class="field">养殖对象<input id="knowledge_species" placeholder="鱼类、对虾"></label>
+            <label class="field">关联指标<input id="knowledge_metric" placeholder="DO / AMMONIA，可留空"></label>
+            <label class="field wide">关键词<input id="knowledge_keywords" placeholder="用逗号分隔，例如：低溶氧,增氧,复核"></label>
+            <label class="field wide">正文<textarea id="knowledge_content" rows="5" placeholder="输入知识文档正文"></textarea></label>
+            <label class="field wide">参考用量或处置边界<textarea id="knowledge_reference_dose" rows="3" placeholder="不直接替代处方，填写参考边界和确认要求"></textarea></label>
+            <label class="field wide">风险提示<textarea id="knowledge_risk_notes" rows="3" placeholder="填写适用条件、禁忌和人工确认要求"></textarea></label>
+            <label class="field wide">休药期或合规要求<input id="knowledge_withdrawal_period" placeholder="如不适用请填写不适用"></label>
+          </div>
+          <div class="actions"><button class="button" type="button" onclick="createKnowledgeDocument()"><i data-lucide="plus"></i>添加文档</button><button class="button secondary" type="button" onclick="resetKnowledgeForm()"><i data-lucide="eraser"></i>清空</button></div>
+          <div id="knowledge_message" class="message"></div>
+        </section>
+        <section class="tool-panel">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="library"></i>文档列表</h2><span class="section-meta">可删除自定义文档</span></div>
+          <div id="knowledge_admin_list" class="knowledge-admin-list" style="margin-top:14px"></div>
         </section>
       </div>
     </section>
@@ -952,7 +981,7 @@
     <section id="view_reports" class="view">
       <section class="tool-panel">
         <div class="section-heading">
-          <div><h2 class="section-title"><i data-lucide="file-chart-column"></i>每日报告</h2><p class="eyebrow">保留历史版本，趋势、知识建议、库存和 Agent 操作日志可独立下载</p></div>
+          <div><h2 class="section-title"><i data-lucide="file-chart-column"></i>每日报告</h2><p class="eyebrow">保留历史版本，趋势、告警、库存和 Agent 操作日志可独立下载</p></div>
           <div class="actions"><button class="button" type="button" onclick="generateDailyReport()"><i data-lucide="file-plus-2"></i>生成今日报告</button><a id="report_download" class="button secondary" href="#" download hidden><i data-lucide="download"></i>下载 HTML</a></div>
         </div>
       </section>
@@ -1912,6 +1941,37 @@
       document.getElementById('event_meta').textContent = `${currentState.events?.length || 0} 条事件`;
       document.getElementById('raw_state').textContent = JSON.stringify(currentState, null, 2);
     }
+    function renderKnowledge() {
+      const documents = [...(currentState.knowledge_documents || [])].sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN'));
+      document.getElementById('knowledge_meta').textContent = `${documents.length} 篇文档`;
+      document.getElementById('knowledge_admin_list').innerHTML = documents.length ? documents.map(item => `<article class="knowledge-admin-card"><div class="knowledge-admin-head"><strong>${escapeHtml(item.title)}</strong><button class="icon-button" type="button" title="删除文档" onclick="deleteKnowledgeDocument('${escapeHtml(item.id)}')"><i data-lucide="trash-2"></i></button></div><div class="knowledge-admin-meta"><span>${escapeHtml(item.source || '未填写来源')}</span><span>版本 ${escapeHtml(item.version || '--')}</span><span>${escapeHtml(item.section || '未分类')}</span><span>${escapeHtml(item.metric || '通用')}</span></div><p>${escapeHtml(item.content)}</p>${item.keywords?.length ? `<div class="camera-tags">${item.keywords.map(keyword => `<span class="camera-tag">${escapeHtml(keyword)}</span>`).join('')}</div>` : ''}${item.reference_dose ? `<p><b>参考边界：</b>${escapeHtml(item.reference_dose)}</p>` : ''}${item.risk_notes ? `<p><b>风险提示：</b>${escapeHtml(item.risk_notes)}</p>` : ''}${item.withdrawal_period ? `<p><b>合规要求：</b>${escapeHtml(item.withdrawal_period)}</p>` : ''}</article>`).join('') : '<div class="empty">暂无知识文档，请在左侧添加</div>';
+      iconRefresh();
+    }
+    function resetKnowledgeForm() {
+      ['knowledge_title','knowledge_section','knowledge_species','knowledge_metric','knowledge_keywords','knowledge_content','knowledge_reference_dose','knowledge_risk_notes','knowledge_withdrawal_period'].forEach(id => { document.getElementById(id).value = ''; });
+      document.getElementById('knowledge_source').value = '养殖运营知识库';
+      document.getElementById('knowledge_version').value = '1.0';
+    }
+    async function createKnowledgeDocument() {
+      const payload = {
+        title: document.getElementById('knowledge_title').value.trim(),
+        source: document.getElementById('knowledge_source').value.trim(),
+        version: document.getElementById('knowledge_version').value.trim(),
+        section: document.getElementById('knowledge_section').value.trim(),
+        species: document.getElementById('knowledge_species').value.trim(),
+        metric: document.getElementById('knowledge_metric').value.trim(),
+        keywords: document.getElementById('knowledge_keywords').value.trim(),
+        content: document.getElementById('knowledge_content').value.trim(),
+        reference_dose: document.getElementById('knowledge_reference_dose').value.trim(),
+        risk_notes: document.getElementById('knowledge_risk_notes').value.trim(),
+        withdrawal_period: document.getElementById('knowledge_withdrawal_period').value.trim()
+      };
+      try { await api('/api/v1/knowledge-documents', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); resetKnowledgeForm(); showToast('知识文档已添加'); await refresh(); switchView('knowledge'); } catch (error) { showToast(`知识文档添加失败：${error.message}`, true); }
+    }
+    function deleteKnowledgeDocument(documentId) {
+      if (!window.confirm('确定删除这篇知识文档吗？')) return;
+      return mutate(() => api(`/api/v1/knowledge-documents/${encodeURIComponent(documentId)}`, {method:'DELETE'}), '知识文档已删除');
+    }
     function renderReports() {
       const reports = [...(currentState.daily_reports || [])].reverse();
       if (!selectedReportId || !reports.some(item => item.id === selectedReportId)) selectedReportId = reports[0]?.id || null;
@@ -2112,7 +2172,7 @@
       drawSensorTrendChart();
     }
     function renderAll() {
-      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics(); renderReports();
+      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics(); renderKnowledge(); renderReports();
       document.getElementById('footer_status').textContent = '系统运行正常';
       requestAnimationFrame(drawCharts);
       iconRefresh();

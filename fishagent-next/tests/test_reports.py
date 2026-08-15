@@ -19,6 +19,8 @@ def test_knowledge_inventory_and_report_are_persistent_in_snapshot() -> None:
     assert state["daily_reports"][0]["id"] == report.id
     assert report.html_content.startswith("<!doctype html>")
     assert "水质趋势图" in report.html_content
+    assert "知识库" not in report.html_content
+    assert "用药处方" not in report.html_content
     assert len(report.data["trends"]) == 7
     assert order.items[0]["inventory_id"] == "inventory-shrimp-feed"
 
@@ -31,3 +33,18 @@ def test_report_history_keeps_multiple_generated_versions() -> None:
 
     assert first.id != second.id
     assert [item["id"] for item in system.snapshot()["daily_reports"]] == [first.id, second.id]
+
+
+def test_knowledge_documents_can_be_added_and_deleted() -> None:
+    system = FishAgentSystem()
+    system.initialize_demo()
+    document = system.create_knowledge_document(
+        {
+            "title": "夜间巡塘复核",
+            "content": "启动设备后等待现场复核。",
+            "keywords": "夜间,复核",
+        }
+    )
+    assert document.id in {item["id"] for item in system.snapshot()["knowledge_documents"]}
+    system.delete_knowledge_document(document.id)
+    assert document.id not in {item["id"] for item in system.snapshot()["knowledge_documents"]}

@@ -1005,6 +1005,34 @@ def report_payload(item: dict[str, Any], include_html: bool = False) -> dict[str
     return payload
 
 
+@app.get("/api/v1/knowledge-documents")
+async def knowledge_documents(request: Request) -> dict:
+    authenticate(request, request.url.path)
+    return {"knowledge_documents": SYSTEM.read_snapshot().get("knowledge_documents", [])}
+
+
+@app.post("/api/v1/knowledge-documents")
+async def create_knowledge_document(request: Request, payload: JsonPayload) -> Any:
+    authenticate(request, request.url.path, write=True)
+    try:
+        document = SYSTEM.create_knowledge_document(payload.model_dump())
+    except (TypeError, ValueError) as exc:
+        return problem(400, "Invalid knowledge document", str(exc))
+    state = SYSTEM.snapshot()
+    item = next(item for item in state["knowledge_documents"] if item["id"] == document.id)
+    return encoded_response(201, {"knowledge_document": item, "state": state})
+
+
+@app.delete("/api/v1/knowledge-documents/{document_id}")
+async def delete_knowledge_document(request: Request, document_id: str) -> Any:
+    authenticate(request, request.url.path, write=True)
+    try:
+        SYSTEM.delete_knowledge_document(document_id)
+    except KeyError as exc:
+        return problem(404, "Knowledge document not found", str(exc))
+    return encoded_response(200, {"deleted": document_id, "state": SYSTEM.snapshot()})
+
+
 @app.get("/api/v1/inventory")
 async def inventory(request: Request) -> dict:
     authenticate(request, request.url.path)

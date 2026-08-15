@@ -103,10 +103,6 @@ def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at
         item for item in snapshot.get("inventory", [])
         if float(item.get("stock_quantity", 0)) <= float(item.get("minimum_quantity", 0))
     ]
-    knowledge = sorted(
-        snapshot.get("knowledge_documents", []),
-        key=lambda item: (item.get("metric") != "DO", item.get("title", "")),
-    )[:4]
     data = {
         "report_date": report_date.isoformat(),
         "generated_at": generated_at.isoformat(),
@@ -118,8 +114,6 @@ def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at
         "trends": trends,
         "incidents": incidents[-50:],
         "active_incidents": active_incidents,
-        "knowledge_recommendations": knowledge,
-        "medication_prescriptions": knowledge,
         "inventory": snapshot.get("inventory", []),
         "low_stock": low_stock,
         "restock_orders": snapshot.get("restock_orders", []),
@@ -145,16 +139,6 @@ def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at
         )
         for item in incidents[-50:]
     ) or '<tr><td colspan="4">过去报告周期没有告警事件</td></tr>'
-    knowledge_rows = "".join(
-        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
-        % (
-            escape(item.get("title", "")),
-            escape(item.get("source", "")),
-            escape(item.get("reference_dose", "")),
-            escape(item.get("risk_notes", "")),
-        )
-        for item in knowledge
-    ) or '<tr><td colspan="4">暂无知识库命中</td></tr>'
     inventory_rows = "".join(
         "<tr><td>%s</td><td>%s</td><td>%s %s</td><td>%s</td></tr>"
         % (
@@ -187,9 +171,8 @@ table{border-collapse:collapse;width:100%%;font-size:13px}th,td{text-align:left;
 <h2>一、养殖池概览</h2><table><thead><tr><th>池塘</th><th>名称</th><th>品种</th></tr></thead><tbody>%s</tbody></table>
 <h2>二、水质趋势图</h2><div class="trends">%s</div>
 <h2>三、告警与事件</h2><table><thead><tr><th>池塘</th><th>事件</th><th>状态</th><th>证据</th></tr></thead><tbody>%s</tbody></table>
-<h2>四、用药处方参考（需人工确认）</h2><p class="muted">以下是知识库检索到的参考边界，不构成直接用药处方。任何用药必须由专业人员确认产品、剂量和休药期。</p><table><thead><tr><th>文档</th><th>来源</th><th>参考用量/边界</th><th>风险提示</th></tr></thead><tbody>%s</tbody></table>
-<h2>五、库存与补货</h2><table><thead><tr><th>物资</th><th>类别</th><th>库存</th><th>状态</th></tr></thead><tbody>%s</tbody></table>
-<h2>六、设备操作日志与 Agent 轨迹</h2><table><thead><tr><th>时间</th><th>类型</th><th>内容</th></tr></thead><tbody>%s</tbody></table>
+<h2>四、库存与补货</h2><table><thead><tr><th>物资</th><th>类别</th><th>库存</th><th>状态</th></tr></thead><tbody>%s</tbody></table>
+<h2>五、设备操作日志与 Agent 轨迹</h2><table><thead><tr><th>时间</th><th>类型</th><th>内容</th></tr></thead><tbody>%s</tbody></table>
 </main></body></html>""" % (
         escape(report_title),
         escape(report_title),
@@ -198,7 +181,6 @@ table{border-collapse:collapse;width:100%%;font-size:13px}th,td{text-align:left;
         pond_rows,
         trend_sections,
         incident_rows,
-        knowledge_rows,
         inventory_rows,
         log_rows,
     )
