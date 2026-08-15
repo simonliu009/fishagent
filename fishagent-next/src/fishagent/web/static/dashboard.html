@@ -323,7 +323,7 @@
     .work-item-meta { margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.4; }
     .work-item-actions { display: flex; gap: 5px; margin-top: 7px; }
     .empty { min-height: 70px; display: grid; place-items: center; color: var(--muted); font-size: 11px; text-align: center; }
-    .pond-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .pond-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
     .pond-card { min-height: 196px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
     .pond-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .pond-name { min-width: 0; font-size: 11px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1289,6 +1289,11 @@
         .filter(item => item.pond_id === pondId)
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
     }
+    function abnormalEvidenceText(summary) {
+      const text = String(summary || '');
+      const markerIndex = text.lastIndexOf('异常：');
+      return markerIndex >= 0 ? text.slice(markerIndex + 3) : text;
+    }
     function waterMetricAlertSource(metric, reading, pond, finding, incident) {
       if (metricIsAbnormal(metric, reading, pond)) return true;
       const sensorIds = new Set((currentState.sensors || [])
@@ -1305,8 +1310,8 @@
         TEMPERATURE: ['水温', '温度']
       }[metric.metric] || [metric.label];
       const evidenceText = [
-        finding?.status !== 'NORMAL' ? finding.summary : '',
-        ...(incident?.evidence || []).map(item => item.summary || '')
+        finding?.status !== 'NORMAL' ? abnormalEvidenceText(finding.summary) : '',
+        ...(incident?.evidence || []).map(item => abnormalEvidenceText(item.summary))
       ].join('；');
       return metricNames.some(name => evidenceText.includes(name));
     }
