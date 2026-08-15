@@ -250,26 +250,35 @@
     }
     .detail-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 11px; }
     .detail-head b { color: var(--ink); font-size: 16px; font-weight: 800; }
-    .patrol-pond-list { display: grid; gap: 4px; margin-top: 7px; }
+    .patrol-pond-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
     .patrol-pond-row {
       display: grid;
       grid-template-columns: minmax(180px, 1fr) auto;
       gap: 7px 10px;
       align-items: center;
-      min-height: 70px;
-      padding: 8px;
-      background: var(--surface-alt);
-      border-radius: 5px;
+      min-width: 0;
+      min-height: 100%;
+      align-content: start;
+      padding: 10px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 7px;
       font-size: 12px;
     }
-    .patrol-sensor-strip { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+    .patrol-sensor-strip { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
     .patrol-device-block { grid-column: 1 / -1; }
     .patrol-device-heading { margin-bottom: 3px; color: var(--muted); font-size: 10px; font-weight: 750; }
-    .patrol-device-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+    .patrol-device-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
     .patrol-advice { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 7px; padding: 7px 8px; border: 1px solid #c6e3d8; border-radius: 4px; color: var(--brand-dark); background: #f2fbf7; font-size: 11px; line-height: 1.55; }
     .patrol-advice svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 1px; }
     .patrol-advice strong { margin-right: 6px; color: var(--ink); font-size: 11px; }
     .patrol-advice span { display: inline; }
+    .patrol-loading { min-height: 120px; display: flex; align-items: center; justify-content: center; gap: 4px; color: var(--ink); font-size: 16px; font-weight: 800; }
+    .patrol-typing { display: inline-flex; align-items: center; gap: 4px; height: 16px; }
+    .patrol-typing i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: patrol-dot-bounce 1.2s infinite ease-in-out; }
+    .patrol-typing i:nth-child(2) { animation-delay: .16s; }
+    .patrol-typing i:nth-child(3) { animation-delay: .32s; }
+    @keyframes patrol-dot-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .45; } 30% { transform: translateY(-4px); opacity: 1; } }
     .patrol-device { min-width: 0; display: flex; align-items: center; gap: 4px; padding: 4px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--surface); font-size: 9px; line-height: 1.25; }
     .patrol-device .dot { width: 6px; height: 6px; flex: 0 0 auto; }
     .patrol-device-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -776,6 +785,7 @@
       .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .case-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .patrol-pond-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .patrol-sensor-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
       .patrol-device-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
@@ -792,6 +802,7 @@
       .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary, .case-summary-grid, .knowledge-grid, .camera-observation-grid, .inventory-grid { grid-template-columns: 1fr; }
       .llm-profile-bar { grid-template-columns: 1fr; }
       .metric-tile { min-height: 68px; }
+      .patrol-pond-list { grid-template-columns: 1fr; }
       .patrol-pond-row { grid-template-columns: 1fr auto; gap: 6px; }
       .patrol-sensor-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .patrol-device-strip { grid-template-columns: 1fr; }
@@ -867,9 +878,9 @@
       <div id="metric_grid" class="metric-grid"></div>
 
       <div class="monitor-stack">
-        <section class="tool-panel">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="droplets"></i>水质监控面板</h2><span id="water_meta" class="section-meta"></span></div>
-          <div id="pond_grid" class="pond-grid"></div>
+        <section id="alert_panel" class="tool-panel" tabindex="-1">
+          <div class="section-heading"><h2 class="section-title"><i data-lucide="bell-ring"></i>告警列表</h2><span id="alert_meta" class="status-badge danger">0 条/24h · 0 条活跃</span></div>
+          <div id="alert_list" class="alert-list"></div>
         </section>
 
         <section class="tool-panel">
@@ -880,13 +891,6 @@
         <section class="tool-panel">
           <div class="section-heading"><h2 class="section-title"><i data-lucide="bot"></i>Agent 执行中心</h2><span class="section-meta">审批 · 任务 · 运行</span></div>
           <div id="execution_kanban" class="kanban"></div>
-        </section>
-      </div>
-
-      <div class="dashboard-grid single-panel-grid">
-        <section id="alert_panel" class="tool-panel" tabindex="-1">
-          <div class="section-heading"><h2 class="section-title"><i data-lucide="bell-ring"></i>告警列表</h2><span id="alert_meta" class="status-badge danger">0 条/24h · 0 条活跃</span></div>
-          <div id="alert_list" class="alert-list"></div>
         </section>
       </div>
     </section>
@@ -981,6 +985,10 @@
     </section>
 
     <section id="view_analytics" class="view">
+      <section class="tool-panel">
+        <div class="section-heading"><h2 class="section-title"><i data-lucide="droplets"></i>水质监控面板</h2><span id="water_meta" class="section-meta"></span></div>
+        <div id="pond_grid" class="pond-grid"></div>
+      </section>
       <section class="tool-panel sensor-trend-panel">
         <div class="section-heading">
           <h2 class="section-title"><i data-lucide="chart-spline"></i>传感器趋势</h2>
@@ -1506,6 +1514,7 @@
       } else {
         document.getElementById('patrol_scope').textContent = `${ponds.length} 个池塘 · 可滚动查看`;
       }
+      const patrolLoadingMarkup = '<div class="patrol-loading" role="status" aria-label="正在巡查"><span>正在巡查</span><span class="patrol-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>';
       document.getElementById('patrol_pond_list').innerHTML = visiblePonds.length ? visiblePonds.map(pond => {
         const condition = pondCondition(pond);
         const readings = waterMetrics.map(metric => ({...metric, reading:latestMetricReading(pond.id, metric.metric)}));
@@ -1529,7 +1538,7 @@
           ? `<div class="patrol-advice"><i data-lucide="lightbulb"></i><div><strong>巡查建议</strong><span>${recommendations.map(item => escapeHtml(item)).join('；')}</span></div></div>`
           : '';
         return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pond.name)}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div><div class="patrol-device-block"><div class="patrol-device-heading">设备在线状态</div><div class="patrol-device-strip">${deviceStrip}</div></div>${adviceMarkup}</div>`;
-      }).join('') : activeReveal ? `<div class="empty">正在巡查...</div>` : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
+      }).join('') : activeReveal ? patrolLoadingMarkup : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
       updateCountdown();
     }
     function advanceCountdownTarget(now = Date.now()) {
