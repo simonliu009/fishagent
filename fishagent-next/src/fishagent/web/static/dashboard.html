@@ -418,13 +418,13 @@
     .alert-flow-node.failed .alert-flow-check { color: var(--red); }
     .alert-flow-label { color: var(--brand-dark); font-size: 10px; font-weight: 850; }
     .alert-flow-agent { margin-top: 4px; color: var(--ink); font-size: 10px; font-weight: 750; }
-    .alert-flow-summary { position: relative; z-index: 1; display: -webkit-box; max-height: 2.9em; margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.45; white-space: pre-line; -webkit-box-orient: vertical; -webkit-line-clamp: 2; cursor: zoom-in; }
+    .alert-flow-summary { position: relative; z-index: 1; display: -webkit-box; max-height: 2.9em; margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.45; white-space: pre-line; -webkit-box-orient: vertical; -webkit-line-clamp: 2; cursor: help; }
     .alert-item.reveal-hidden { opacity: 0; transform: translateY(10px); pointer-events: none; }
     .alert-item.reveal-visible { animation: alert-item-reveal .28s ease-out both; }
     .alert-flow-node.reveal-hidden { opacity: 0; transform: translateX(18px); }
     .alert-flow-node.reveal-visible { animation: alert-flow-node-reveal .28s ease-out both; }
     .alert-flow-summary.is-streaming::after { content: '▋'; display: inline-block; margin-left: 2px; color: var(--brand); animation: alert-stream-caret .8s steps(1, end) infinite; }
-    .alert-flow-summary:hover { z-index: 10; display: block; width: min(420px, calc(100vw - 44px)); max-width: calc(100vw - 44px); max-height: none; margin: -2px 0 -8px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--ink); background: var(--surface); box-shadow: 0 9px 24px rgba(24, 48, 42, .18); font-size: 11px; line-height: 1.55; }
+    .alert-text-tooltip { position: fixed; z-index: 80; width: min(420px, calc(100vw - 32px)); max-height: min(220px, calc(100vh - 32px)); padding: 9px 10px; overflow: auto; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface); box-shadow: 0 12px 30px rgba(24, 48, 42, .2); font-size: 11px; line-height: 1.55; white-space: pre-line; pointer-events: auto; }
     @keyframes alert-item-reveal { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes alert-flow-node-reveal { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
     @keyframes alert-stream-caret { 0%, 45% { opacity: 1; } 46%, 100% { opacity: 0; } }
@@ -511,6 +511,24 @@
     .chat-send:hover { color: #fff; background: var(--brand-dark); border-color: transparent; }
     .chat-send:disabled { cursor: wait; opacity: .55; }
     .chat-context { color: var(--muted); font-size: 10px; }
+    .assistant-launcher { position: fixed; right: 20px; bottom: 82px; z-index: 36; }
+    .assistant-launcher-toggle { width: 48px; height: 48px; display: grid; place-items: center; padding: 0; border: 1px solid var(--blue); border-radius: 50%; color: #fff; background: var(--blue); box-shadow: 0 12px 28px rgba(57, 113, 184, .28); transition: transform .18s ease, background .18s ease; }
+    .assistant-launcher-toggle:hover { transform: translateY(-2px); background: #2d5f9d; }
+    .assistant-launcher-toggle svg { width: 21px; height: 21px; }
+    .assistant-launcher-toggle:disabled { cursor: wait; opacity: .55; }
+    .assistant-floating-panel { position: absolute; right: 0; bottom: 58px; width: min(390px, calc(100vw - 24px)); height: min(560px, calc(100vh - 126px)); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: 0 18px 44px rgba(24, 48, 42, .22); opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(8px); transition: opacity .16s ease, transform .16s ease, visibility .16s ease; }
+    .assistant-launcher.is-open .assistant-floating-panel { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0); }
+    .assistant-floating-head { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--surface-alt); }
+    .assistant-floating-title { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 850; }
+    .assistant-floating-title svg { width: 17px; height: 17px; color: var(--blue); }
+    .assistant-floating-head .icon-button { width: 30px; height: 30px; }
+    .assistant-floating-chat { min-height: 0; padding: 12px; overflow-y: auto; }
+    .assistant-floating-chat .chat-empty { min-height: 210px; }
+    .assistant-floating-composer { padding: 10px; border-top: 1px solid var(--line); background: var(--surface-alt); }
+    .assistant-floating-compose-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 36px; gap: 6px; align-items: end; }
+    .assistant-floating-compose-row select { min-width: 0; }
+    .assistant-floating-compose-row textarea { height: 54px; min-height: 54px; max-height: 120px; resize: none; }
+    .assistant-floating-compose-row .chat-send { width: 36px; height: 36px; }
     .case-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .case-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-top: 12px; }
     .case-card { min-height: 164px; padding: 13px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
@@ -853,6 +871,8 @@
       .alert-head { flex-direction: column; }
       .alert-head-actions { justify-content: space-between; width: 100%; }
       .demo-launcher { right: 12px; bottom: 16px; }
+      .assistant-launcher { right: 12px; bottom: 72px; }
+      .assistant-floating-panel { height: min(540px, calc(100vh - 116px)); }
       .data-stream-item { grid-template-columns: 58px minmax(0, 1fr); }
       .run-row-head { align-items: flex-start; flex-wrap: wrap; }
       .run-row-time { margin-left: 0; }
@@ -940,11 +960,11 @@
             <span id="assistant_model_badge" class="status-badge warning">模型未配置</span>
           </div>
           <div id="assistant_chat" class="chat-log" role="log" aria-live="polite"></div>
-          <form id="assistant_chat_form" class="chat-composer" onsubmit="submitAssistantChat(event)">
+          <form id="assistant_chat_form" class="chat-composer assistant-chat-form" onsubmit="submitAssistantChat(event)">
             <div class="chat-compose-row">
-              <select id="assistant_chat_pond" title="对话范围" aria-label="对话范围"><option value="">全场</option></select>
+              <select id="assistant_chat_pond" class="assistant-chat-pond" title="对话范围" aria-label="对话范围" onchange="syncAssistantPond(this.value)"><option value="">全场</option></select>
               <textarea id="assistant_chat_input" maxlength="2000" rows="2" placeholder="输入养殖运营问题" aria-label="发送给智渔AI的消息" onkeydown="handleAssistantChatKey(event)"></textarea>
-              <button id="assistant_chat_send" class="icon-button chat-send" type="submit" title="发送消息"><i data-lucide="send"></i></button>
+              <button id="assistant_chat_send" class="icon-button chat-send assistant-chat-send" type="submit" title="发送消息"><i data-lucide="send"></i></button>
             </div>
           </form>
         </section>
@@ -1167,6 +1187,23 @@
     </div>
     <button class="demo-launcher-toggle" type="button" title="Agent Demo 场景" aria-label="Agent Demo 场景" aria-expanded="false" onclick="toggleDemoLauncher(event)"><i data-lucide="flask-conical"></i></button>
   </aside>
+  <aside id="assistant_launcher" class="assistant-launcher" aria-label="智渔AI 浮动助手">
+    <section id="assistant_floating_panel" class="assistant-floating-panel" aria-label="智渔AI 浮动聊天窗口" aria-hidden="true">
+      <div class="assistant-floating-head">
+        <div class="assistant-floating-title"><i data-lucide="bot"></i><span>智渔AI 助手</span><span id="assistant_floating_model_badge" class="status-badge warning">模型未配置</span></div>
+        <button class="icon-button" type="button" title="关闭聊天窗口" aria-label="关闭聊天窗口" onclick="toggleFloatingAssistant(event)"><i data-lucide="x"></i></button>
+      </div>
+      <div id="assistant_floating_chat" class="chat-log assistant-floating-chat" role="log" aria-live="polite"></div>
+      <form id="assistant_floating_chat_form" class="assistant-chat-form assistant-floating-composer" onsubmit="submitAssistantChat(event)">
+        <div class="assistant-floating-compose-row">
+          <select id="assistant_floating_chat_pond" class="assistant-chat-pond" title="对话范围" aria-label="对话范围" onchange="syncAssistantPond(this.value)"><option value="">全场</option></select>
+          <textarea id="assistant_floating_chat_input" maxlength="2000" rows="2" placeholder="输入养殖运营问题" aria-label="发送给智渔AI的消息" onkeydown="handleAssistantChatKey(event)"></textarea>
+          <button id="assistant_floating_chat_send" class="icon-button chat-send assistant-chat-send" type="submit" title="发送消息"><i data-lucide="send"></i></button>
+        </div>
+      </form>
+    </section>
+    <button id="assistant_launcher_toggle" class="assistant-launcher-toggle" type="button" title="打开智渔AI助手" aria-label="打开智渔AI助手" aria-expanded="false" onclick="toggleFloatingAssistant(event)"><i data-lucide="bot"></i></button>
+  </aside>
   <aside id="alert_capsule" class="alert-capsule" hidden aria-label="活跃告警" onmouseleave="releaseAlertCapsuleHover()">
     <div class="alert-capsule-head">
       <button id="alert_capsule_toggle" class="alert-capsule-icon" type="button" aria-expanded="false" title="固定展开告警" onclick="toggleAlertCapsule(event)"><i data-lucide="bell-ring"></i></button>
@@ -1176,6 +1213,7 @@
   </aside>
   <div id="toast" class="toast" hidden></div>
   <div id="demo_feedback" class="demo-feedback" role="status" aria-live="polite" hidden></div>
+  <div id="alert_text_tooltip" class="alert-text-tooltip" role="tooltip" onmouseenter="keepAlertTextTooltip()" onmouseleave="scheduleAlertTextTooltipHide()" hidden></div>
 
   <script>
     let csrfToken = sessionStorage.getItem('fishagent_csrf') || '';
@@ -1199,6 +1237,7 @@
     let alertRevealTimeouts = new Set();
     let alertRevealIntervals = new Set();
     let demoFeedbackTimer = null;
+    let alertTextTooltipHideTimer = null;
     let lastDemoInitializationEventId = null;
     let analysisCasePollTimer = null;
     let patrolRevealState = null;
@@ -1255,6 +1294,37 @@
       clearTimeout(demoFeedbackTimer);
       document.getElementById('demo_feedback').hidden = true;
     }
+    function keepAlertTextTooltip() {
+      clearTimeout(alertTextTooltipHideTimer);
+    }
+    function scheduleAlertTextTooltipHide() {
+      clearTimeout(alertTextTooltipHideTimer);
+      alertTextTooltipHideTimer = setTimeout(hideAlertTextTooltip, 240);
+    }
+    function hideAlertTextTooltip() {
+      clearTimeout(alertTextTooltipHideTimer);
+      document.getElementById('alert_text_tooltip').hidden = true;
+    }
+    function showAlertTextTooltip(event) {
+      keepAlertTextTooltip();
+      const source = event.currentTarget;
+      const tooltip = document.getElementById('alert_text_tooltip');
+      tooltip.textContent = source.dataset.streamText || source.textContent || '';
+      tooltip.hidden = false;
+      const sourceRect = source.getBoundingClientRect();
+      const place = () => {
+        const tooltipRect = tooltip.getBoundingClientRect();
+        const margin = 16;
+        const left = Math.min(Math.max(margin, sourceRect.left), window.innerWidth - tooltipRect.width - margin);
+        const below = sourceRect.bottom + 8;
+        const top = below + tooltipRect.height <= window.innerHeight - margin
+          ? below
+          : Math.max(margin, sourceRect.top - tooltipRect.height - 8);
+        tooltip.style.left = `${Math.round(left)}px`;
+        tooltip.style.top = `${Math.round(top)}px`;
+      };
+      requestAnimationFrame(place);
+    }
     function keepDemoLauncherOpen() {
       clearTimeout(demoLauncherCloseTimer);
       document.getElementById('demo_launcher').classList.add('is-hover-open');
@@ -1285,6 +1355,7 @@
     }
     function cancelAlertReveal() {
       clearAlertRevealTimers();
+      hideAlertTextTooltip();
       alertRevealToken += 1;
       alertRevealRequested = false;
       document.querySelectorAll('#alert_list .alert-item, #alert_list .alert-flow-node').forEach(node => node.classList.remove('reveal-hidden', 'reveal-visible'));
@@ -1569,10 +1640,16 @@
         const launcher = document.getElementById('demo_launcher');
         launcher.classList.remove('is-hover-open', 'is-pinned');
         launcher.querySelector('.demo-launcher-toggle').setAttribute('aria-expanded', 'false');
+        const assistantLauncher = document.getElementById('assistant_launcher');
+        assistantLauncher.classList.remove('is-open');
+        assistantLauncher.hidden = true;
+        assistantLauncher.querySelector('.assistant-floating-panel').setAttribute('aria-hidden', 'true');
+        assistantLauncher.querySelector('.assistant-launcher-toggle').setAttribute('aria-expanded', 'false');
       }
       document.querySelectorAll('.view').forEach(node => node.classList.toggle('active', node.id === `view_${name}`));
       document.querySelectorAll('.nav-button').forEach(node => node.classList.toggle('active', node.dataset.view === name));
       document.getElementById('demo_launcher').hidden = name !== 'monitor';
+      if (name === 'monitor') document.getElementById('assistant_launcher').hidden = false;
       if (name === 'analytics' || name === 'monitor') requestAnimationFrame(drawCharts);
       iconRefresh();
     }
@@ -2040,6 +2117,7 @@
       return steps.length ? `<div class="agent-data-stream run-trace-list">${steps.map(traceStepMarkup).join('')}</div>` : '<div class="data-stream-empty">运行后将在这里显示实际数据流</div>';
     }
     function renderAlerts() {
+      hideAlertTextTooltip();
       const incidents = (currentState.incidents || [])
         .filter(item => {
           const occurredAt = alertEventTime(item);
@@ -2093,7 +2171,7 @@
         const terminalCommand = command && ['CONFIRMED','REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
         const commandSucceeded = command?.status === 'CONFIRMED';
         const commandFailed = command && ['REJECTED','FAILED','TIMED_OUT','CANCELLED'].includes(command.status);
-        const flowNode = (label, agent, summary, state = 'done') => `<div class="alert-flow-node ${state}${revealClass}" data-stream-text="${escapeHtml(summary)}"><i class="alert-flow-check" data-lucide="${state === 'done' ? 'check-circle-2' : state === 'failed' ? 'circle-x' : 'circle'}"></i><div class="alert-flow-label">${escapeHtml(label)}</div><div class="alert-flow-agent">${escapeHtml(agentLabel(agent))}</div><div class="alert-flow-summary" data-stream-text="${escapeHtml(summary)}">${shouldRevealAlerts ? '' : escapeHtml(summary)}</div></div>`;
+        const flowNode = (label, agent, summary, state = 'done') => `<div class="alert-flow-node ${state}${revealClass}" data-stream-text="${escapeHtml(summary)}"><i class="alert-flow-check" data-lucide="${state === 'done' ? 'check-circle-2' : state === 'failed' ? 'circle-x' : 'circle'}"></i><div class="alert-flow-label">${escapeHtml(label)}</div><div class="alert-flow-agent">${escapeHtml(agentLabel(agent))}</div><div class="alert-flow-summary" data-stream-text="${escapeHtml(summary)}" onmouseenter="showAlertTextTooltip(event)" onmouseleave="scheduleAlertTextTooltipHide()">${shouldRevealAlerts ? '' : escapeHtml(summary)}</div></div>`;
         const flow = [
           flowNode('告警原因', evidence?.type === 'sensor_snapshot' ? 'sensor-monitor-agent' : '事件证据', alertCauseSummary(item, evidence)),
         ];
@@ -2160,22 +2238,47 @@
       return [...(currentState.events || [])].reverse().slice(0, limit).map(item => `<article class="event-row"><div class="event-row-head"><span>#${item.sequence} ${format(item.event_type)}</span><span>${fmtDate(item.occurred_at, false)}</span></div><div class="event-row-meta">${format(item.summary)}</div></article>`).join('') || '<div class="empty">暂无事件</div>';
     }
     function renderAssistantChat() {
-      const log = document.getElementById('assistant_chat');
+      const logs = [...document.querySelectorAll('#assistant_chat, #assistant_floating_chat')];
+      if (!logs.length) return;
       if (!assistantChatHistory.length && !assistantChatBusy) {
-        log.innerHTML = '<div class="chat-empty"><i data-lucide="messages-square"></i><strong>智渔AI 养殖运营助手</strong><span>选择全场或指定鱼塘后开始对话</span></div>';
+        const empty = '<div class="chat-empty"><i data-lucide="messages-square"></i><strong>智渔AI 养殖运营助手</strong><span>选择全场或指定鱼塘后开始对话</span></div>';
+        logs.forEach(log => { log.innerHTML = empty; });
+        iconRefresh();
         return;
       }
       const messages = assistantChatHistory.map(item => `<div class="chat-message ${item.role}"><span class="chat-avatar"><i data-lucide="${item.role === 'user' ? 'user-round' : 'bot'}"></i></span><div class="chat-bubble">${escapeHtml(item.content)}</div></div>`);
       const lastMessage = assistantChatHistory[assistantChatHistory.length - 1];
       if (assistantChatBusy && (!lastMessage || lastMessage.role !== 'assistant')) messages.push('<div class="chat-message assistant pending"><span class="chat-avatar"><i data-lucide="bot"></i></span><div class="chat-bubble"><span class="chat-typing" role="status" aria-label="智渔AI 正在回复"><i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i></span></div></div>');
-      log.innerHTML = messages.join('');
-      requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; iconRefresh(); });
+      const markup = messages.join('');
+      logs.forEach(log => { log.innerHTML = markup; });
+      requestAnimationFrame(() => { logs.forEach(log => { log.scrollTop = log.scrollHeight; }); iconRefresh(); });
+    }
+    function setAssistantChatBusy(busy) {
+      document.querySelectorAll('.assistant-chat-send').forEach(button => { button.disabled = busy; });
+    }
+    function syncAssistantPond(value) {
+      document.querySelectorAll('.assistant-chat-pond').forEach(select => {
+        if (select.value !== value) select.value = value;
+      });
+    }
+    function toggleFloatingAssistant(event) {
+      event.stopPropagation();
+      const launcher = document.getElementById('assistant_launcher');
+      const panel = document.getElementById('assistant_floating_panel');
+      const toggle = document.getElementById('assistant_launcher_toggle');
+      const open = launcher.classList.toggle('is-open');
+      panel.setAttribute('aria-hidden', String(!open));
+      toggle.setAttribute('aria-expanded', String(open));
+      if (open) {
+        renderAssistantChat();
+        requestAnimationFrame(() => document.getElementById('assistant_floating_chat_input').focus());
+      }
     }
     function resetAssistantChatContext() {
       assistantChatContextVersion += 1;
       assistantChatHistory = [];
       assistantChatBusy = false;
-      document.getElementById('assistant_chat_send').disabled = false;
+      setAssistantChatBusy(false);
       renderAssistantChat();
     }
     function renderAssistant() {
@@ -2192,14 +2295,18 @@
       if (!llmDialogOpen || !llmDialogDirty) {
         document.getElementById('llm_message').textContent = currentLlm.api_key_configured ? `密钥已配置：${currentLlm.api_key_preview}` : '尚未配置 API Key';
       }
-      const chatBadge = document.getElementById('assistant_model_badge');
       const modelReady = Boolean(currentLlm.enabled && currentLlm.api_key_configured);
-      chatBadge.className = `status-badge ${modelReady ? '' : 'warning'}`;
-      chatBadge.textContent = modelReady ? `${currentLlm.name || currentLlm.provider} / ${currentLlm.model}` : '模型未配置';
-      const pondSelect = document.getElementById('assistant_chat_pond');
-      const selectedPond = pondSelect.value;
-      pondSelect.innerHTML = '<option value="">全场</option>' + (currentState.ponds || []).map(pond => `<option value="${escapeHtml(pond.id)}">${escapeHtml(pond.id)} · ${escapeHtml(pond.name)}</option>`).join('');
-      if ([...pondSelect.options].some(option => option.value === selectedPond)) pondSelect.value = selectedPond;
+      const chatLabel = modelReady ? `${currentLlm.name || currentLlm.provider} / ${currentLlm.model}` : '模型未配置';
+      document.querySelectorAll('#assistant_model_badge, #assistant_floating_model_badge').forEach(node => {
+        node.className = `status-badge ${modelReady ? '' : 'warning'}`;
+        node.textContent = chatLabel;
+      });
+      const selectedPond = document.querySelector('.assistant-chat-pond')?.value || '';
+      const pondOptions = '<option value="">全场</option>' + (currentState.ponds || []).map(pond => `<option value="${escapeHtml(pond.id)}">${escapeHtml(pond.id)} · ${escapeHtml(pond.name)}</option>`).join('');
+      document.querySelectorAll('.assistant-chat-pond').forEach(pondSelect => {
+        pondSelect.innerHTML = pondOptions;
+        if ([...pondSelect.options].some(option => option.value === selectedPond)) pondSelect.value = selectedPond;
+      });
       renderAssistantChat();
     }
     function syncAssetForm() {
@@ -2531,7 +2638,11 @@
         showDemoFeedback(`${messages[mode] || 'Demo 已注入'}，正在处理，请稍候`, 300000);
         const succeeded = await mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), messages[mode] || 'Demo 已注入', {successToast:false});
         if (succeeded) {
-          showDemoFeedback(`${messages[mode] || 'Demo 已注入'}，正在展示告警流程`);
+          const demoLabel = messages[mode] || 'Demo 已注入';
+          showDemoFeedback(`${demoLabel}，正在触发逐塘巡检...`, 300000);
+          const patrolSucceeded = await runPatrol(true);
+          if (patrolSucceeded) showDemoFeedback(`${demoLabel}，逐塘巡检已完成，正在展示告警流程`);
+          else showDemoFeedback(`${demoLabel}，逐塘巡检触发失败，请查看错误提示`, 8000);
           if (mode === 'multimodal') watchAnalysisCases();
         } else {
           cancelAlertReveal();
@@ -2598,8 +2709,8 @@
         PATROL_REVEAL_INTERVAL_MS,
       );
     }
-    async function runPatrol() {
-      if (patrolRevealState) return;
+    async function runPatrol(fromDemo = false) {
+      if (patrolRevealState || (demoInjectionBusy && !fromDemo)) return false;
       clearTimeout(patrolRevealTimer);
       const token = ++patrolRevealToken;
       patrolRevealState = {runId:null, visible:0};
@@ -2607,15 +2718,16 @@
       renderPatrol();
       try {
         const result = await api('/api/v1/patrol-runs',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-        if (token !== patrolRevealToken) return;
+        if (token !== patrolRevealToken) return false;
         currentState = result.state || currentState;
         lastPatrolRunId = result.run?.id || lastPatrolRunId;
         patrolRevealState = {runId:result.run?.id || null, visible:0};
         renderAll();
         showToast('巡查任务已完成，正在逐塘展示结果');
         revealNextPatrolPond(token);
+        return true;
       } catch (error) {
-        if (token !== patrolRevealToken) return;
+        if (token !== patrolRevealToken) return false;
         clearTimeout(patrolRevealTimer);
         patrolRevealTimer = null;
         patrolRevealState = null;
@@ -2624,18 +2736,20 @@
         const message = error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message;
         showToast(message, true);
         if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false;
+        return false;
       }
     }
     function handleAssistantChatKey(event) {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
-        document.getElementById('assistant_chat_form').requestSubmit();
+        event.currentTarget.closest('form')?.requestSubmit();
       }
     }
     async function submitAssistantChat(event) {
       event.preventDefault();
       if (assistantChatBusy) return;
-      const input = document.getElementById('assistant_chat_input');
+      const form = event.currentTarget;
+      const input = form.querySelector('textarea');
       const message = input.value.trim();
       if (!message) return;
       const history = assistantChatHistory.slice(-12);
@@ -2643,12 +2757,12 @@
       assistantChatHistory.push({role:'user', content:message});
       input.value = '';
       assistantChatBusy = true;
-      document.getElementById('assistant_chat_send').disabled = true;
+      setAssistantChatBusy(true);
       renderAssistantChat();
       let assistantMessage = null;
       try {
         const result = await streamAssistantChat(
-          {message, pond_id:document.getElementById('assistant_chat_pond').value || null, history},
+          {message, pond_id:form.querySelector('.assistant-chat-pond')?.value || null, history},
           delta => {
             if (contextVersion !== assistantChatContextVersion) return;
             if (!assistantMessage) {
@@ -2676,7 +2790,7 @@
       } finally {
         if (contextVersion !== assistantChatContextVersion) return;
         assistantChatBusy = false;
-        document.getElementById('assistant_chat_send').disabled = false;
+        setAssistantChatBusy(false);
         renderAssistantChat();
         input.focus();
       }
