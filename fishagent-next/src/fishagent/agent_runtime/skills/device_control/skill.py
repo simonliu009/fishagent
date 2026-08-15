@@ -34,6 +34,10 @@ class DeviceControlSkill:
             raise ValueError("device-control skill requires an EXECUTE decision")
         if RiskLevel(decision.risk) != RiskLevel.L1:
             raise ValueError("device-control skill only accepts L1 actions")
+        if not decision.device_id:
+            raise ValueError("device-control skill requires a device_id")
+        if decision.target_state not in {"on", "off"}:
+            raise ValueError("device-control skill requires target_state to be on or off")
         run.step(
             "execution-agent",
             "call_skill",

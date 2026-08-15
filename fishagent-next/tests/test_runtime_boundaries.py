@@ -11,7 +11,6 @@ from fishagent.agent_runtime.contracts import IncidentDecision
 from fishagent.agent_runtime.crewai_runtime import (
     CrewAIOrchestrator,
     CrewRunResult,
-    IncidentDecisionOutput,
     _MultimodalCrewLLM,
 )
 from fishagent.application.agent_service import FishAgentSystem
@@ -109,7 +108,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
             ["传感器监控 Agent", "巡查分析 Agent", "视觉与病害分析 Agent", "行动规划 Agent"],
         )
         self.assertIn("必须返回 EXECUTE", captured["tasks"][0].description)
-        self.assertIs(captured["tasks"][0].output_pydantic, IncidentDecisionOutput)
+        self.assertIsNone(getattr(captured["tasks"][0], "output_pydantic", None))
         self.assertIsNone(getattr(captured["tasks"][0], "output_json", None))
 
     def test_crewai_chat_only_exposes_final_answer(self) -> None:
@@ -119,9 +118,11 @@ class RuntimeBoundaryTests(unittest.TestCase):
 
         self.assertEqual(answer, "结论：B-02 水质稳定。")
 
-    def test_crewai_chat_rejects_reasoning_without_final_answer(self) -> None:
-        with self.assertRaisesRegex(ValueError, "safe final chat answer"):
-            CrewAIOrchestrator._extract_public_answer("Here's a thinking process: internal details")
+    def test_crewai_chat_recovers_when_only_reasoning_is_returned(self) -> None:
+        self.assertEqual(
+            CrewAIOrchestrator._extract_public_answer("Here's a thinking process: internal details"),
+            "结论：模型未给出可展示结论，请稍后重试。",
+        )
 
     def test_crewai_chat_localizes_snapshot_times_for_operator(self) -> None:
         orchestrator = object.__new__(CrewAIOrchestrator)
@@ -253,7 +254,7 @@ class RuntimeBoundaryTests(unittest.TestCase):
             "LLM_PROVIDER_CONFIG_INVALID",
         )
 
-    def test_crewai_decision_invalid_only_means_invalid_structured_output(self) -> None:
+    def test_crewai_decision_keeps_unstructured_output_for_manual_understanding(self) -> None:
         orchestrator = object.__new__(CrewAIOrchestrator)
         orchestrator.available = True
         orchestrator.last_error = None
@@ -261,8 +262,11 @@ class RuntimeBoundaryTests(unittest.TestCase):
 
         result = orchestrator.decide_incident({"incident": {"id": "inc-test", "pond_id": "B-01"}})
 
-        self.assertIsNone(result.decision)
-        self.assertEqual(result.stop_reason, "LLM_DECISION_INVALID")
+        self.assertIsNotNone(result.decision)
+        self.assertEqual(result.decision.action, "MANUAL_REQUIRED")
+        self.assertTrue(result.decision.requires_manual_review)
+        self.assertEqual(result.stop_reason, "LLM_DECISION_NEEDS_REVIEW")
+        self.assertTrue(any(action == "incident.understood" for _, action, _ in result.steps))
 
     def test_crewai_decision_accepts_structured_task_output(self) -> None:
         orchestrator = object.__new__(CrewAIOrchestrator)
@@ -301,18 +305,32 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIsNotNone(result.decision)
         self.assertEqual(result.decision.action, "EXECUTE")
 
-    def test_invalid_llm_action_reports_actual_and_allowed_actions(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError,
-            r"unsupported LLM decision action: TURN_ON; allowed actions: .*EXECUTE.*",
-        ):
-            IncidentDecision.from_payload(
-                {
-                    "action": "TURN_ON",
-                    "risk": "L1",
-                    "rationale": "test",
-                }
-            )
+    def test_model_action_alias_is_understood_before_execution(self) -> None:
+        decision = IncidentDecision.from_payload(
+            {
+                "action": "TURN_ON",
+                "risk": "L1",
+                "rationale": "低溶氧，开启增氧机",
+            }
+        )
+
+        self.assertEqual(decision.action, "EXECUTE")
+        self.assertEqual(decision.target_state, "on")
+        self.assertFalse(decision.requires_manual_review)
+        self.assertIn("缺少设备标识", decision.rationale)
+
+    def test_unknown_model_action_is_kept_for_manual_understanding(self) -> None:
+        decision = IncidentDecision.from_payload(
+            {
+                "action": "TELEPORT",
+                "risk": "L1",
+                "rationale": "模型给出了未知动作",
+            }
+        )
+
+        self.assertEqual(decision.action, "MANUAL_REQUIRED")
+        self.assertTrue(decision.requires_manual_review)
+        self.assertIn("模型未提供可识别的动作", decision.rationale)
 
     def test_crewai_decision_rate_limit_is_not_reported_as_invalid(self) -> None:
         orchestrator = object.__new__(CrewAIOrchestrator)

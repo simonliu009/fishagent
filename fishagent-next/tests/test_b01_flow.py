@@ -181,6 +181,36 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(client.published[0][1]["source"], "fishagent.execution-agent")
         gateway.close()
 
+    def test_interpreted_action_is_still_checked_by_device_control_skill(self) -> None:
+        class FakeOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                del context
+                return CrewRunResult(
+                    summary="模型要求开启增氧机，但没有给出设备编号",
+                    stop_reason="LLM_DECISION_READY",
+                    steps=[("supervisor-agent", "incident.decided", "TURN_ON")],
+                    decision=IncidentDecision.from_payload(
+                        {
+                            "action": "TURN_ON",
+                            "risk": "L1",
+                            "rationale": "低溶氧，需要开启增氧机。",
+                        }
+                    ),
+                )
+
+        system = FishAgentSystem(agent_orchestrator=FakeOrchestrator())
+        system.initialize_demo()
+        with patch.object(system.device_control_skill, "execute", wraps=system.device_control_skill.execute) as skill:
+            system.ingest_do("B-01", 2.0, source_event_id="interpreted-action-missing-device")
+
+        skill.assert_called_once()
+        state = system.snapshot()
+        self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_ACTION_INVALID")
+        self.assertIn("device-control skill requires a device_id", state["manual_tasks"][0]["description"])
+
     def test_production_orchestrator_without_llm_never_uses_rule_execution(self) -> None:
         class UnavailableOrchestrator:
             available = False

@@ -1507,6 +1507,7 @@
       return ({
         'incident.started': '启动事件分析',
         'incident.decided': '形成处置决策',
+        'incident.understood': '理解模型输出，待人工确认',
         'incident.failed': '模型调用失败',
         'incident.invalid': '模型决策校验失败',
         'incident.timeout': '模型调用超时',
@@ -1676,7 +1677,8 @@
         if (/thought\s*:/i.test(raw)) return '已完成多维证据分析，形成结构化处置建议。';
         return '已形成结构化处置决策。';
       }
-      if (step?.action === 'validate_llm_decision') return '结构化处置决策已通过安全校验。';
+      if (step?.action === 'incident.understood') return '已尽量理解模型输出，但无法安全确认全部执行字段，已转人工确认。';
+      if (step?.action === 'validate_llm_decision') return '模型处置意图已理解，提交 device-control Skill 和安全策略门做执行校验。';
       if (step?.action === 'request_action_execution') return `设备动作已提交安全策略门：${raw || '等待设备返回结果'}`;
       if (step?.action === 'incident.failed' || step?.action === 'incident.invalid' || step?.action === 'incident.timeout') return '模型决策未能完成，已转人工处理。';
       return localizedQualityText(raw || actionLabel(step?.action));
@@ -1689,7 +1691,7 @@
     }
     function traceKindLabel(step) {
       const kind = step?.details?.kind;
-      return ({patrol_sop: '巡塘 SOP', mqtt_sensor_report: 'MQTT 数据', llm_request: '模型输入', llm_response: '模型输出', llm_error: '模型错误', tool_call: '只读工具返回', decision_validation: '决策校验', action_route: '动作路由', skill_call: 'Skill 调用', policy_gate: '策略门', execution_result: '执行结果', manual_task: '人工任务'})[kind] || '运行步骤';
+      return ({patrol_sop: '巡塘 SOP', mqtt_sensor_report: 'MQTT 数据', llm_request: '模型输入', llm_response: '模型输出', llm_error: '模型错误', tool_call: '只读工具返回', decision_validation: '决策校验', decision_interpretation: '意图理解', action_route: '动作路由', skill_call: 'Skill 调用', policy_gate: '策略门', execution_result: '执行结果', manual_task: '人工任务'})[kind] || '运行步骤';
     }
     function traceStepMarkup(step) {
       const details = step?.details && typeof step.details === 'object' ? step.details : null;
@@ -1749,7 +1751,7 @@
         const incidentCommands = commands.filter(candidate => (item.command_ids || []).includes(candidate.id));
         const steps = decisionRun?.steps || [];
         const findStep = actions => [...steps].reverse().find(step => actions.includes(step.action));
-        const decisionStep = findStep(['incident.decided']) || findStep(['validate_llm_decision', 'propose_action', 'incident.failed', 'incident.invalid', 'incident.timeout', 'stop', 'route']);
+        const decisionStep = findStep(['incident.decided', 'incident.understood']) || findStep(['validate_llm_decision', 'propose_action', 'incident.failed', 'incident.invalid', 'incident.timeout', 'stop', 'route']);
         const executionStep = findStep(['call_skill', 'request_action_execution', 'hold_current_state', 'route_manual_task', 'route_action', 'deduplicate_command']) || (proposal ? findStep(['propose_action']) : null);
         const verificationStep = [...(verificationRun?.steps || [])].reverse().find(step => step.agent === 'verification-agent');
         const verificationResult = [...(currentState.verification_results || [])].reverse().find(result => result.incident_id === item.id);

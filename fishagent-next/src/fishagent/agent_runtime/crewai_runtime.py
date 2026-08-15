@@ -8,6 +8,7 @@ import base64
 import io
 import json
 import os
+import re
 import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
@@ -15,8 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
-
-from pydantic import BaseModel, Field
 
 from fishagent.agent_runtime.contracts import IncidentDecision
 from fishagent.core import LLMConfig
@@ -115,18 +114,6 @@ class _MultimodalCrewLLM:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._base_llm, name)
-
-
-class IncidentDecisionOutput(BaseModel):
-    """Structured output requested from CrewAI before domain validation."""
-
-    action: str
-    device_id: Optional[str] = ""
-    target_state: Optional[str] = ""
-    risk: str = "L3"
-    rationale: str
-    verification_delay_seconds: int = 30
-    evidence_refs: list[str] = Field(default_factory=list)
 
 
 class CrewAIOrchestrator:
@@ -477,7 +464,6 @@ class CrewAIOrchestrator:
             expected_output=expected_output,
             agent=None,
             context=[],
-            output_pydantic=IncidentDecisionOutput if response_mode != "chat" else None,
         )
         task.callback = task_callback
         if response_mode == "chat":
@@ -530,10 +516,12 @@ class CrewAIOrchestrator:
 
     @staticmethod
     def _extract_public_answer(raw: str) -> str:
-        """Return only a user-facing final answer and reject exposed reasoning."""
-        candidate = raw.strip()
+        """Recover a user-facing answer without exposing model reasoning."""
+        candidate = str(raw or "").strip()
         if not candidate:
-            raise ValueError("CrewAI returned an empty chat response")
+            return "结论：模型未返回可展示内容，请稍后重试。"
+
+        candidate = re.sub(r"<think>.*?</think>", "", candidate, flags=re.IGNORECASE | re.DOTALL).strip()
 
         conclusion_indexes = [
             index
@@ -545,8 +533,6 @@ class CrewAIOrchestrator:
 
         normalized = candidate.lower()
         reasoning_markers = (
-            "<think>",
-            "</think>",
             "thinking process",
             "analysis:",
             "analyze user input",
@@ -555,8 +541,12 @@ class CrewAIOrchestrator:
             "思考过程：",
             "分析步骤：",
         )
-        if any(marker in normalized for marker in reasoning_markers):
-            raise ValueError("CrewAI did not return a safe final chat answer")
+        if any(marker in normalized for marker in reasoning_markers) and not any(
+            marker in candidate for marker in ("结论：", "结论:")
+        ):
+            return "结论：模型未给出可展示结论，请稍后重试。"
+        if not any(marker in candidate for marker in ("结论：", "结论:")):
+            candidate = "结论：" + candidate
         return candidate[:4000]
 
     @staticmethod
@@ -595,19 +585,29 @@ class CrewAIOrchestrator:
         return message
 
     @staticmethod
-    def _extract_decision_payload(output: Any) -> dict:
+    def _extract_decision_payload(output: Any) -> object:
         structured = getattr(output, "json_dict", None)
         if isinstance(structured, dict):
             return structured
         if isinstance(structured, str):
-            return CrewAIOrchestrator._extract_json(structured)
+            try:
+                return CrewAIOrchestrator._extract_json(structured)
+            except ValueError:
+                return structured
         model = getattr(output, "pydantic", None)
         if model is not None and hasattr(model, "model_dump"):
             payload = model.model_dump()
             if isinstance(payload, dict):
                 return payload
-        raw = str(getattr(output, "raw", output))
-        return CrewAIOrchestrator._extract_json(raw)
+        raw = getattr(output, "raw", output)
+        if isinstance(raw, dict):
+            return raw
+        try:
+            return CrewAIOrchestrator._extract_json(str(raw))
+        except ValueError:
+            # Keep the provider's original text. IncidentDecision will try to
+            # interpret it and otherwise route it to a human review task.
+            return raw
 
     def decide_incident(self, context: dict) -> CrewRunResult:
         """Ask the CrewAI hierarchy for the next incident action."""
@@ -658,36 +658,27 @@ class CrewAIOrchestrator:
                     }
                 ],
             )
-        raw = str(getattr(output, "raw", output))
+        raw = str(getattr(output, "raw", output) or "")
         try:
             payload = self._extract_decision_payload(output)
             decision = IncidentDecision.from_payload(payload)
-        except (TypeError, ValueError) as exc:
-            self.last_error = str(exc)
-            steps.append(("supervisor-agent", "incident.invalid", "模型未返回可执行的结构化决策：%s" % exc))
-            return CrewRunResult(
-                summary="模型返回的结构化决策无效：%s" % exc,
-                stop_reason="LLM_DECISION_INVALID",
-                steps=steps,
-                trace=trace + [
-                    {
-                        "agent": "supervisor-agent",
-                        "action": "llm.response",
-                        "summary": "模型返回无法通过结构化协议校验",
-                        "details": {
-                            "kind": "llm_response",
-                            "valid": False,
-                            "error": str(exc),
-                            "raw_preview": raw[:4000],
-                        },
-                    }
-                ],
-            )
-        steps.append(("supervisor-agent", "incident.decided", raw[:800]))
+        except Exception as exc:
+            # A provider adapter or an unexpected object shape must not turn a
+            # model response into an execution exception. Preserve the text
+            # and let the tolerant contract route it to manual review.
+            decision = IncidentDecision.from_payload(raw)
+            decision.rationale = "模型返回需要人工理解：%s；解析异常：%s" % (decision.rationale, exc)
+            decision.requires_manual_review = True
+        if decision.requires_manual_review:
+            steps.append(("supervisor-agent", "incident.understood", "已尽量理解模型输出，但仍需人工确认后才能执行"))
+            stop_reason = "LLM_DECISION_NEEDS_REVIEW"
+        else:
+            steps.append(("supervisor-agent", "incident.decided", raw[:800]))
+            stop_reason = "LLM_DECISION_READY"
         delegated = [agent for agent, _, _ in steps if agent not in {"supervisor-agent", "crewai"}]
         return CrewRunResult(
             summary=decision.rationale,
-            stop_reason="LLM_DECISION_READY",
+            stop_reason=stop_reason,
             delegated_agents=sorted(set(delegated)),
             steps=steps,
             decision=decision,
@@ -695,10 +686,12 @@ class CrewAIOrchestrator:
                 {
                     "agent": "supervisor-agent",
                     "action": "llm.response",
-                    "summary": "模型返回结构化处置决策",
+                        "summary": "模型响应已进入处置意图理解阶段",
                     "details": {
                         "kind": "llm_response",
-                        "valid": True,
+                        "valid": not decision.requires_manual_review,
+                        "understood": True,
+                        "requires_manual_review": decision.requires_manual_review,
                         "raw_response": raw[:4000],
                         "decision": {
                             "action": decision.action,
@@ -708,6 +701,7 @@ class CrewAIOrchestrator:
                             "rationale": decision.rationale,
                             "verification_delay_seconds": decision.verification_delay_seconds,
                             "evidence_refs": decision.evidence_refs,
+                            "requires_manual_review": decision.requires_manual_review,
                         },
                     },
                 }

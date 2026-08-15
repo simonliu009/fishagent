@@ -1619,10 +1619,12 @@ class FishAgentSystem:
             run.step(
                 "supervisor-agent",
                 "llm.response",
-                "模型返回结构化处置决策",
+                "模型响应已进入处置意图理解阶段",
                 details={
                     "kind": "llm_response",
-                    "valid": True,
+                    "valid": not decision.requires_manual_review,
+                    "understood": True,
+                    "requires_manual_review": decision.requires_manual_review,
                     "decision": {
                         "action": decision.action,
                         "device_id": decision.device_id,
@@ -1631,6 +1633,7 @@ class FishAgentSystem:
                         "rationale": decision.rationale,
                         "verification_delay_seconds": decision.verification_delay_seconds,
                         "evidence_refs": decision.evidence_refs,
+                        "requires_manual_review": decision.requires_manual_review,
                     },
                 },
             )
@@ -1638,9 +1641,9 @@ class FishAgentSystem:
         run.step(
             "execution-agent",
             "validate_llm_decision",
-            "结构化动作通过协议校验，提交安全策略门",
+            "模型处置意图已理解，提交 device-control Skill 和安全策略门做执行校验",
             details={
-                "kind": "decision_validation",
+                "kind": "decision_interpretation",
                 "decision": {
                     "action": decision.action,
                     "device_id": decision.device_id,
@@ -1648,12 +1651,15 @@ class FishAgentSystem:
                     "risk": decision.risk,
                     "verification_delay_seconds": decision.verification_delay_seconds,
                     "evidence_refs": decision.evidence_refs,
+                    "requires_manual_review": decision.requires_manual_review,
                 },
             },
         )
         incident.transition(IncidentStatus.ACTION_PROPOSED)
         try:
             risk = RiskLevel(decision.risk)
+            if decision.requires_manual_review:
+                return self._llm_manual_stop(incident, run, result.stop_reason, decision.rationale)
             if decision.action in {"NO_ACTION", "REFRESH_EVIDENCE", "MANUAL_REQUIRED"}:
                 return self._llm_manual_stop(incident, run, "LLM_%s" % decision.action, decision.rationale)
             if risk in {RiskLevel.L2, RiskLevel.L3} or decision.action == "REQUEST_APPROVAL":
