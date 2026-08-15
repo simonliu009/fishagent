@@ -137,7 +137,7 @@ def add_picture(slide, path, left, top, width, height):
 
 
 def crop(path: Path, target: Path, box: tuple[int, int, int, int]) -> Path:
-    if not target.exists():
+    if not target.exists() or target.stat().st_mtime < path.stat().st_mtime:
         image = Image.open(path)
         image.crop(box).save(target)
     return target
@@ -239,7 +239,7 @@ def make_slides():
     base(slide, "先给评委一个可验证的答案", "01 / 项目定位", number=2)
     text(slide, "智渔Agent不是把聊天框接到传感器上，而是把养殖异常变成一条可追溯、可复核、可交接的任务链。", 0.68, 1.8, 12, 0.42, size=15, color=INK, bold=True, margin=0)
     metric_card(slide, 0.68, 2.45, 2.25, "4", "养殖池塘", BLUE, "B-01 至 B-04")
-    metric_card(slide, 3.07, 2.45, 2.25, "28", "模拟设备总数", MINT, "27 在线 / 1 离线")
+    metric_card(slide, 3.07, 2.45, 2.25, "28", "模拟设备总数", MINT, "正常 28/28 · 故障 Demo 27/28")
     metric_card(slide, 5.46, 2.45, 2.25, "7", "核心传感器指标", PURPLE, "水质全量巡检")
     metric_card(slide, 7.85, 2.45, 2.25, "MQTT", "设备消息总线", CORAL, "上报与下发统一走消息")
     card(slide, 10.25, 2.45, 2.4, 1.05, PALE_YELLOW, YELLOW)
@@ -274,7 +274,7 @@ def make_slides():
     # 3. Pain and users
     slide = presentation.slides.add_slide(blank)
     base(slide, "真实场景：异常处置不是一句建议", "02 / 行业价值", number=3)
-    text(slide, "对养殖户来说，低溶氧的价值不在于“看见了”，而在于“设备已经动作、风险正在下降、何时停机有依据”。", 0.68, 1.78, 12, 0.45, size=15, color=INK, bold=True, margin=0)
+    text(slide, "典型场景：夜间或无人值守时，B-01 溶解氧跌破安全线；养殖户要在风险扩大前完成判断、动作和复核，而不是只收到一条告警。", 0.68, 1.78, 12, 0.45, size=14, color=INK, bold=True, margin=0)
     users = [
         ("养殖户", "关心损失与收益", "少死鱼、少误操作、少熬夜", PALE_BLUE, BLUE),
         ("现场操作员", "关心动作与交接", "任务清楚、失败可接管、结果可复核", PALE_MINT, MINT),
@@ -313,11 +313,11 @@ def make_slides():
     text(slide, "示例输入：B-01 溶解氧 2.8 mg/L，安全下限 4.0 mg/L。系统不止报错，而是把处理过程跑完。", 0.68, 1.78, 12, 0.4, size=14, color=INK, bold=True, margin=0)
     steps = [
         ("01", "任务输入", "MQTT 传感器\nDO 2.8 mg/L", BLUE, PALE_BLUE),
-        ("02", "意图理解", "监控 Agent\n识别低溶氧", CYAN, PALE_BLUE),
-        ("03", "任务规划", "行动 Agent\n建议 EXECUTE", PURPLE, rgb("F0EDFF")),
+        ("02", "意图理解", "sensor-monitor\n确认新鲜读数", CYAN, PALE_BLUE),
+        ("03", "任务规划", "action-planning\n形成 action", PURPLE, rgb("F0EDFF")),
         ("04", "Skill 校验", "能力 / 风险 /\n幂等 / 健康", YELLOW, PALE_YELLOW),
-        ("05", "设备执行", "MQTT 发布\n增氧机开启", MINT, PALE_MINT),
-        ("06", "延时复核", "主动巡塘\nDO ≥ 5.0", CORAL, PALE_CORAL),
+        ("05", "设备执行", "execution-agent\n调用设备 Skill", MINT, PALE_MINT),
+        ("06", "延时复核", "verification-agent\n等待复核", CORAL, PALE_CORAL),
         ("07", "结果交付", "关闭告警 /\n人工接管 / 报告", BLUE, PALE_BLUE),
     ]
     for idx, (number, title, body, accent, fill) in enumerate(steps):
@@ -349,7 +349,7 @@ def make_slides():
     text(slide, "大模型决策输出", 0.96, 2.78, 2.8, 0.26, size=16, color=BLUE, bold=True, margin=0)
     text(slide, "只展示业务必要字段，不暴露 API Key、供应商路由等配置。", 0.96, 3.15, 2.7, 0.38, size=9.5, color=MUTED, margin=0)
     add_shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, 0.96, 3.8, 2.96, 1.72, WHITE, rgb("C9DDF6"), True)
-    text(slide, '{\n  "action": "EXECUTE",\n  "device_id": "aerator-b01",\n  "target_state": "on",\n  "risk": "L2",\n  "verification_delay": 300\n}', 1.16, 4.0, 2.55, 1.35, size=10.5, color=INK, font="Noto Sans Mono CJK SC", margin=0)
+    text(slide, '{\n  "action": "EXECUTE",\n  "device_id": "aerator-b01-1",\n  "target_state": "on",\n  "risk": "L1",\n  "verification_delay": 300\n}', 1.16, 4.0, 2.55, 1.35, size=10.5, color=INK, font="Noto Sans Mono CJK SC", margin=0)
     line(slide, 4.3, 4.3, 4.73, 4.3, BLUE, 2.2, True)
     card(slide, 4.78, 2.5, 3.52, 3.65, PALE_YELLOW, YELLOW)
     text(slide, "DeviceControlSkill", 5.06, 2.78, 2.8, 0.26, size=16, color=INK, bold=True, margin=0)
@@ -361,7 +361,7 @@ def make_slides():
     text(slide, "MQTT 设备边界", 9.16, 2.78, 2.8, 0.26, size=16, color=INK, bold=True, margin=0)
     text(slide, "发布主题", 9.16, 3.32, 1.2, 0.2, size=10, color=MUTED, bold=True, margin=0)
     add_shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, 9.16, 3.58, 3.1, 0.52, WHITE, rgb("C5E8D8"), True)
-    text(slide, "farms/.../ponds/B-01/devices/aerator/commands", 9.32, 3.76, 2.78, 0.16, size=8, color=INK, font="Noto Sans Mono CJK SC", margin=0)
+    text(slide, "fishagent/ponds/B-01/devices/aerator-b01-1/commands", 9.32, 3.76, 2.78, 0.16, size=7.4, color=INK, font="Noto Sans Mono CJK SC", margin=0)
     text(slide, "回执与状态", 9.16, 4.4, 1.2, 0.2, size=10, color=MUTED, bold=True, margin=0)
     add_shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, 9.16, 4.68, 3.1, 0.82, WHITE, rgb("C5E8D8"), True)
     text(slide, "命令：开启增氧机\n回执：ACKNOWLEDGED\n状态：shadow_state = on", 9.32, 4.78, 2.78, 0.6, size=9, color=INK, margin=0)
@@ -402,11 +402,24 @@ def make_slides():
     numbered_callout(slide, 3, "悬浮告警胶囊", "活跃告警固定在左侧，点击进入告警流程。", 9.05, 3.6, 3.55, PALE_CORAL, CORAL)
     numbered_callout(slide, 4, "Agent 执行中心", "展示待处理、进行中、已完成，而不是静态流程图。", 9.05, 4.48, 3.55, PALE_MINT, MINT)
     numbered_callout(slide, 5, "聊天与报告", "对话可查询快照，日报可下载独立 HTML。", 9.05, 5.36, 3.55, rgb("F0EDFF"), PURPLE)
-    source_note(slide, "截图：本地运行实例 http://127.0.0.1:3000；数据为持久化模拟状态，页面交互与真实流程一致。")
+    source_note(slide, "截图：本地运行实例 http://127.0.0.1:3000；此图为正常基线，故显示 28/28，故障 Demo 注入后会显示 27/28。")
 
-    # 8. Data flow / architecture
+    # 8. Verifiable evidence
     slide = presentation.slides.add_slide(blank)
-    base(slide, "数据流：从传感器到可追溯报告", "07 / 工程架构", number=8)
+    base(slide, "核心功能有证据：页面、接口、日志和报告彼此对得上", "07 / 可验证材料", number=8)
+    text(slide, "评委可以从真实运行快照、报告预览、HTTP 接口和回归测试四个层面复核同一条任务链。", 0.68, 1.78, 12, 0.4, size=14, color=INK, bold=True, margin=0)
+    add_picture(slide, report_top, 0.68, 2.38, 7.6, 4.75)
+    numbered_callout(slide, 1, "真实报告正文", "趋势图来自当前快照，不是 PPT 绘制的示意图。", 8.62, 2.42, 3.98, PALE_BLUE, BLUE)
+    numbered_callout(slide, 2, "自动日报与交付", "每日 23:59 自动生成；历史版本、下载 HTML、删除报告均有页面入口。", 8.62, 3.3, 3.98, PALE_MINT, MINT)
+    numbered_callout(slide, 3, "接口可复现", "Demo、Agent steps、MQTT 命令、报告均有 HTTP API。", 8.62, 4.18, 3.98, PALE_YELLOW, YELLOW)
+    numbered_callout(slide, 4, "测试可回归", "当前工程回归：106 passed，2 skipped；另有 ruff 检查。", 8.62, 5.06, 3.98, PALE_CORAL, CORAL)
+    card(slide, 8.62, 6.05, 3.98, 0.68, NAVY, NAVY)
+    text(slide, "复现入口：POST /api/v1/demo/success\n交付入口：GET /api/v1/reports/{id}/download", 8.86, 6.17, 3.5, 0.4, size=8.2, color=WHITE, font="Noto Sans Mono CJK SC", margin=0)
+    source_note(slide, "截图：当前本地运行实例；报告包含真实快照趋势图、告警、自动操作、人工任务和设备操作日志。")
+
+    # 9. Data flow / architecture
+    slide = presentation.slides.add_slide(blank)
+    base(slide, "模型、Agent 与工具接口：谁负责什么", "08 / 工程架构", number=9)
     text(slide, "系统把每一次输入、模型消息、决策、Skill 调用、设备回执和复核结果写入可观察轨迹。", 0.68, 1.78, 12, 0.4, size=14, color=INK, bold=True, margin=0)
     lanes = [
         ("感知层", "传感器 / 摄像头 / 天气", BLUE, PALE_BLUE),
@@ -438,14 +451,15 @@ def make_slides():
         add_shape(slide, MSO_SHAPE.OVAL, left, 4.7, 0.34, 0.34, accent, accent, False)
         text(slide, label, left + 0.44, 4.68, 1.1, 0.2, size=9.5, color=INK, bold=True, margin=0)
         text(slide, body, left + 0.44, 4.96, 1.35, 0.33, size=8.2, color=MUTED, margin=0)
-    text(slide, "基础设施：PostgreSQL 持久化 · Redis 事件加速 · MinIO 媒体 / 文件 · Celery 调度 · FastAPI Web", 0.98, 5.5, 11.0, 0.2, size=9.5, color=MUTED, margin=0)
+    text(slide, "核心工具接口：get_pond_snapshot · get_weather_context · search_knowledge_base · get_device_shadow_state · DeviceControlSkill", 0.98, 5.48, 11.0, 0.18, size=7.8, color=MUTED, margin=0)
+    text(slide, "基础设施：PostgreSQL 持久化 · Redis 事件加速 · MinIO 媒体 / 文件 · Celery 调度 · FastAPI Web", 0.98, 5.72, 11.0, 0.18, size=8.5, color=MUTED, margin=0)
     card(slide, 0.68, 6.1, 12.0, 0.48, NAVY, NAVY)
     text(slide, "数据流不是 PPT 假流程：前端直接读取 agent_runs / events / commands / verification_results 的真实运行快照。", 0.92, 6.24, 11.5, 0.18, size=10.5, color=WHITE, bold=True, align=PP_ALIGN.CENTER, margin=0)
 
-    # 9. Safety
+    # 10. Safety
     slide = presentation.slides.add_slide(blank)
-    base(slide, "安全边界：让 Agent 能做事，也知道不能做什么", "08 / 安全与合规", number=9)
-    text(slide, "水产养殖涉及生物、设备和现场操作风险。智渔Agent把“能否行动”从模型输出中拿出来，交给可审计的执行边界。", 0.68, 1.78, 12, 0.42, size=14, color=INK, bold=True, margin=0)
+    base(slide, "安全边界：让 Agent 能做事，也知道不能做什么", "09 / 安全与合规", number=10)
+    text(slide, "水产养殖涉及生物、设备和现场操作风险。主要风险是误判、隐私泄露和误动作；系统用策略门、人工接管、最小化数据和审计来控制。", 0.68, 1.78, 12, 0.42, size=13.2, color=INK, bold=True, margin=0)
     safety = [
         ("模型层", "负责理解\n规划与解释", "不直接写设备", PALE_BLUE, BLUE),
         ("策略门", "白名单 / 能力\n风险 / 幂等 / 审批", "Skill 才能执行", PALE_YELLOW, YELLOW),
@@ -459,20 +473,20 @@ def make_slides():
         text(slide, body, left + 0.22, 3.2, 2.2, 0.48, size=11, color=MUTED, margin=0)
         pill(slide, note, left + 0.22, 3.83, 1.75, accent, WHITE if accent in [BLUE, CORAL, MINT] else NAVY)
     card(slide, 0.68, 4.68, 5.82, 1.48, WHITE, LINE)
-    text(slide, "数据与隐私边界", 0.96, 4.96, 2.0, 0.25, size=15, color=INK, bold=True, margin=0)
+    text(slide, "当前演示数据授权与隐私状态", 0.96, 4.96, 3.1, 0.25, size=15, color=INK, bold=True, margin=0)
     bullet_list(slide, [
-        "传感器、图像、天气、知识库均为演示模拟数据",
-        "不使用养殖户个人信息，不回显 API Key",
-        "真实厂商设备协议、现场生产数据仍需授权后接入",
+        "传感器、设备、天气、知识库是项目生成的模拟数据",
+        "摄像头使用项目内模拟图片，不含真实人员或养殖户信息",
+        "API Key 脱敏展示；公网部署必须开启认证并限制访问来源",
     ], 0.96, 5.36, 5.15, 0.65, size=9.5, gap=1)
     card(slide, 6.78, 4.68, 5.9, 1.48, PALE_CORAL, CORAL)
-    text(slide, "比赛材料待补边界", 7.06, 4.96, 2.3, 0.25, size=15, color=CORAL, bold=True, margin=0)
-    text(slide, "□ 真实试点数据授权说明   □ 第三方模型 / API 清单\n□ 现场设备接入责任边界   □ 专业人员审核确认", 7.06, 5.38, 5.1, 0.5, size=10.5, color=INK, margin=0)
-    source_note(slide, "按手册 9.1—9.4：说明数据来源、授权、第三方依赖、风险提示，并不得替代现场专业人员最终判断。")
+    text(slide, "真实接入前必须完成", 7.06, 4.96, 2.3, 0.25, size=15, color=CORAL, bold=True, margin=0)
+    text(slide, "养殖场 / 养殖户书面授权、用途最小化、留存与删除策略\n第三方模型 / API 清单、数据传输范围、密钥管理\n现场负责人和专业人员确认，Agent 不替代最终判断", 7.06, 5.3, 5.1, 0.62, size=9.3, color=INK, margin=0)
+    source_note(slide, "按手册 9.1—9.4：明确数据来源、授权、第三方依赖、风险提示和行业责任边界。当前 PPT 不把模拟数据包装成真实试点结果。")
 
-    # 10. Reproducibility / open source
+    # 11. Reproducibility / open source
     slide = presentation.slides.add_slide(blank)
-    base(slide, "可运行、可复现、可复用", "09 / 开放贡献", number=10)
+    base(slide, "可运行、可复现、可复用", "10 / 开放贡献", number=11)
     text(slide, "评委拿到的不是一张概念图，而是一套可以从零启动、注入事件、观察数据流并复盘结果的工程。", 0.68, 1.78, 12, 0.4, size=14, color=INK, bold=True, margin=0)
     card(slide, 0.68, 2.46, 5.45, 3.36, NAVY, NAVY)
     text(slide, "从零启动", 0.98, 2.76, 1.6, 0.28, size=17, color=WHITE, bold=True, margin=0)
@@ -488,7 +502,7 @@ def make_slides():
         pill(slide, f"0{idx + 1}", 0.98, y, 0.42, CYAN, NAVY)
         add_shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, 1.58, y, 3.9, 0.31, rgb("163D70"), rgb("2B6195"), True)
         text(slide, command, 1.76, y + 0.06, 3.55, 0.16, size=9.5, color=WHITE, font="Noto Sans Mono CJK SC", margin=0)
-    text(slide, "当前回归：104 passed, 2 skipped", 0.98, 5.55, 4.4, 0.2, size=9.5, color=YELLOW, bold=True, margin=0)
+    text(slide, "当前回归：106 passed, 2 skipped", 0.98, 5.55, 4.4, 0.2, size=9.5, color=YELLOW, bold=True, margin=0)
     card(slide, 6.45, 2.46, 6.23, 3.36, WHITE, LINE)
     text(slide, "可以复用的开放组件", 6.74, 2.76, 3.2, 0.28, size=17, color=INK, bold=True, margin=0)
     components = [
@@ -506,9 +520,9 @@ def make_slides():
     text(slide, "GitHub：github.com/simonliu009/fishagent", 6.76, 5.54, 5.0, 0.2, size=9.5, color=BLUE, bold=True, margin=0)
     source_note(slide, "复赛 / 决赛需按组委会要求补充最终仓库、部署说明、许可证和第三方依赖清单。")
 
-    # 11. Demo runbook
+    # 12. Demo runbook
     slide = presentation.slides.add_slide(blank)
-    base(slide, "给评委的 3 分钟现场 Demo 路径", "10 / 现场演示", number=11)
+    base(slide, "给评委的 3 分钟现场 Demo 路径", "11 / 现场演示", number=12)
     text(slide, "从正常态开始，注入一个可重复的低溶氧事件；每一步都能在页面、Agent 轨迹或审计中找到证据。", 0.68, 1.78, 12, 0.4, size=14, color=INK, bold=True, margin=0)
     demo = [
         ("00:00", "正常态", "4 个池塘均有最新读数\n设备在线比例可见", BLUE, PALE_BLUE),
@@ -533,9 +547,9 @@ def make_slides():
     text(slide, "设备失败 → 人工任务 + 原因", 10.55, 6.08, 1.8, 0.2, size=9.5, color=INK, margin=0)
     source_note(slide, "演示入口与账号属于最终交付信息，当前保留占位符，避免把本地环境地址误当成比赛访问地址。")
 
-    # 12. Evidence matrix
+    # 13. Evidence matrix
     slide = presentation.slides.add_slide(blank)
-    base(slide, "用证据回答评委的评分表", "11 / 评审对照", number=12)
+    base(slide, "用证据回答评委的评分表", "12 / 评审对照", number=13)
     text(slide, "每个评分维度对应一个可点击、可运行或可复盘的证据，不用技术名词堆叠替代结果。", 0.68, 1.78, 12, 0.4, size=14, color=INK, bold=True, margin=0)
     cols = [0.68, 2.48, 6.0, 9.22]
     widths = [1.55, 3.28, 2.95, 3.46]
@@ -544,9 +558,9 @@ def make_slides():
         add_shape(slide, MSO_SHAPE.RECTANGLE, left, 2.45, width, 0.42, NAVY, NAVY, False)
         text(slide, label, left + 0.08, 2.57, width - 0.16, 0.16, size=9.5, color=WHITE, bold=True, align=PP_ALIGN.CENTER, margin=0)
     rows = [
-        ("行业场景价值 25%", "低溶氧处置、设备离线、人工接管", "四池塘 / 28 设备 / 7 指标", "□ 真实试点收益数据"),
+        ("行业场景价值 25%", "低溶氧处置、设备离线、人工接管", "四池塘 / 28 设备 / 7 指标；health Demo 可复现 27/28", "□ 真实试点收益数据"),
         ("Agent 闭环 25%", "理解 → 规划 → 工具 → 执行 → 复核", "CrewAI + Skill + MQTT + verification", "□ 现场操作确认"),
-        ("产品体验 20%", "告警、聊天、轨迹、报告", "可运行 Web + 流式数据流", "□ Demo 录屏链接"),
+        ("产品体验 20%", "告警、聊天、轨迹、报告", "页面截图 + API + 106 条回归测试", "□ Demo 录屏链接"),
         ("技术深度 15%", "多模态、RAG、调度、持久化", "Docker / Postgres / Redis / MinIO", "□ 性能与模型成本"),
         ("安全合规 10%", "风险分级、策略门、人工任务", "模拟数据 / 审计 / 失败分流", "□ 授权与依赖清单"),
         ("开放复用 5%", "组件、规格、文档、部署", "GitHub + README + 测试", "□ License / 贡献指南"),
@@ -561,7 +575,7 @@ def make_slides():
     card(slide, 0.68, 6.65, 12.0, 0.34, PALE_YELLOW, YELLOW)
     text(slide, "红线意识：PPT 只能说明方案，Demo、日志、视频和可复现工程才是最终验证。", 0.92, 6.74, 11.5, 0.16, size=9.5, color=INK, bold=True, align=PP_ALIGN.CENTER, margin=0)
 
-    # 13. Closing / placeholders
+    # 14. Closing / placeholders
     slide = presentation.slides.add_slide(blank)
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = NAVY
@@ -573,7 +587,7 @@ def make_slides():
         ("01", "团队与作者", "团队名称、成员、分工、联系方式"),
         ("02", "真实价值", "试点对象、收益指标、失败案例与边界"),
         ("03", "现场证据", "Demo 视频、访问地址、演示账号、运行记录"),
-        ("04", "开放材料", "最终仓库、License、依赖与数据说明"),
+        ("04", "合规与开放", "授权、License、第三方依赖与数据说明"),
     ]
     for idx, (number, title, body) in enumerate(closing):
         left = 0.72 + (idx % 2) * 4.35
