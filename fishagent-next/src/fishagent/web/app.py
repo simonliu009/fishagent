@@ -1127,6 +1127,16 @@ async def generate_report(request: Request, payload: JsonPayload) -> Any:
     return encoded_response(201, {"report": report_payload(item, include_html=True), "state": state})
 
 
+@app.delete("/api/v1/reports/{report_id}")
+async def delete_report(request: Request, report_id: str) -> Any:
+    authenticate(request, request.url.path, write=True)
+    try:
+        SYSTEM.delete_daily_report(report_id)
+    except KeyError as exc:
+        return problem(404, "Report not found", str(exc))
+    return encoded_response(200, {"deleted": report_id, "state": SYSTEM.snapshot()})
+
+
 @app.get("/api/v1/reports/{report_id}/download")
 async def download_report(request: Request, report_id: str) -> Response:
     authenticate(request, request.url.path)

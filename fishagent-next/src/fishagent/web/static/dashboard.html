@@ -121,10 +121,15 @@
     .nav-button svg { width: 17px; height: 17px; }
     .report-layout { display: grid; grid-template-columns: minmax(220px, .32fr) minmax(0, 1fr); gap: 14px; }
     .report-history { display: grid; gap: 8px; align-content: start; max-height: 680px; overflow: auto; }
-    .report-history-item { width: 100%; text-align: left; padding: 11px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+    .report-history-item { position: relative; width: 100%; padding: 11px 44px 11px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
     .report-history-item.active { border-color: var(--brand); background: var(--brand-soft); }
-    .report-history-item strong, .report-history-item span { display: block; }
+    .report-history-select { width: 100%; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; }
+    .report-history-select strong, .report-history-select span { display: block; }
+    .report-history-delete { position: absolute; top: 9px; right: 9px; width: 28px; height: 28px; color: var(--muted); }
+    .report-history-delete:hover { color: var(--red); background: var(--red-soft); border-color: #efb5b5; }
     .report-history-item span { margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .report-action-status { min-height: 18px; color: var(--brand-dark); font-size: 10px; }
+    .button:disabled { cursor: wait; opacity: .62; }
     .report-preview { width: 100%; min-height: 720px; border: 1px solid var(--line); background: #f5f7fb; }
     .knowledge-management { display: grid; grid-template-columns: minmax(340px, .82fr) minmax(0, 1.18fr); gap: 14px; }
     .knowledge-admin-list { display: grid; gap: 8px; max-height: 720px; overflow: auto; }
@@ -1125,8 +1130,8 @@
     <section id="view_reports" class="view">
       <section class="tool-panel">
         <div class="section-heading">
-          <div><h2 class="section-title"><i data-lucide="file-chart-column"></i>每日报告</h2><p class="eyebrow">保留历史版本，趋势、告警、库存和 Agent 操作日志可独立下载</p></div>
-          <div class="actions"><button class="button" type="button" onclick="generateDailyReport()"><i data-lucide="file-plus-2"></i>生成今日报告</button><a id="report_download" class="button secondary" href="#" download hidden><i data-lucide="download"></i>下载 HTML</a></div>
+          <div><h2 class="section-title"><i data-lucide="file-chart-column"></i>每日报告</h2><p class="eyebrow">保留历史版本，趋势、告警、库存和 Agent 操作日志可独立下载 · 每日 23:59 自动生成当日报告（本地时间）</p></div>
+          <div class="actions"><span id="report_action_status" class="report-action-status" role="status" aria-live="polite"></span><button id="generate_report_button" class="button" type="button" onclick="generateDailyReport()"><i data-lucide="file-plus-2"></i>生成今日报告</button><a id="report_download" class="button secondary" href="#" download hidden><i data-lucide="download"></i>下载 HTML</a></div>
         </div>
       </section>
       <div class="report-layout" style="margin-top:14px">
@@ -1250,6 +1255,7 @@
     let selectedTrendMetric = 'DO';
     let trendWindowHours = 12;
     let selectedReportId = null;
+    let reportGenerationBusy = false;
     const PATROL_REVEAL_INTERVAL_MS = 700;
     const ALERT_REVEAL_INTERVAL_MS = 2000;
     const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
@@ -2467,7 +2473,7 @@
       if (!selectedReportId || !reports.some(item => item.id === selectedReportId)) selectedReportId = reports[0]?.id || null;
       const selected = reports.find(item => item.id === selectedReportId) || reports[0];
       document.getElementById('report_meta').textContent = `${reports.length} 份`;
-      document.getElementById('report_history').innerHTML = reports.length ? reports.map(item => `<button class="report-history-item ${item.id === selected?.id ? 'active' : ''}" type="button" onclick="selectReport('${item.id}')"><strong>${escapeHtml(item.report_date)} · ${escapeHtml(item.title)}</strong><span>${escapeHtml(item.summary || '')}</span><span>生成于 ${fmtDate(item.generated_at)}</span></button>`).join('') : '<div class="empty">尚未生成报告</div>';
+      document.getElementById('report_history').innerHTML = reports.length ? reports.map(item => `<article class="report-history-item ${item.id === selected?.id ? 'active' : ''}"><button class="report-history-select" type="button" onclick="selectReport('${escapeHtml(item.id)}')"><strong>${escapeHtml(item.report_date)} · ${escapeHtml(item.title)}</strong><span>${escapeHtml(item.summary || '')}</span><span>生成于 ${fmtDate(item.generated_at)}</span></button><button class="icon-button report-history-delete" type="button" title="删除报告" aria-label="删除报告 ${escapeHtml(item.report_date)}" onclick="deleteDailyReport(event, '${escapeHtml(item.id)}')"><i data-lucide="trash-2"></i></button></article>`).join('') : '<div class="empty">尚未生成报告</div>';
       const title = document.getElementById('report_title');
       const generated = document.getElementById('report_generated_at');
       const summary = document.getElementById('report_summary');
@@ -2485,8 +2491,44 @@
       download.hidden = false;
     }
     function selectReport(reportId) { selectedReportId = reportId; renderReports(); iconRefresh(); }
+    function setReportGenerationState(busy, message = '') {
+      const button = document.getElementById('generate_report_button');
+      const status = document.getElementById('report_action_status');
+      if (!button || !status) return;
+      button.disabled = busy;
+      button.setAttribute('aria-busy', String(busy));
+      button.innerHTML = busy ? '<i data-lucide="loader-circle"></i>生成中…' : '<i data-lucide="file-plus-2"></i>生成今日报告';
+      status.textContent = message;
+      iconRefresh();
+    }
     async function generateDailyReport() {
-      try { const result = await api('/api/v1/reports/generate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}); selectedReportId = result.report?.id || null; showToast('每日报告已生成'); await refresh(); switchView('reports'); } catch (error) { showToast(`报告生成失败：${error.message}`, true); }
+      if (reportGenerationBusy) return;
+      reportGenerationBusy = true;
+      setReportGenerationState(true, '正在生成报告，请稍候…');
+      showToast('正在生成每日报告，请稍候');
+      try {
+        const result = await api('/api/v1/reports/generate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+        selectedReportId = result.report?.id || null;
+        setReportGenerationState(false, '报告已生成并载入预览');
+        showToast('每日报告已生成');
+        await refresh();
+        switchView('reports');
+      } catch (error) {
+        setReportGenerationState(false, `生成失败：${error.message}`);
+        showToast(`报告生成失败：${error.message}`, true);
+      } finally {
+        reportGenerationBusy = false;
+        setReportGenerationState(false, document.getElementById('report_action_status')?.textContent || '');
+      }
+    }
+    function deleteDailyReport(event, reportId) {
+      event.stopPropagation();
+      if (reportGenerationBusy || !window.confirm('确定删除这份日报吗？删除后无法恢复。')) return;
+      if (reportId === selectedReportId) selectedReportId = null;
+      return mutate(
+        () => api(`/api/v1/reports/${encodeURIComponent(reportId)}`, {method:'DELETE'}),
+        '日报已删除',
+      );
     }
     function renderCameraObservations() {
       const observations = currentState.camera_observations || [];

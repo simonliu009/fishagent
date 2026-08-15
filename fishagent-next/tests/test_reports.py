@@ -1,3 +1,6 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from fishagent.application.agent_service import FishAgentSystem
 
 
@@ -40,6 +43,33 @@ def test_report_history_keeps_multiple_generated_versions() -> None:
 
     assert first.id != second.id
     assert [item["id"] for item in system.snapshot()["daily_reports"]] == [first.id, second.id]
+
+
+def test_daily_report_is_generated_once_at_local_2359() -> None:
+    system = FishAgentSystem()
+    system.initialize_demo()
+    timezone = ZoneInfo("Asia/Shanghai")
+
+    assert system.generate_daily_report_if_due(datetime(2026, 8, 15, 23, 58, tzinfo=timezone)) is None
+    report = system.generate_daily_report_if_due(datetime(2026, 8, 15, 23, 59, tzinfo=timezone))
+    repeated = system.generate_daily_report_if_due(datetime(2026, 8, 15, 23, 59, 55, tzinfo=timezone))
+
+    assert report is not None
+    assert repeated is report
+    assert report.report_date == "2026-08-15"
+    assert report.data["generation_mode"] == "automatic"
+    assert len(system.snapshot()["daily_reports"]) == 1
+
+
+def test_daily_report_can_be_deleted() -> None:
+    system = FishAgentSystem()
+    system.initialize_demo()
+    report = system.generate_daily_report("2026-08-15")
+
+    deleted = system.delete_daily_report(report.id)
+
+    assert deleted.id == report.id
+    assert system.snapshot()["daily_reports"] == []
 
 
 def test_knowledge_documents_can_be_added_and_deleted() -> None:

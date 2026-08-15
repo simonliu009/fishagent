@@ -103,6 +103,7 @@ class FishAgentSystem:
         self.device_control_skill = DeviceControlSkill(self)
         self._job_lock = RLock()
         self._demo_lock = RLock()
+        self._report_lock = RLock()
         self._analysis_case_lock = RLock()
         self._analysis_case_thread: Optional[Thread] = None
         self._analysis_case_generation = 0
@@ -1547,7 +1548,7 @@ class FishAgentSystem:
         self.snapshot()
         return order
 
-    def generate_daily_report(self, report_date: Optional[str] = None) -> DailyReport:
+    def generate_daily_report(self, report_date: Optional[str] = None, automatic: bool = False) -> DailyReport:
         generated_at = utcnow()
         selected_date = datetime.now(report_timezone()).date()
         if report_date:
@@ -1556,6 +1557,8 @@ class FishAgentSystem:
             except ValueError as exc:
                 raise ValueError("report_date must use YYYY-MM-DD") from exc
         summary, data, html_content = build_daily_report(self._snapshot(persist=False), selected_date, generated_at)
+        data = dict(data)
+        data["generation_mode"] = "automatic" if automatic else "manual"
         report = DailyReport(
             id=new_id("report"),
             report_date=selected_date.isoformat(),
@@ -1569,6 +1572,68 @@ class FishAgentSystem:
         self.store.emit(
             "daily_report.generated",
             report.title,
+            {
+                "report_id": report.id,
+                "report_date": report.report_date,
+                "generation_mode": data["generation_mode"],
+            },
+        )
+        self.snapshot()
+        return report
+
+    def generate_daily_report_if_due(self, now: Optional[datetime] = None) -> Optional[DailyReport]:
+        """Generate one automatic report during the local 23:59 minute.
+
+        Celery Beat polls every five seconds, so the report is guarded by the
+        local report date and an automatic-generation marker instead of a
+        transient scheduler task ID. This keeps the operation idempotent
+        across repeated polls and worker restarts.
+        """
+        current = now or utcnow()
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=report_timezone())
+        local_now = current.astimezone(report_timezone())
+        if local_now.hour != 23 or local_now.minute < 59:
+            return None
+
+        report_date = local_now.date().isoformat()
+        with self._report_lock:
+            existing = next(
+                (
+                    report
+                    for report in self.store.daily_reports.values()
+                    if report.report_date == report_date
+                    and report.data.get("generation_mode") == "automatic"
+                ),
+                None,
+            )
+            if existing is not None:
+                return existing
+            try:
+                report = self.generate_daily_report(report_date, automatic=True)
+            except Exception as exc:
+                self.store.emit(
+                    "daily_report.auto_generation_failed",
+                    "每日23:59自动生成日报失败：%s" % exc,
+                    {"report_date": report_date},
+                )
+                self.snapshot()
+                return None
+            self.store.emit(
+                "daily_report.auto_generated",
+                "每日23:59已自动生成当日报告",
+                {"report_id": report.id, "report_date": report.report_date},
+            )
+            self.snapshot()
+            return report
+
+    def delete_daily_report(self, report_id: str) -> DailyReport:
+        report = self.store.daily_reports.pop(report_id, None)
+        if report is None:
+            raise KeyError(report_id)
+        self.store.emit(
+            "daily_report.deleted",
+            "已删除每日报告：%s" % report.title,
             {"report_id": report.id, "report_date": report.report_date},
         )
         self.snapshot()
@@ -2470,6 +2535,7 @@ class FishAgentSystem:
     def claim_due_jobs(self, limit: int = 50) -> list[ScheduledJob]:
         """Atomically move due work out of DUE before a worker executes it."""
         with self._job_lock:
+            self.generate_daily_report_if_due()
             self._enqueue_due_schedules()
             self.recover_stuck_jobs()
             jobs = self.store.due_jobs()[:limit]
