@@ -1500,7 +1500,7 @@
       advanceCountdownTarget();
       document.getElementById('demo_data_badge').hidden = currentState.dataset?.source_classification !== 'simulated_persistent';
       document.getElementById('patrol_summary').innerHTML = [
-        ['clock-3','上次巡查', lastRun ? fmtDate(lastRun.steps?.at(-1)?.created_at) : '尚未执行', lastRun?.stop_reason || '等待自动触发'],
+        ['clock-3','上次巡查', lastRun ? fmtDate(lastRun.steps?.at(-1)?.created_at) : '尚未执行', lastRun?.stop_reason ? stopReasonLabel(lastRun.stop_reason) : '等待自动触发'],
         ['triangle-alert','巡查结果', abnormal ? `发现 ${abnormal} 处异常` : '未发现新异常', `本轮已形成 ${latestFindings.length} 条巡查结论`],
         ['activity','执行情况', `${confirmed} 次自动处置`, `${commands.length - confirmed} 项待确认或失败`]
       ].map((item, index) => `<div class="summary-block"><div class="summary-label"><i data-lucide="${item[0]}"></i>${item[1]}</div><div class="summary-value">${escapeHtml(item[2])}</div><div class="summary-note">${escapeHtml(item[3])}${index === 0 && countdownTarget ? `<span class="summary-inline-next"><i data-lucide="calendar-clock"></i>下次 ${fmtDate(countdownTarget)} · <span id="countdown_number">-- 分 -- 秒</span></span>` : ''}</div></div>`).join('');
@@ -1598,8 +1598,8 @@
         const proposal = proposals.find(proposal => proposal.id === item.proposal_id) || {};
         pendingItems.unshift(taskItem(proposal.rationale || '设备动作审批', `${proposal.pond_id || '--'} · 风险 ${proposal.risk || '--'}`, `<button class="button small" onclick="approveProposal('${proposal.id}')">批准</button><button class="button secondary small" onclick="rejectProposal('${proposal.id}')">拒绝</button>`));
       });
-      const runningItems = runs.filter(item => ['RUNNING','WAITING_APPROVAL'].includes(item.status)).slice(-6).map(item => taskItem(item.goal, item.stop_reason || item.status));
-      const completedItems = runs.filter(item => ['COMPLETED','FAILED','CANCELLED'].includes(item.status)).slice(-6).reverse().map(item => taskItem(item.goal, item.stop_reason || item.status));
+      const runningItems = runs.filter(item => ['RUNNING','WAITING_APPROVAL'].includes(item.status)).slice(-6).map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status)));
+      const completedItems = runs.filter(item => ['COMPLETED','FAILED','CANCELLED'].includes(item.status)).slice(-6).reverse().map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status)));
       const columns = [
         ['待处理','',pendingItems], ['进行中','running',runningItems], ['已完成','done',completedItems]
       ];

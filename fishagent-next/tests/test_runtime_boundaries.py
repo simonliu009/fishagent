@@ -396,6 +396,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('onclick="openAlertView(event)"', response.text)
         self.assertIn("function advanceCountdownTarget", response.text)
         self.assertIn("巡检 ${fmtDate(markedAt)}", response.text)
+        self.assertIn("lastRun?.stop_reason ? stopReasonLabel(lastRun.stop_reason)", response.text)
+        self.assertIn("PATROL_COMPLETED: '巡查已完成'", response.text)
         self.assertIn("class=\"patrol-advice\"", response.text)
         self.assertIn("巡查建议", response.text)
         self.assertIn('class="patrol-loading"', response.text)
