@@ -108,7 +108,9 @@ class RuntimeBoundaryTests(unittest.TestCase):
             [agent.role for agent in captured["agents"]],
             ["传感器监控 Agent", "巡查分析 Agent", "视觉与病害分析 Agent", "行动规划 Agent"],
         )
-        self.assertIs(captured["tasks"][0].output_json, IncidentDecisionOutput)
+        self.assertIn("必须返回 EXECUTE", captured["tasks"][0].description)
+        self.assertIs(captured["tasks"][0].output_pydantic, IncidentDecisionOutput)
+        self.assertIsNone(getattr(captured["tasks"][0], "output_json", None))
 
     def test_crewai_chat_only_exposes_final_answer(self) -> None:
         raw = "Here's a thinking process:\ninternal details\n结论：B-02 水质稳定。"
@@ -284,6 +286,20 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIsNotNone(result.decision)
         self.assertEqual(result.decision.action, "EXECUTE")
         self.assertEqual(result.stop_reason, "LLM_DECISION_READY")
+
+    def test_crewai_decision_accepts_json_string_in_structured_task_output(self) -> None:
+        orchestrator = object.__new__(CrewAIOrchestrator)
+        orchestrator.available = True
+        orchestrator.last_error = None
+        orchestrator._kickoff_crew = lambda *args, **kwargs: SimpleNamespace(
+            raw='{"action":"EXECUTE","device_id":"aerator-b01-1","target_state":"on","risk":"L1","rationale":"低溶氧证据充分，开启增氧机。","verification_delay_seconds":30,"evidence_refs":[]}',
+            json_dict='{"action":"EXECUTE","device_id":"aerator-b01-1","target_state":"on","risk":"L1","rationale":"低溶氧证据充分，开启增氧机。","verification_delay_seconds":30,"evidence_refs":[]}',
+        )
+
+        result = orchestrator.decide_incident({"incident": {"id": "inc-test", "pond_id": "B-01"}})
+
+        self.assertIsNotNone(result.decision)
+        self.assertEqual(result.decision.action, "EXECUTE")
 
     def test_invalid_llm_action_reports_actual_and_allowed_actions(self) -> None:
         with self.assertRaisesRegex(

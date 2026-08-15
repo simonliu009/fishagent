@@ -704,7 +704,7 @@ class FishAgentSystem:
                 active = Incident(
                     id=new_id("inc"),
                     pond_id=pond.id,
-                    title="%s 巡查异常" % pond.name,
+                    title=self._patrol_incident_title(pond.id),
                     evidence=[
                         Evidence(
                             id=new_id("evi"),
@@ -720,6 +720,8 @@ class FishAgentSystem:
                     active.title,
                     {"incident_id": active.id, "pond_id": pond.id, "source": "patrol"},
                 )
+            elif active and active.title.endswith("巡查异常"):
+                active.title = self._patrol_incident_title(pond.id)
             if active and active.status == IncidentStatus.DETECTED:
                 incidents_to_decide.append(active.id)
         run.status = "COMPLETED"
@@ -752,6 +754,63 @@ class FishAgentSystem:
             IncidentStatus.RESOLVED: "复核通过并关闭告警",
             IncidentStatus.ESCALATED: "升级人工处理",
         }.get(status, status.value)
+
+    def _patrol_alert_reason_labels(self, pond_id: str) -> list[str]:
+        pond = self.store.ponds.get(pond_id)
+        if pond is None:
+            return []
+        labels: list[str] = []
+        latest_readings = [self.store.latest_reading(pond_id, spec["metric"]) for spec in DEMO_SENSOR_SPECS]
+        if len([reading for reading in latest_readings if reading is not None]) < len(DEMO_SENSOR_SPECS):
+            labels.append("传感器数据不完整")
+        for spec, reading in zip(DEMO_SENSOR_SPECS, latest_readings):
+            if reading is None:
+                continue
+            sensor = self.store.sensors.get(reading.sensor_id)
+            source_name = sensor.name if sensor else spec["name"]
+            if reading.quality != "GOOD":
+                labels.append("%s读数质量%s" % (source_name, READING_QUALITY_LABELS.get(reading.quality, reading.quality)))
+                continue
+            if reading.metric == "DO" and reading.value < pond.dissolved_oxygen_min:
+                labels.append("溶氧低于安全线")
+                continue
+            high_limit = WATER_QUALITY_HIGH_LIMITS.get(reading.metric)
+            if high_limit is not None and reading.value > high_limit:
+                labels.append("%s高于安全线" % spec["name"])
+                continue
+            safe_range = WATER_QUALITY_RANGES.get(reading.metric)
+            if safe_range and not safe_range[0] <= reading.value <= safe_range[1]:
+                labels.append("%s超出安全范围" % spec["name"])
+
+        sensor_ids = {sensor.id for sensor in self.store.sensors.values() if sensor.pond_id == pond_id}
+        latest_by_sensor = {reading.sensor_id: reading for reading in latest_readings if reading is not None}
+        for sensor_id, health in self.store.sensor_health.items():
+            if sensor_id not in sensor_ids or health.status == HealthStatus.ONLINE:
+                continue
+            if sensor_id in latest_by_sensor and latest_by_sensor[sensor_id].quality != "GOOD":
+                continue
+            sensor = self.store.sensors.get(sensor_id)
+            sensor_name = sensor.name if sensor else sensor_id
+            labels.append("%s%s" % (
+                sensor_name,
+                {
+                    HealthStatus.OFFLINE: "离线",
+                    HealthStatus.DRIFTING: "漂移",
+                    HealthStatus.ERROR: "错误",
+                }.get(health.status, health.status.value),
+            ))
+        for device in self.store.devices.values():
+            if device.pond_id == pond_id and not device.healthy:
+                labels.append("%s离线" % device.name)
+        return list(dict.fromkeys(labels))
+
+    def _patrol_incident_title(self, pond_id: str) -> str:
+        pond = self.store.ponds.get(pond_id)
+        if pond is None:
+            return "%s 巡查异常" % pond_id
+        labels = self._patrol_alert_reason_labels(pond_id)
+        suffix = "：%s" % "；".join(labels[:4]) if labels else ""
+        return "%s 巡查异常%s" % (pond.name, suffix)
 
     def _do_recovery_threshold(self, pond_id: str) -> float:
         pond = self.store.ponds[pond_id]
@@ -966,6 +1025,62 @@ class FishAgentSystem:
         task.status = TaskStatus.COMPLETED
         task.completed_at = utcnow()
         self.store.emit("manual_task.completed", task.title, {"task_id": task.id})
+        return task
+
+    def _escalate_command_failure(self, incident: Incident, run: AgentRun, command: DeviceCommand, stop_reason: str) -> ManualTask:
+        if incident.status in {IncidentStatus.ACTION_PROPOSED, IncidentStatus.EXECUTING}:
+            incident.transition(IncidentStatus.ACTION_FAILED)
+        if incident.status == IncidentStatus.ACTION_FAILED:
+            incident.transition(IncidentStatus.ESCALATED)
+        incident.assignee = "现场操作员"
+        device = self.store.devices.get(command.device_id)
+        device_name = device.name if device else command.device_id
+        target_label = "开启" if command.target_state == "on" else "关闭"
+        feedback = command.policy_reason or "设备网关未返回确认"
+        for step in reversed(run.steps):
+            if step.action != "device.command_result":
+                continue
+            details = step.details if isinstance(step.details, dict) else {}
+            feedback = str(details.get("detail") or details.get("reason") or step.summary or feedback)
+            break
+        if device and device.capability == "aeration" and command.target_state == "on":
+            description = (
+                "自动开启设备“%s”的命令未获得设备确认；命令状态：%s；系统反馈：%s。"
+                "请现场检查电源、断路器、控制箱、线路、叶轮或曝气盘，确认增氧机实际开关状态；"
+                "若仍未启动，启用备用增氧设备或现场手动开启，并记录启动时间、设备状态和现场照片。"
+                % (device_name, command.status.value, feedback)
+            )
+        else:
+            description = (
+                "自动%s%s命令未获得设备确认；命令状态：%s；系统反馈：%s。"
+                "请现场检查设备电源、网络、控制箱和实际状态，必要时按审批要求人工执行并记录结果。"
+                % (target_label, device_name, command.status.value, feedback)
+            )
+        task = self.create_manual_task(
+            title="处理设备动作失败：%s" % incident.title,
+            description=description,
+            incident_id=incident.id,
+        )
+        run.step(
+            "execution-agent",
+            "route_manual_task",
+            "设备动作未确认，已升级人工处理：%s" % task.title,
+            details={
+                "kind": "manual_task",
+                "task_id": task.id,
+                "command_id": command.id,
+                "status": command.status.value,
+                "reason": feedback,
+            },
+        )
+        run.status = "FAILED"
+        run.stop_reason = stop_reason
+        self.store.emit(
+            "agent.run.failed",
+            "设备动作未确认，已转人工：%s" % task.title,
+            {"run_id": run.id, "command_id": command.id, "task_id": task.id},
+            correlation_id=run.id,
+        )
         return task
 
     @staticmethod
@@ -1593,11 +1708,7 @@ class FishAgentSystem:
             run.stop_reason = "LLM_ACTION_EXECUTED"
             self.store.emit("agent.run.completed", decision.rationale, {"run_id": run.id, "command_id": command.id}, correlation_id=run.id)
         else:
-            incident.transition(IncidentStatus.ACTION_FAILED)
-            incident.transition(IncidentStatus.ESCALATED)
-            run.status = "FAILED"
-            run.stop_reason = "LLM_POLICY_REJECTED"
-            self.store.emit("agent.run.failed", command.policy_reason, {"run_id": run.id, "command_id": command.id}, correlation_id=run.id)
+            self._escalate_command_failure(incident, run, command, "LLM_ACTION_EXECUTION_FAILED")
         return run
 
     def _run_rule_incident_flow(self, incident_id: str, risk_override: Optional[RiskLevel] = None) -> AgentRun:
@@ -1685,10 +1796,7 @@ class FishAgentSystem:
             run.status = "COMPLETED"
             run.stop_reason = "ALREADY_SATISFIED"
         else:
-            incident.transition(IncidentStatus.ACTION_FAILED)
-            incident.transition(IncidentStatus.ESCALATED)
-            run.status = "FAILED"
-            run.stop_reason = "POLICY_REJECTED"
+            self._escalate_command_failure(incident, run, command, "ACTION_EXECUTION_FAILED")
         return run
 
     def propose_action(
@@ -1792,11 +1900,7 @@ class FishAgentSystem:
             run.status = "COMPLETED"
             run.stop_reason = "ACTION_EXECUTED_AFTER_APPROVAL"
         else:
-            if incident.status == IncidentStatus.EXECUTING:
-                incident.transition(IncidentStatus.ACTION_FAILED)
-                incident.transition(IncidentStatus.ESCALATED)
-            run.status = "FAILED"
-            run.stop_reason = "POLICY_REJECTED"
+            self._escalate_command_failure(incident, run, command, "ACTION_EXECUTION_FAILED")
         self.store.emit(
             "approval.approved",
             "动作已由 %s 批准" % approver,
@@ -2378,7 +2482,7 @@ class FishAgentSystem:
                 {
                     "id": item.id,
                     "pond_id": item.pond_id,
-                    "title": item.title,
+                    "title": self._patrol_incident_title(item.pond_id) if item.title.endswith("巡查异常") else item.title,
                     "status": item.status.value,
                     "risk": item.risk.value,
                     "evidence": [

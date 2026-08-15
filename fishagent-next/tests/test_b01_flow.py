@@ -12,7 +12,7 @@ from fishagent.application.policy import evaluate_action
 from fishagent.core import LLMConfig, RuntimeConfigStore
 from fishagent.domain.models import Device, IncidentStatus, JobStatus, RiskLevel, SensorReading, utcnow
 from fishagent.infrastructure.auth import AuthManager
-from fishagent.infrastructure.gateways import MqttDeviceGateway
+from fishagent.infrastructure.gateways import GatewayResult, MqttDeviceGateway
 
 
 class B01FlowTest(unittest.TestCase):
@@ -76,6 +76,41 @@ class B01FlowTest(unittest.TestCase):
         policy_step = next(step for step in state["agent_runs"][0]["steps"] if step["action"] == "request_action_execution")
         self.assertTrue(policy_step["details"]["allowed"])
         self.assertIn("健康状态异常", policy_step["details"]["reason"])
+
+    def test_llm_aeration_confirmation_failure_creates_manual_task(self) -> None:
+        class FakeOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="EXECUTE",
+                        device_id="aerator-b01-1",
+                        target_state="on",
+                        risk="L1",
+                        rationale="可信低溶氧读数需要立即开启增氧机。",
+                    ),
+                    summary="设备确认失败演示",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["action-planning-agent"],
+                    steps=[],
+                )
+
+        class FailingGateway:
+            def send_command(self, device, target_state, idempotency_key):
+                return GatewayResult(True, True, False, "模拟设备未确认目标状态")
+
+        system = FishAgentSystem(agent_orchestrator=FakeOrchestrator(), device_gateway=FailingGateway())
+        system.initialize_demo()
+        system.ingest_do("B-01", 2.0, source_event_id="llm-aeration-confirmation-failure")
+        state = system.snapshot()
+
+        self.assertEqual(state["commands"][0]["status"], "TIMED_OUT")
+        self.assertEqual(state["incidents"][0]["status"], "ESCALATED")
+        self.assertEqual(state["agent_runs"][0]["stop_reason"], "LLM_ACTION_EXECUTION_FAILED")
+        self.assertEqual(len(state["manual_tasks"]), 1)
+        self.assertIn("自动开启设备“B-01 一号增氧机”的命令未获得设备确认", state["manual_tasks"][0]["description"])
+        self.assertIn("现场检查电源", state["manual_tasks"][0]["description"])
 
     def test_device_control_skill_loads_contract_and_keeps_mqtt_gateway_boundary(self) -> None:
         system = FishAgentSystem()
@@ -707,6 +742,9 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(len(orchestrator.contexts), 1)
         self.assertTrue(any(step.action == "dispatch_incident" for step in patrol.steps))
         self.assertEqual(state["incidents"][0]["status"], "MANUAL_REQUIRED")
+        self.assertIn("巡查异常：", state["incidents"][0]["title"])
+        self.assertIn("溶解氧传感器读数质量不可信", state["incidents"][0]["title"])
+        self.assertIn("一号增氧机离线", state["incidents"][0]["title"])
         self.assertEqual(len(state["manual_tasks"]), 1)
         task_description = state["manual_tasks"][0]["description"]
         self.assertIn("【人工执行清单】", task_description)

@@ -1582,7 +1582,7 @@
       return ({QUEUED: '排队中', RUNNING: '运行中', WAITING_APPROVAL: '等待审批', COMPLETED: '已完成', FAILED: '失败', TIMED_OUT: '超时', CANCELLED: '已取消'})[status] || status || '未知';
     }
     function stopReasonLabel(reason) {
-      return ({ACTION_EXECUTED: '设备动作已执行，等待复核', LLM_ACTION_EXECUTED: '模型动作已执行，等待复核', RESOLVED: '复核通过，告警已关闭', ALREADY_SATISFIED: '设备已处于目标状态，等待复核', ESCALATED: '复核未通过，已升级人工', ACTION_FAILED: '设备动作执行失败', LLM_MANUAL_REQUIRED: '模型建议转人工处置', WAITING_APPROVAL: '等待人工审批', PATROL_COMPLETED: '巡查已完成', VERIFY_WAITING_FOR_NEXT_PATROL: '等待下一次巡塘复核'})[reason] || reason || '等待结果';
+      return ({ACTION_EXECUTED: '设备动作已执行，等待复核', LLM_ACTION_EXECUTED: '模型动作已执行，等待复核', RESOLVED: '复核通过，告警已关闭', ALREADY_SATISFIED: '设备已处于目标状态，等待复核', ESCALATED: '复核未通过，已升级人工', ACTION_FAILED: '设备动作执行失败', ACTION_EXECUTION_FAILED: '设备动作未确认，已转人工', LLM_ACTION_EXECUTION_FAILED: '设备动作未确认，已转人工', LLM_MANUAL_REQUIRED: '模型建议转人工处置', WAITING_APPROVAL: '等待人工审批', PATROL_COMPLETED: '巡查已完成', VERIFY_WAITING_FOR_NEXT_PATROL: '等待下一次巡塘复核'})[reason] || reason || '等待结果';
     }
     function deviceAssetLabel(deviceId) {
       const device = (currentState.devices || []).find(item => item.id === deviceId);
