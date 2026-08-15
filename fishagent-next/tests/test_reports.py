@@ -11,6 +11,7 @@ def test_knowledge_inventory_and_report_are_persistent_in_snapshot() -> None:
     assert matches[0]["risk_notes"]
 
     order = system.draft_restock_order("inventory-shrimp-feed", 300, "库存低于补货线")
+    task = system.create_manual_task("现场复核 B-04", "携带便携式试剂盒复核氨氮并记录结果")
     report = system.generate_daily_report("2026-08-15")
     state = system.snapshot()
 
@@ -21,6 +22,12 @@ def test_knowledge_inventory_and_report_are_persistent_in_snapshot() -> None:
     assert "水质趋势图" in report.html_content
     assert "知识库" not in report.html_content
     assert "用药处方" not in report.html_content
+    assert "人工任务" in report.html_content
+    assert task.title in report.html_content
+    assert report.data["manual_tasks"][0]["id"] == task.id
+    assert report.data["automatic_operations"] == []
+    assert "<polyline" in report.html_content
+    assert "B-01" in report.html_content
     assert len(report.data["trends"]) == 7
     assert order.items[0]["inventory_id"] == "inventory-shrimp-feed"
 

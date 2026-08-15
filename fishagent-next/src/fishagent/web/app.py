@@ -1045,6 +1045,22 @@ async def restock_orders(request: Request) -> dict:
     return {"restock_orders": SYSTEM.read_snapshot().get("restock_orders", [])}
 
 
+@app.post("/api/v1/restock-orders")
+async def create_restock_order(request: Request, payload: JsonPayload) -> Any:
+    session = authenticate(request, request.url.path, write=True)
+    data = payload.model_dump()
+    try:
+        order = SYSTEM.draft_restock_order(
+            str(data.get("inventory_id") or ""),
+            float(data.get("quantity") or 0),
+            str(data.get("rationale") or "控制台创建补货草案"),
+            created_by=str(data.get("created_by") or getattr(session, "username", "operator")),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return problem(400, "Invalid restock order", str(exc))
+    return encoded_response(201, {"restock_order": order.__dict__, "state": SYSTEM.snapshot()})
+
+
 @app.post("/api/v1/restock-orders/{order_id}/approve")
 async def approve_restock_order(request: Request, order_id: str, payload: JsonPayload) -> Any:
     session = authenticate(request, request.url.path, write=True)

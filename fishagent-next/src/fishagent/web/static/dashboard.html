@@ -99,7 +99,7 @@
     }
     .primary-nav {
       display: grid;
-      grid-template-columns: repeat(11, minmax(0, 1fr));
+      grid-template-columns: repeat(12, minmax(0, 1fr));
       background: var(--surface);
       border-bottom: 1px solid var(--line);
     }
@@ -133,6 +133,17 @@
     .knowledge-admin-head strong { font-size: 12px; }
     .knowledge-admin-card p { margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
     .knowledge-admin-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 7px; color: var(--muted); font-size: 10px; }
+    .inventory-layout { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(340px, .95fr); gap: 14px; }
+    .inventory-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+    .inventory-card { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
+    .inventory-card.low-stock { border-color: #e7a4a4; background: #fff6f6; }
+    .inventory-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; }
+    .inventory-card strong { font-size: 12px; }
+    .inventory-card-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 12px; margin-top: 9px; color: var(--muted); font-size: 10px; }
+    .restock-list { display: grid; gap: 8px; max-height: 480px; overflow: auto; }
+    .restock-card { padding: 11px; border-left: 3px solid var(--amber); border-radius: 4px; background: var(--surface-alt); }
+    .restock-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .restock-card p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
     .app-main { width: min(1500px, 100%); margin: 0 auto; padding: 22px; }
     .view { display: none; }
     .view.active { display: block; }
@@ -690,7 +701,7 @@
     }
     .system-ok { display: flex; align-items: center; gap: 6px; }
     @media (max-width: 1080px) {
-      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout, .case-flow-layout, .report-layout, .knowledge-management { grid-template-columns: 1fr; }
+      .patrol-panel, .dashboard-grid, .page-grid, .assistant-layout, .case-flow-layout, .report-layout, .knowledge-management, .inventory-layout { grid-template-columns: 1fr; }
       .pond-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .asset-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .case-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -702,12 +713,12 @@
       .brand-subtitle { display: none; }
       .brand { min-width: 0; }
       .brand-name { font-size: 16px; }
-      .primary-nav { overflow-x: auto; grid-template-columns: repeat(11, minmax(120px, 1fr)); }
+      .primary-nav { overflow-x: auto; grid-template-columns: repeat(12, minmax(120px, 1fr)); }
       .nav-button { min-height: 44px; }
       .app-main { padding: 12px; }
       .patrol-panel, .tool-panel { padding: 12px; }
       .panel-heading { align-items: stretch; flex-direction: column; }
-      .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary, .case-summary-grid, .knowledge-grid, .camera-observation-grid { grid-template-columns: 1fr; }
+      .patrol-summary-grid, .metric-grid, .kanban, .pond-grid, .form-grid, .asset-summary, .case-summary-grid, .knowledge-grid, .camera-observation-grid, .inventory-grid { grid-template-columns: 1fr; }
       .llm-profile-bar { grid-template-columns: 1fr; }
       .metric-tile { min-height: 68px; }
       .patrol-pond-row { grid-template-columns: 1fr auto; gap: 6px; }
@@ -752,6 +763,7 @@
     <button class="nav-button" type="button" data-view="assistant" onclick="switchView('assistant')"><i data-lucide="bot"></i><span>AI 助手</span></button>
     <button class="nav-button" type="button" data-view="cases" onclick="switchView('cases')"><i data-lucide="route"></i><span>Agent 案例</span></button>
     <button class="nav-button" type="button" data-view="knowledge" onclick="switchView('knowledge')"><i data-lucide="book-open-check"></i><span>知识库</span></button>
+    <button class="nav-button" type="button" data-view="inventory" onclick="switchView('inventory')"><i data-lucide="boxes"></i><span>库存补货</span></button>
     <button class="nav-button" type="button" data-view="management" onclick="switchView('management')"><i data-lucide="waves"></i><span>养殖管理</span></button>
     <button class="nav-button" type="button" data-view="analytics" onclick="switchView('analytics')"><i data-lucide="chart-no-axes-combined"></i><span>数据分析</span></button>
     <button class="nav-button" type="button" data-view="assets" onclick="switchView('assets')"><i data-lucide="square-plus"></i><span>资产录入</span></button>
@@ -893,6 +905,31 @@
           <div class="section-heading"><h2 class="section-title"><i data-lucide="library"></i>文档列表</h2><span class="section-meta">可删除自定义文档</span></div>
           <div id="knowledge_admin_list" class="knowledge-admin-list" style="margin-top:14px"></div>
         </section>
+      </div>
+    </section>
+
+    <section id="view_inventory" class="view">
+      <div class="inventory-layout">
+        <section class="tool-panel">
+          <div class="section-heading"><div><h2 class="section-title"><i data-lucide="boxes"></i>库存与补货</h2><p class="eyebrow">查看库存水位，生成补货草案并提交人工确认</p></div><span id="inventory_meta" class="section-meta"></span></div>
+          <div id="inventory_grid" class="inventory-grid" style="margin-top:14px"></div>
+        </section>
+        <div class="stack">
+          <section class="tool-panel">
+            <div class="section-heading"><h2 class="section-title"><i data-lucide="package-plus"></i>创建补货草案</h2><span class="status-badge warning">需人工确认</span></div>
+            <div class="form-grid" style="margin-top:14px">
+              <label class="field wide">物资<select id="restock_inventory_id"></select></label>
+              <label class="field">补货数量<input id="restock_quantity" type="number" min="0.01" step="0.01" value="100"></label>
+              <label class="field">单位<input id="restock_unit" readonly></label>
+              <label class="field wide">补货原因<textarea id="restock_rationale" rows="3" placeholder="例如：库存低于补货线"></textarea></label>
+            </div>
+            <div class="actions"><button class="button" type="button" onclick="createRestockOrder()"><i data-lucide="file-plus-2"></i>生成补货草案</button></div>
+          </section>
+          <section class="tool-panel">
+            <div class="section-heading"><h2 class="section-title"><i data-lucide="clipboard-list"></i>补货单</h2><span id="restock_meta" class="section-meta"></span></div>
+            <div id="restock_list" class="restock-list" style="margin-top:14px"></div>
+          </section>
+        </div>
       </div>
     </section>
 
@@ -1085,7 +1122,7 @@
     function fmtNumber(value, digits = 1) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '--'; }
     function statusTone(status) {
       if (['DETECTED','INVESTIGATING','ACTION_PROPOSED','EXECUTING','VERIFY_FAILED','ESCALATED','ACTION_FAILED','FAILED','DEAD_LETTER','MANUAL_REQUIRED'].includes(status)) return 'danger';
-      if (['WAITING_APPROVAL','PENDING','RETRY_WAIT','VERIFY_PENDING','NEEDS_ATTENTION'].includes(status)) return 'warning';
+      if (['WAITING_APPROVAL','PENDING','PENDING_CONFIRMATION','RETRY_WAIT','VERIFY_PENDING','NEEDS_ATTENTION'].includes(status)) return 'warning';
       if (['RUNNING','EXECUTING','QUEUED','SENT','ACKNOWLEDGED'].includes(status)) return 'info';
       return '';
     }
@@ -1972,6 +2009,46 @@
       if (!window.confirm('确定删除这篇知识文档吗？')) return;
       return mutate(() => api(`/api/v1/knowledge-documents/${encodeURIComponent(documentId)}`, {method:'DELETE'}), '知识文档已删除');
     }
+    function renderInventory() {
+      const inventory = currentState.inventory || [];
+      const orders = [...(currentState.restock_orders || [])].reverse();
+      const lowStockCount = inventory.filter(item => item.low_stock ?? Number(item.stock_quantity) <= Number(item.minimum_quantity)).length;
+      document.getElementById('inventory_meta').textContent = `${inventory.length} 项 · ${lowStockCount} 项低库存`;
+      document.getElementById('inventory_grid').innerHTML = inventory.length ? inventory.map(item => {
+        const low = item.low_stock ?? Number(item.stock_quantity) <= Number(item.minimum_quantity);
+        return `<article class="inventory-card ${low ? 'low-stock' : ''}"><div class="inventory-card-head"><strong>${escapeHtml(item.name)}</strong>${badge(low ? 'NEEDS_ATTENTION' : 'NORMAL', low ? '低库存' : '库存正常')}</div><div class="inventory-card-meta"><span>类别：${escapeHtml(item.category)}</span><span>供应商：${escapeHtml(item.supplier)}</span><span>当前：${fmtNumber(item.stock_quantity, 2)} ${escapeHtml(item.unit)}</span><span>补货线：${fmtNumber(item.minimum_quantity, 2)} ${escapeHtml(item.unit)}</span><span>建议补：${fmtNumber(item.reorder_quantity, 2)} ${escapeHtml(item.unit)}</span><span>适用池塘：${escapeHtml(item.pond_id || '全场')}</span></div></article>`;
+      }).join('') : '<div class="empty">暂无库存数据</div>';
+      const select = document.getElementById('restock_inventory_id');
+      const selectedId = select.value;
+      select.innerHTML = inventory.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${fmtNumber(item.stock_quantity, 2)} ${escapeHtml(item.unit)}</option>`).join('') || '<option value="">暂无物资</option>';
+      if ([...select.options].some(option => option.value === selectedId)) select.value = selectedId;
+      select.onchange = updateRestockUnit;
+      updateRestockUnit();
+      document.getElementById('restock_meta').textContent = `${orders.length} 张`;
+      document.getElementById('restock_list').innerHTML = orders.length ? orders.map(order => {
+        const item = order.items?.[0] || {};
+        const pending = order.status === 'PENDING_CONFIRMATION';
+        return `<article class="restock-card"><div class="restock-card-head"><strong>${escapeHtml(item.name || '补货单')}</strong>${badge(order.status, pending ? '待人工确认' : order.status === 'SUBMITTED' ? '已提交采购' : order.status)}</div><p>数量：${fmtNumber(item.quantity, 2)} ${escapeHtml(item.unit || '')} · 供应商：${escapeHtml(order.supplier || '--')}</p><p>原因：${escapeHtml(order.rationale || '--')} · 创建时间：${fmtDate(order.created_at)}</p>${pending ? `<div class="actions" style="margin-top:8px"><button class="button secondary small" type="button" onclick="approveRestockOrder('${escapeHtml(order.id)}')"><i data-lucide="check"></i>确认提交</button></div>` : `<p>确认人：${escapeHtml(order.approved_by || '--')} · 时间：${fmtDate(order.approved_at)}</p>`}</article>`;
+      }).join('') : '<div class="empty">暂无补货单</div>';
+      iconRefresh();
+    }
+    function updateRestockUnit() {
+      const item = (currentState.inventory || []).find(entry => entry.id === document.getElementById('restock_inventory_id').value);
+      document.getElementById('restock_unit').value = item?.unit || '--';
+      if (item && !document.getElementById('restock_rationale').value) document.getElementById('restock_rationale').value = item.low_stock ? '库存低于补货线' : '';
+    }
+    async function createRestockOrder() {
+      try {
+        await api('/api/v1/restock-orders', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({inventory_id:document.getElementById('restock_inventory_id').value, quantity:Number(document.getElementById('restock_quantity').value), rationale:document.getElementById('restock_rationale').value.trim()})});
+        document.getElementById('restock_rationale').value = '';
+        showToast('补货草案已生成，等待人工确认');
+        await refresh();
+        switchView('inventory');
+      } catch (error) { showToast(`补货草案生成失败：${error.message}`, true); }
+    }
+    function approveRestockOrder(orderId) {
+      return mutate(() => api(`/api/v1/restock-orders/${encodeURIComponent(orderId)}/approve`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({approver:'现场负责人'})}), '补货单已提交模拟采购接口');
+    }
     function renderReports() {
       const reports = [...(currentState.daily_reports || [])].reverse();
       if (!selectedReportId || !reports.some(item => item.id === selectedReportId)) selectedReportId = reports[0]?.id || null;
@@ -2172,7 +2249,7 @@
       drawSensorTrendChart();
     }
     function renderAll() {
-      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics(); renderKnowledge(); renderReports();
+      renderPatrol(); renderMetrics(); renderWater(); renderCameraObservations(); renderExecution(); renderAlerts(); renderAssistant(); renderCases(); renderManagement(); renderAnalytics(); renderKnowledge(); renderInventory(); renderReports();
       document.getElementById('footer_status').textContent = '系统运行正常';
       requestAnimationFrame(drawCharts);
       iconRefresh();

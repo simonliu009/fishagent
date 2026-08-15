@@ -32,54 +32,101 @@ def _local_time(value: str) -> str:
         return str(value or "-")
 
 
-def _svg(values: list[float]) -> str:
-    if not values:
-        return '<svg viewBox="0 0 360 72" role="img"><text x="12" y="40">暂无趋势数据</text></svg>'
+CHART_COLORS = ("#1677ff", "#07966f", "#e45a55", "#c99324", "#5746d9", "#3971b8")
+
+
+def _reading_time(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return datetime.min
+
+
+def _svg(series: list[dict[str, Any]]) -> str:
+    readings = [reading for item in series for reading in item["readings"] if reading.get("value") is not None]
+    if not readings:
+        return '<svg viewBox="0 0 520 170" role="img"><text x="16" y="86">暂无真实采样数据</text></svg>'
+    values = [float(reading["value"]) for reading in readings]
     low = min(values)
     high = max(values)
-    spread = max(high - low, 0.0001)
-    points = []
-    for index, value in enumerate(values):
-        x = 8 + (index / max(len(values) - 1, 1)) * 344
-        y = 62 - ((value - low) / spread) * 48
-        points.append("%.1f,%.1f" % (x, y))
-    x, y = points[-1].split(",")
+    spread = max(high - low, max(abs(high), 1.0) * 0.04, 0.0001)
+    low -= spread * 0.08
+    high += spread * 0.08
+    start = min((_reading_time(reading.get("sampled_at", "")) for reading in readings), default=datetime.min)
+    end = max((_reading_time(reading.get("sampled_at", "")) for reading in readings), default=datetime.max)
+    time_span = max((end - start).total_seconds(), 1.0)
+    left, top, right, bottom = 48, 12, 510, 132
+
+    def point(reading: dict[str, Any]) -> tuple[float, float]:
+        x = left + ((_reading_time(reading.get("sampled_at", "")) - start).total_seconds() / time_span) * (right - left)
+        y = bottom - ((float(reading["value"]) - low) / max(high - low, 0.0001)) * (bottom - top)
+        return x, y
+
+    grid = []
+    for index in range(3):
+        value = low + (high - low) * index / 2
+        y = bottom - (bottom - top) * index / 2
+        grid.append('<path d="M%.1f %.1fH%.1f" stroke="#d8dee8"/><text x="4" y="%.1f">%.2f</text>' % (left, y, right, y + 4, value))
+    paths = []
+    for index, item in enumerate(series):
+        ordered = sorted(item["readings"], key=lambda reading: reading.get("sampled_at", ""))
+        points = [point(reading) for reading in ordered if reading.get("value") is not None]
+        if not points:
+            continue
+        color = CHART_COLORS[index % len(CHART_COLORS)]
+        paths.append(
+            '<polyline points="%s" fill="none" stroke="%s" stroke-width="2.2" stroke-linejoin="round"/>'
+            % (" ".join("%.1f,%.1f" % item for item in points), color)
+        )
+        paths.extend('<circle cx="%.1f" cy="%.1f" r="2.2" fill="%s"/>' % (x, y, color) for x, y in points)
+    start_label = _local_time(start.isoformat()).replace(":00", "") if start != datetime.min else "--"
+    end_label = _local_time(end.isoformat()).replace(":00", "") if end != datetime.max else "--"
     return (
-        '<svg viewBox="0 0 360 72" role="img" aria-label="传感器趋势">'
-        '<path d="M8 62H352" stroke="#d8dee8" fill="none"/>'
-        '<polyline points="%s" fill="none" stroke="#1677ff" stroke-width="2.5"/>'
-        '<circle cx="%s" cy="%s" r="3.5" fill="#1677ff"/></svg>'
-        % (" ".join(points), x, y)
+        '<svg viewBox="0 0 520 170" role="img" aria-label="按池塘展示的真实传感器趋势">'
+        '<g font-family="system-ui, sans-serif" font-size="10" fill="#68748a">%s</g>'
+        '<path d="M%.1f %.1fH%.1f" stroke="#9da9bb"/><text x="%.1f" y="151">%s</text><text x="%.1f" y="151" text-anchor="end">%s</text>'
+        '%s</svg>'
+        % ("".join(grid), left, bottom, right, left, escape(start_label), right, escape(end_label), "".join(paths))
     )
 
 
 def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at: datetime) -> tuple[str, dict[str, Any], str]:
     ponds = snapshot.get("ponds", [])
     readings = snapshot.get("readings", [])
-    readings_by_metric: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    pond_names = {item.get("id"): item.get("name", item.get("id", "")) for item in ponds}
+    readings_by_metric: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     for reading in readings:
-        readings_by_metric[str(reading.get("metric", ""))].append(reading)
+        readings_by_metric[str(reading.get("metric", ""))][str(reading.get("pond_id", ""))].append(reading)
     trends = []
     for metric, label in METRIC_LABELS.items():
-        metric_readings = sorted(readings_by_metric.get(metric, []), key=lambda item: item.get("sampled_at", ""))[-24:]
+        metric_series = [
+            {
+                "pond_id": pond_id,
+                "pond_name": pond_names.get(pond_id, pond_id),
+                "readings": sorted(items, key=lambda item: item.get("sampled_at", ""))[-24:],
+            }
+            for pond_id, items in sorted(readings_by_metric.get(metric, {}).items())
+        ]
+        metric_readings = [reading for item in metric_series for reading in item["readings"]]
         trends.append(
             {
                 "metric": metric,
                 "label": label,
                 "unit": metric_readings[-1].get("unit", "") if metric_readings else "",
                 "readings": metric_readings,
-                "chart_svg": _svg([float(item["value"]) for item in metric_readings if item.get("value") is not None]),
+                "series": metric_series,
+                "chart_svg": _svg(metric_series),
             }
         )
 
     incidents = snapshot.get("incidents", [])
     active_incidents = [item for item in incidents if item.get("status") not in {"RESOLVED", "DISMISSED"}]
     operation_logs = []
-    for command in snapshot.get("commands", [])[-100:]:
+    for command in snapshot.get("commands", []):
         operation_logs.append(
             {
                 "time": _local_time(command.get("created_at", "")),
-                "type": "设备操作",
+                "type": "自动设备操作",
                 "summary": "%s：%s -> %s（%s）"
                 % (
                     command.get("pond_id", ""),
@@ -89,8 +136,17 @@ def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at
                 ),
             }
         )
-    for run in snapshot.get("agent_runs", [])[-100:]:
-        for step in run.get("steps", [])[-20:]:
+    for task in snapshot.get("manual_tasks", []):
+        operation_logs.append(
+            {
+                "time": _local_time(task.get("created_at", "")),
+                "type": "人工任务",
+                "summary": "%s（%s，负责人：%s）：%s"
+                % (task.get("title", ""), task.get("status", ""), task.get("assignee", "现场操作员"), task.get("description", "")),
+            }
+        )
+    for run in snapshot.get("agent_runs", []):
+        for step in run.get("steps", []):
             operation_logs.append(
                 {
                     "time": _local_time(step.get("created_at", "")),
@@ -117,11 +173,22 @@ def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at
         "inventory": snapshot.get("inventory", []),
         "low_stock": low_stock,
         "restock_orders": snapshot.get("restock_orders", []),
-        "operation_logs": operation_logs[:100],
+        "operation_logs": operation_logs,
+        "automatic_operations": [item for item in operation_logs if item["type"] == "自动设备操作"],
+        "manual_tasks": snapshot.get("manual_tasks", []),
     }
     trend_sections = "".join(
-        '<section class="trend"><h3>%s</h3>%s<p class="muted">最近 %d 条读数，单位：%s</p></section>'
-        % (escape(item["label"]), item["chart_svg"], len(item["readings"]), escape(item["unit"] or "-"))
+        '<section class="trend"><h3>%s</h3>%s<div class="trend-legend">%s</div><p class="muted">基于最近 %d 条真实采样读数，单位：%s</p></section>'
+        % (
+            escape(item["label"]),
+            item["chart_svg"],
+            "".join(
+                '<span><i style="background:%s"></i>%s</span>' % (CHART_COLORS[index % len(CHART_COLORS)], escape(series["pond_name"]))
+                for index, series in enumerate(item["series"])
+            ),
+            len(item["readings"]),
+            escape(item["unit"] or "-"),
+        )
         for item in trends
     )
     pond_rows = "".join(
@@ -153,7 +220,7 @@ def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at
     log_rows = "".join(
         "<tr><td>%s</td><td>%s</td><td>%s</td></tr>"
         % (escape(item["time"]), escape(item["type"]), escape(item["summary"]))
-        for item in operation_logs[:100]
+        for item in operation_logs
     ) or '<tr><td colspan="3">暂无操作日志</td></tr>'
     report_title = "今日渔场巡检与操作建议报告 · %s" % report_date.isoformat()
     html = """<!doctype html>
@@ -162,7 +229,7 @@ def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at
 body{font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;color:#172033;background:#f5f7fb;margin:0;padding:32px;line-height:1.55}
 main{max-width:1180px;margin:auto;background:#fff;padding:32px 40px;box-shadow:0 8px 30px #17203312}
 h1{margin:0 0 4px;font-size:28px}h2{margin:32px 0 12px;border-bottom:2px solid #e8edf5;padding-bottom:8px}h3{margin:0 0 6px;font-size:16px}.muted{color:#68748a;font-size:12px}
-.summary{padding:16px 20px;background:#edf6ff;border-left:4px solid #1677ff;margin:20px 0}.trends{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.trend{border:1px solid #e1e7f0;padding:14px}.trend svg{width:100%%;height:72px;background:#fbfcfe}
+.summary{padding:16px 20px;background:#edf6ff;border-left:4px solid #1677ff;margin:20px 0}.trends{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.trend{border:1px solid #e1e7f0;padding:14px}.trend svg{width:100%%;height:170px;background:#fbfcfe}.trend-legend{display:flex;gap:10px;flex-wrap:wrap;margin:3px 0 2px;color:#68748a;font-size:11px}.trend-legend span{display:inline-flex;align-items:center;gap:4px}.trend-legend i{display:inline-block;width:8px;height:8px;border-radius:50%%}
 table{border-collapse:collapse;width:100%%;font-size:13px}th,td{text-align:left;border-bottom:1px solid #e8edf5;padding:9px 8px;vertical-align:top}th{background:#f6f8fb}
 @media print{body{background:#fff;padding:0}main{box-shadow:none;padding:0}}@media(max-width:700px){body{padding:12px}main{padding:20px}.trends{grid-template-columns:1fr}}
 </style></head><body><main>
