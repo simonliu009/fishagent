@@ -32,6 +32,31 @@ def _local_time(value: str) -> str:
         return str(value or "-")
 
 
+def _pond_name_without_id(pond: dict[str, Any]) -> str:
+    pond_id = str(pond.get("id") or "").strip()
+    name = str(pond.get("name") or "").strip()
+    if not name or not pond_id:
+        return name or pond_id
+    if name.casefold().startswith(pond_id.casefold()):
+        suffix = name[len(pond_id) :].strip()
+        return suffix or name
+    return name
+
+
+def _incident_title_without_pond_prefix(title: str, pond: dict[str, Any] | None) -> str:
+    value = str(title or "").strip()
+    if not pond:
+        return value
+    prefixes = [str(pond.get("name") or "").strip(), str(pond.get("id") or "").strip()]
+    for prefix in prefixes:
+        if not prefix or not value.casefold().startswith(prefix.casefold()):
+            continue
+        remainder = value[len(prefix) :].lstrip(" ：:·-")
+        if remainder:
+            return remainder
+    return value
+
+
 CHART_COLORS = ("#1677ff", "#07966f", "#e45a55", "#c99324", "#5746d9", "#3971b8")
 
 
@@ -93,7 +118,8 @@ def _svg(series: list[dict[str, Any]]) -> str:
 def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at: datetime) -> tuple[str, dict[str, Any], str]:
     ponds = snapshot.get("ponds", [])
     readings = snapshot.get("readings", [])
-    pond_names = {item.get("id"): item.get("name", item.get("id", "")) for item in ponds}
+    pond_by_id = {item.get("id"): item for item in ponds}
+    pond_names = {pond_id: _pond_name_without_id(item) for pond_id, item in pond_by_id.items()}
     readings_by_metric: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     for reading in readings:
         readings_by_metric[str(reading.get("metric", ""))][str(reading.get("pond_id", ""))].append(reading)
@@ -193,14 +219,14 @@ def build_daily_report(snapshot: dict[str, Any], report_date: date, generated_at
     )
     pond_rows = "".join(
         "<tr><td>%s</td><td>%s</td><td>%s</td></tr>"
-        % (escape(item.get("id", "")), escape(item.get("name", "")), escape(item.get("species", "")))
+        % (escape(item.get("id", "")), escape(_pond_name_without_id(item)), escape(item.get("species", "")))
         for item in ponds
     ) or '<tr><td colspan="3">暂无池塘数据</td></tr>'
     incident_rows = "".join(
         "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
         % (
             escape(item.get("pond_id", "")),
-            escape(item.get("title", "")),
+            escape(_incident_title_without_pond_prefix(item.get("title", ""), pond_by_id.get(item.get("pond_id")))),
             escape(item.get("status", "")),
             escape("；".join(evidence.get("summary", "") for evidence in item.get("evidence", []))),
         )

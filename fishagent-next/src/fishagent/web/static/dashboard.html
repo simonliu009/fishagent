@@ -1261,6 +1261,32 @@
 
     function iconRefresh() { if (window.lucide) window.lucide.createIcons({attrs: {'stroke-width': 1.8}}); }
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
+    function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+    function pondNameWithoutId(pond) {
+      const id = String(pond?.id || '').trim();
+      const name = String(pond?.name || '').trim();
+      if (!name || !id) return name || id || '--';
+      const withoutId = name.replace(new RegExp(`^${escapeRegExp(id)}(?:\\s+|$)`, 'i'), '').trim();
+      return withoutId || name;
+    }
+    function pondRecord(pondId) {
+      return (currentState.ponds || []).find(item => item.id === pondId);
+    }
+    function pondDisplayLabel(pondId) {
+      const id = String(pondId || '').trim();
+      const pond = pondRecord(id);
+      return pond ? `${id} ${pondNameWithoutId(pond)}` : id || '--';
+    }
+    function pondReasonTitle(pondId, title) {
+      const value = String(title || '').trim();
+      const pond = pondRecord(pondId);
+      const prefixes = [pond?.name, pond?.id].filter(Boolean);
+      for (const prefix of prefixes) {
+        const stripped = value.replace(new RegExp(`^${escapeRegExp(prefix)}(?:\\s*[：:·\\-]\\s*|\\s+)`, 'i'), '').trim();
+        if (stripped !== value) return stripped;
+      }
+      return value;
+    }
     function fmtDate(value, withSeconds = true) {
       if (!value) return '--';
       const date = new Date(value);
@@ -1788,7 +1814,7 @@
         const adviceMarkup = recommendations.length
           ? `<div class="patrol-advice"><i data-lucide="lightbulb"></i><div><strong>巡查建议</strong><span>${recommendations.map(item => escapeHtml(item)).join('；')}</span></div></div>`
           : '';
-        return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pond.name)}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div><div class="patrol-device-block"><div class="patrol-device-heading">设备在线状态</div><div class="patrol-device-strip">${deviceStrip}</div></div>${adviceMarkup}</div>`;
+        return `<div class="patrol-pond-row"><span class="patrol-pond-name"><span class="dot ${condition.tone}"></span><b>${escapeHtml(pond.id)}</b><span>${escapeHtml(pondNameWithoutId(pond))}</span><time>巡检 ${fmtDate(markedAt)}</time></span>${badge(condition.tone === 'danger' ? 'FAILED' : condition.tone === 'warning' ? 'NEEDS_ATTENTION' : 'NORMAL', condition.label)}<div class="patrol-sensor-strip">${sensorStrip}</div><div class="patrol-device-block"><div class="patrol-device-heading">设备在线状态</div><div class="patrol-device-strip">${deviceStrip}</div></div>${adviceMarkup}</div>`;
       }).join('') : activeReveal ? patrolLoadingMarkup : '<div class="empty">暂无池塘，前往养殖管理初始化资产</div>';
       updateCountdown();
       iconRefresh();
@@ -2144,7 +2170,7 @@
         const carouselItems = activeIncidents.length > 1 ? [...activeIncidents, activeIncidents[0]] : activeIncidents;
         document.getElementById('alert_capsule_list').innerHTML = `<div id="alert_capsule_track" class="alert-capsule-track">${carouselItems.map(item => {
           const evidence = item.evidence?.at(-1);
-          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${activeIncidents.length} 条活跃 · ${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(alertTriggerSummary(evidence || {summary: item.status}))}</span></button>`;
+          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${activeIncidents.length} 条活跃 · ${escapeHtml(pondDisplayLabel(item.pond_id))} · ${escapeHtml(pondReasonTitle(item.pond_id, item.title || item.status))}</b><span>${escapeHtml(alertTriggerSummary(evidence || {summary: item.status}))}</span></button>`;
         }).join('')}</div>`;
         startAlertCarousel(activeIncidents.length);
       }
@@ -2302,7 +2328,7 @@
         node.textContent = chatLabel;
       });
       const selectedPond = document.querySelector('.assistant-chat-pond')?.value || '';
-      const pondOptions = '<option value="">全场</option>' + (currentState.ponds || []).map(pond => `<option value="${escapeHtml(pond.id)}">${escapeHtml(pond.id)} · ${escapeHtml(pond.name)}</option>`).join('');
+      const pondOptions = '<option value="">全场</option>' + (currentState.ponds || []).map(pond => `<option value="${escapeHtml(pond.id)}">${escapeHtml(pond.id)} · ${escapeHtml(pondNameWithoutId(pond))}</option>`).join('');
       document.querySelectorAll('.assistant-chat-pond').forEach(pondSelect => {
         pondSelect.innerHTML = pondOptions;
         if ([...pondSelect.options].some(option => option.value === selectedPond)) pondSelect.value = selectedPond;
@@ -2332,7 +2358,7 @@
       document.getElementById('schedule_list').innerHTML = schedules.length ? `${schedules.map(item => `<div class="work-item"><div class="work-item-title">${escapeHtml(item.name)} ${badge(item.status)}</div><div class="work-item-meta">每 ${item.interval_seconds} 秒 · 下次 ${fmtDate(item.next_run_at)}</div></div>`).join('')}<div class="message">最近作业 ${jobs.length} 条</div>` : '<div class="empty">暂无调度定义</div>';
       document.getElementById('asset_tables').innerHTML = [
         table('养殖场', currentState.farms || [], [['id','ID'],['name','名称'],['location','位置']]),
-        table('池塘', currentState.ponds || [], [['id','ID'],['farm_id','养殖场'],['name','名称'],['species','品种'],['dissolved_oxygen_min','DO 下限']]),
+        table('池塘', (currentState.ponds || []).map(pond => ({...pond, name:pondNameWithoutId(pond)})), [['id','ID'],['farm_id','养殖场'],['name','名称'],['species','品种'],['dissolved_oxygen_min','DO 下限']]),
         table('传感器', currentState.sensors || [], [['id','ID'],['pond_id','池塘'],['name','名称'],['metric','指标'],['status','状态']]),
         table('设备', currentState.devices || [], [['id','ID'],['pond_id','池塘'],['name','名称'],['capability','能力'],['shadow_state','状态']]),
         table('摄像头', currentState.cameras || [], [['id','ID'],['pond_id','池塘'],['name','名称'],['source_type','来源'],['status','状态']])
