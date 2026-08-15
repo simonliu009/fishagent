@@ -399,6 +399,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn("class=\"patrol-advice\"", response.text)
         self.assertIn("巡查建议", response.text)
         self.assertIn('class="patrol-loading"', response.text)
+        self.assertIn('class="patrol-loading-robot"', response.text)
+        self.assertIn('@keyframes patrol-robot-walk', response.text)
         self.assertIn('@keyframes patrol-dot-bounce', response.text)
         self.assertIn("24 * 60 * 60 * 1000", response.text)
         self.assertIn('class="alert-item ${closed ? \'resolved\' : \'active\'}"', response.text)
