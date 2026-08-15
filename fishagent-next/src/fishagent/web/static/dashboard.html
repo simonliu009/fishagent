@@ -1291,8 +1291,10 @@
     }
     function abnormalEvidenceText(summary) {
       const text = String(summary || '');
-      const markerIndex = text.lastIndexOf('异常：');
-      return markerIndex >= 0 ? text.slice(markerIndex + 3) : text;
+      const detailedMarker = text.lastIndexOf('；异常：');
+      if (detailedMarker >= 0) return text.slice(detailedMarker + '；异常：'.length);
+      const markerIndex = text.indexOf('异常：');
+      return markerIndex >= 0 ? text.slice(markerIndex + '异常：'.length) : text;
     }
     function waterMetricAlertSource(metric, reading, pond, finding, incident) {
       if (metricIsAbnormal(metric, reading, pond)) return true;
@@ -1572,11 +1574,30 @@
     function offlineDeviceDetails(pondId) {
       return (currentState.devices || []).filter(item => item.pond_id === pondId && !item.healthy).map(item => deviceAssetLabel(item.id) + '，状态：离线');
     }
+    function alertTriggerSummary(evidence) {
+      const raw = String(evidence?.summary || '等待告警证据');
+      const detailedMarker = raw.lastIndexOf('；异常：');
+      if (detailedMarker < 0) return raw;
+      const snapshot = raw.slice(0, detailedMarker);
+      const reason = abnormalEvidenceText(raw);
+      const sources = [
+        {names: ['氨氮'], pattern: /氨氮\s*[-+]?\d+(?:\.\d+)?\s*(?:mg\/L)?/i},
+        {names: ['亚硝酸根离子', '亚硝酸盐'], pattern: /亚硝酸根离子\s*[-+]?\d+(?:\.\d+)?\s*(?:mg\/L)?/i},
+        {names: ['浊度'], pattern: /浊度\s*[-+]?\d+(?:\.\d+)?\s*(?:NTU)?/i},
+        {names: ['叶绿素'], pattern: /叶绿素\s*[-+]?\d+(?:\.\d+)?\s*(?:ug\/L)?/i},
+        {names: ['溶氧', '溶解氧'], pattern: /溶解氧\s*[-+]?\d+(?:\.\d+)?\s*(?:mg\/L)?/i},
+        {names: ['pH', 'PH'], pattern: /pH\s*[-+]?\d+(?:\.\d+)?\s*(?:pH)?/i},
+        {names: ['水温', '温度'], pattern: /水温\s*[-+]?\d+(?:\.\d+)?\s*(?:°C)?/i}
+      ];
+      const triggerValues = sources
+        .filter(source => source.names.some(name => reason.includes(name)))
+        .map(source => snapshot.match(source.pattern)?.[0])
+        .filter(Boolean);
+      return [...new Set([...triggerValues, reason ? `原因：${reason}` : ''].filter(Boolean))].join('；') || raw;
+    }
     function alertCauseSummary(item, evidence) {
-      const pond = (currentState.ponds || []).find(candidate => candidate.id === item.pond_id);
-      const summary = evidence?.summary || item.title || '等待告警证据';
+      const summary = alertTriggerSummary(evidence || {summary: item.title});
       const details = [];
-      if (pond) details.push(`池塘资产：${pond.id} ${pond.name}（品种：${pond.species || '未标注'}）`);
       details.push(summary);
       const sensors = sensorAssetDetails(item.pond_id);
       const devices = offlineDeviceDetails(item.pond_id);
@@ -1678,7 +1699,7 @@
         const carouselItems = activeIncidents.length > 1 ? [...activeIncidents, activeIncidents[0]] : activeIncidents;
         document.getElementById('alert_capsule_list').innerHTML = `<div id="alert_capsule_track" class="alert-capsule-track">${carouselItems.map(item => {
           const evidence = item.evidence?.at(-1);
-          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${activeIncidents.length} 条活跃 · ${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(evidence?.summary || item.status || '等待处置')}</span></button>`;
+          return `<button class="capsule-alert" type="button" onclick="openAlertView(event)"><b>${activeIncidents.length} 条活跃 · ${escapeHtml(item.pond_id || '--')} · ${escapeHtml(item.title || item.status)}</b><span>${escapeHtml(alertTriggerSummary(evidence || {summary: item.status}))}</span></button>`;
         }).join('')}</div>`;
         startAlertCarousel(activeIncidents.length);
       }
