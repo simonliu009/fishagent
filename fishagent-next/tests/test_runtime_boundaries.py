@@ -137,10 +137,13 @@ class RuntimeBoundaryTests(unittest.TestCase):
                         "pond_id": "B-02",
                         "metric": "PH",
                         "value": 7.9,
+                        "quality": "GOOD",
                         "sampled_at": "2026-08-14T07:24:00+00:00",
                     }
                 ],
-                "devices": [],
+                "sensors": [{"id": "ph-b02", "pond_id": "B-02"}],
+                "sensor_health": [{"sensor_id": "ph-b02", "status": "ONLINE"}],
+                "devices": [{"id": "aerator-b02-1", "pond_id": "B-02", "healthy": True}],
                 "incidents": [],
             }
         )
@@ -158,6 +161,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
         live_state = captured["context"]["live_state"]
         self.assertEqual(live_state["latest_readings"][0]["sampled_at"], "2026-08-14 15:24:00")
         self.assertEqual(live_state["timezone"], "Asia/Shanghai")
+        self.assertEqual(live_state["current_status"]["label"], "正常")
+        self.assertEqual(live_state["current_status"]["active_incident_count"], 0)
         self.assertNotIn("UTC", str(live_state))
 
     def test_crewai_chat_retries_an_empty_provider_response(self) -> None:
@@ -382,6 +387,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn("onclick=\"injectDemo('health')\"", response.text)
         self.assertNotIn('data-view="cases"', response.text)
         self.assertNotIn('id="view_cases"', response.text)
+        self.assertGreater(response.text.index('data-view="knowledge"'), response.text.index('data-view="reports"'))
+        self.assertIn("function resetAssistantChatContext()", response.text)
         self.assertIn('onclick="toggleAlertCapsule(event)"', response.text)
         self.assertIn('onclick="openAlertView(event)"', response.text)
         self.assertIn("function advanceCountdownTarget", response.text)

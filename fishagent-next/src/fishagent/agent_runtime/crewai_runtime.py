@@ -475,7 +475,8 @@ class CrewAIOrchestrator:
                 "回答控制在 600 个汉字以内，避免长表格或重复说明；"
                 "引用水质数据时写明池塘和采样时间，证据不足时明确说明。"
                 "所有时间均使用应用运行时区 {timezone}，时间格式为 YYYY-MM-DD HH:mm:ss；禁止输出 UTC、Z 或任何 UTC 时区标记。"
-                "运行上下文中的 live_state 是应用刚读取的可信实时证据；涉及水质时必须优先据此判断，"
+                "运行上下文中的 live_state 是应用刚读取的可信实时证据，其中 current_status 和 active_incidents 优先级最高；"
+                "历史对话只用于理解上下文，历史助手回复可能已经过期，绝不能覆盖当前快照。涉及水质时必须优先据此判断，"
                 "不要编造上下文中不存在的读数、时间、告警或设备状态。"
                 "不得声称已经执行设备操作；涉及设备控制时只能提出建议，并说明还需经过策略门或人工审批。"
                 "输出必须以“结论：”开头，只输出最终答复，严禁输出思考过程、分析步骤或隐藏推理。"
@@ -816,15 +817,38 @@ class CrewAIOrchestrator:
             for reading in snapshot.get("readings", []):
                 if reading.get("pond_id") in pond_ids:
                     latest_readings[(reading["pond_id"], reading.get("metric", ""))] = reading
+            active_incidents = [
+                item
+                for item in snapshot.get("incidents", [])
+                if item.get("pond_id") in pond_ids and item.get("status") not in {"RESOLVED", "DISMISSED"}
+            ]
+            pond_sensor_ids = {
+                sensor["id"] for sensor in snapshot.get("sensors", []) if sensor.get("pond_id") in pond_ids
+            }
+            sensor_health = [item for item in snapshot.get("sensor_health", []) if item.get("sensor_id") in pond_sensor_ids]
+            devices = [item for item in snapshot.get("devices", []) if item.get("pond_id") in pond_ids]
+            current_is_normal = bool(ponds and sensor_health and devices and latest_readings) and not active_incidents and len(
+                sensor_health
+            ) == len(pond_sensor_ids) and all(
+                item.get("status") == "ONLINE" for item in sensor_health
+            ) and all(item.get("healthy") is True for item in devices) and all(
+                item.get("quality", "GOOD") == "GOOD" for item in latest_readings.values()
+            )
             live_state = {
                 "ponds": ponds,
                 "latest_readings": list(latest_readings.values()),
-                "devices": [item for item in snapshot.get("devices", []) if item.get("pond_id") in pond_ids],
-                "active_incidents": [
-                    item
-                    for item in snapshot.get("incidents", [])
-                    if item.get("pond_id") in pond_ids and item.get("status") not in {"RESOLVED", "DISMISSED"}
-                ],
+                "sensor_health": sensor_health,
+                "devices": devices,
+                "active_incidents": active_incidents,
+                "current_status": {
+                    "label": "正常" if current_is_normal else "需关注",
+                    "active_incident_count": len(active_incidents),
+                    "instruction": (
+                        "当前快照为正常基线，不得引用历史对话中的旧告警作为当前事实。"
+                        if current_is_normal
+                        else "只能引用当前快照中的异常证据，不得把已关闭事件当作活跃告警。"
+                    ),
+                },
             }
             live_state = self._localize_chat_context(live_state)
             display_timezone = self._chat_timezone()

@@ -829,7 +829,6 @@
   <nav class="primary-nav" aria-label="主导航">
     <button class="nav-button active" type="button" data-view="monitor" onclick="switchView('monitor')"><i data-lucide="layout-dashboard"></i><span>监控总览</span></button>
     <button class="nav-button" type="button" data-view="assistant" onclick="switchView('assistant')"><i data-lucide="bot"></i><span>AI 助手</span></button>
-    <button class="nav-button" type="button" data-view="knowledge" onclick="switchView('knowledge')"><i data-lucide="book-open-check"></i><span>知识库</span></button>
     <button class="nav-button" type="button" data-view="inventory" onclick="switchView('inventory')"><i data-lucide="boxes"></i><span>库存补货</span></button>
     <button class="nav-button" type="button" data-view="management" onclick="switchView('management')"><i data-lucide="waves"></i><span>养殖管理</span></button>
     <button class="nav-button" type="button" data-view="analytics" onclick="switchView('analytics')"><i data-lucide="chart-no-axes-combined"></i><span>数据分析</span></button>
@@ -838,6 +837,7 @@
     <button class="nav-button" type="button" data-view="schedules" onclick="switchView('schedules')"><i data-lucide="calendar-clock"></i><span>调度中心</span></button>
     <button class="nav-button" type="button" data-view="audit" onclick="switchView('audit')"><i data-lucide="scroll-text"></i><span>系统审计</span></button>
     <button class="nav-button" type="button" data-view="reports" onclick="switchView('reports')"><i data-lucide="file-chart-column"></i><span>每日报告</span></button>
+    <button class="nav-button" type="button" data-view="knowledge" onclick="switchView('knowledge')"><i data-lucide="book-open-check"></i><span>知识库</span></button>
   </nav>
 
   <main class="app-main">
@@ -1140,6 +1140,8 @@
     let alertCarouselResetTimer = null;
     let assistantChatHistory = [];
     let assistantChatBusy = false;
+    let assistantChatContextVersion = 0;
+    let lastDemoInitializationEventId = null;
     let analysisCasePollTimer = null;
     let patrolRevealState = null;
     let patrolRevealTimer = null;
@@ -1967,6 +1969,13 @@
       log.innerHTML = messages.join('');
       requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; iconRefresh(); });
     }
+    function resetAssistantChatContext() {
+      assistantChatContextVersion += 1;
+      assistantChatHistory = [];
+      assistantChatBusy = false;
+      document.getElementById('assistant_chat_send').disabled = false;
+      renderAssistantChat();
+    }
     function renderAssistant() {
       renderRuns();
       document.getElementById('assistant_events').innerHTML = eventRows(24, true);
@@ -2256,9 +2265,17 @@
     async function refresh() {
       try {
         const [state, config, user] = await Promise.all([api('/api/v1/state'), api('/api/v1/config/llm'), api('/api/v1/me')]);
+        const latestDemoInitialization = [...(state.events || [])].reverse().find(item => item.event_type === 'system.demo.initialized');
+        const demoWasResetElsewhere = Boolean(
+          latestDemoInitialization?.event_id
+          && lastDemoInitializationEventId
+          && latestDemoInitialization.event_id !== lastDemoInitializationEventId,
+        );
         const latestPatrolRun = (state.agent_runs || []).filter(run => String(run.goal).includes('巡查')).at(-1);
         const patrolRunChanged = Boolean(lastPatrolRunId && latestPatrolRun?.id && latestPatrolRun.id !== lastPatrolRunId && !patrolRevealState);
         currentState = state;
+        if (demoWasResetElsewhere) resetAssistantChatContext();
+        lastDemoInitializationEventId = latestDemoInitialization?.event_id || lastDemoInitializationEventId;
         lastPatrolRunId = latestPatrolRun?.id || null;
         currentLlm = config.llm || {};
         llmProfiles = config.profiles || [];
@@ -2281,7 +2298,10 @@
       try { await action(); showToast(success); await refresh(); }
       catch (error) { showToast(error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message, true); if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false; }
     }
-    function initializeDemo() { return mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化'); }
+    function initializeDemo() {
+      resetAssistantChatContext();
+      return mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化');
+    }
     async function injectDemo(mode) {
       const messages = {
         success: '已注入低溶氧自动处置 Demo',
@@ -2292,6 +2312,7 @@
         multimodal: '已启动多模态案例序列 Demo',
         health: '已注入传感器与设备故障 Demo',
       };
+      resetAssistantChatContext();
       await mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), messages[mode] || 'Demo 已注入');
       if (mode === 'multimodal') watchAnalysisCases();
     }
@@ -2370,6 +2391,7 @@
       const message = input.value.trim();
       if (!message) return;
       const history = assistantChatHistory.slice(-12);
+      const contextVersion = assistantChatContextVersion;
       assistantChatHistory.push({role:'user', content:message});
       input.value = '';
       assistantChatBusy = true;
@@ -2380,6 +2402,7 @@
         const result = await streamAssistantChat(
           {message, pond_id:document.getElementById('assistant_chat_pond').value || null, history},
           delta => {
+            if (contextVersion !== assistantChatContextVersion) return;
             if (!assistantMessage) {
               assistantMessage = {role:'assistant', content:''};
               assistantChatHistory.push(assistantMessage);
@@ -2388,6 +2411,7 @@
             renderAssistantChat();
           },
         );
+        if (contextVersion !== assistantChatContextVersion) return;
         if (!assistantMessage) {
           assistantMessage = {role:'assistant', content:result.reply || ''};
           assistantChatHistory.push(assistantMessage);
@@ -2396,11 +2420,13 @@
         }
         await refresh();
       } catch (error) {
+        if (contextVersion !== assistantChatContextVersion) return;
         const errorMessage = `无法完成本次对话：${error.message}`;
         if (assistantMessage) assistantMessage.content = errorMessage;
         else assistantChatHistory.push({role:'assistant', content:errorMessage});
         showToast(`智渔AI 对话失败：${error.message}`, true);
       } finally {
+        if (contextVersion !== assistantChatContextVersion) return;
         assistantChatBusy = false;
         document.getElementById('assistant_chat_send').disabled = false;
         renderAssistantChat();
