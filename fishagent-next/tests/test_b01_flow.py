@@ -897,6 +897,37 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(len(state["manual_tasks"]), 1)
         self.assertEqual(state["manual_tasks"][0]["incident_id"], incidents["B-02"]["id"])
 
+    def test_auto_response_demo_injection_records_operator_trigger(self) -> None:
+        class ManualOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="演示异常需要人工复核。",
+                    ),
+                    summary="演示转人工",
+                    stop_reason="LLM_DECISION_READY",
+                    delegated_agents=["sensor-monitor-agent"],
+                    steps=[],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=ManualOrchestrator())
+        state = system.inject_demo("alerts")
+
+        self.assertEqual(len(state["incidents"]), 2)
+        self.assertTrue(any(item.source_event_id == "demo-alert-do" for item in system.store.readings))
+        event = next(item for item in reversed(state["events"]) if item["event_type"] == "demo.injected")
+        self.assertEqual(event["payload"]["mode"], "alerts")
+        self.assertTrue(event["payload"]["auto_response"])
+        self.assertEqual(event["payload"]["transport"], "mqtt")
+
+    def test_auto_response_demo_rejects_unknown_mode(self) -> None:
+        with self.assertRaises(ValueError):
+            FishAgentSystem().inject_demo("unknown")
+
     def test_crewai_chat_turn_is_audited_as_agent_run(self) -> None:
         class ChatOrchestrator:
             available = True

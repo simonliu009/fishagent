@@ -687,6 +687,73 @@
     .capsule-alert b, .capsule-alert span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .capsule-alert b { color: var(--red); font-size: 11px; line-height: 16px; }
     .capsule-alert span { color: var(--muted); font-size: 10px; line-height: 16px; }
+    .demo-launcher {
+      position: fixed;
+      right: 20px;
+      bottom: 22px;
+      z-index: 35;
+    }
+    .demo-launcher-toggle {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--brand-dark);
+      border-radius: 50%;
+      color: #fff;
+      background: var(--brand);
+      box-shadow: 0 12px 28px rgba(7, 150, 111, .28);
+      transition: transform .18s ease, background .18s ease;
+    }
+    .demo-launcher-toggle:hover { transform: translateY(-2px); background: var(--brand-dark); }
+    .demo-launcher-toggle svg { width: 21px; height: 21px; }
+    .demo-launcher-menu {
+      position: absolute;
+      right: 0;
+      bottom: 58px;
+      width: min(330px, calc(100vw - 24px));
+      padding: 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 16px 40px rgba(24, 48, 42, .18);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(7px);
+      transition: opacity .14s ease, transform .14s ease, visibility .14s ease;
+    }
+    .demo-launcher:hover .demo-launcher-menu,
+    .demo-launcher:focus-within .demo-launcher-menu {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .demo-launcher-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 3px 8px; }
+    .demo-launcher-head strong { font-size: 13px; }
+    .demo-launcher-head span { color: var(--muted); font-size: 10px; }
+    .demo-option-list { display: grid; gap: 5px; }
+    .demo-option {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      padding: 7px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--surface-alt);
+      text-align: left;
+    }
+    .demo-option:hover { border-color: var(--brand); background: var(--brand-soft); }
+    .demo-option svg { width: 16px; height: 16px; margin: auto; color: var(--brand-dark); }
+    .demo-option strong { display: block; font-size: 11px; line-height: 1.35; }
+    .demo-option small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+    .demo-option.reset { border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; color: var(--muted); background: transparent; }
+    .demo-option.reset svg { color: var(--muted); }
     .app-footer {
       min-height: 38px;
       display: flex;
@@ -733,6 +800,7 @@
       .sensor-trend-current-head { align-items: flex-start; flex-direction: column; gap: 3px; }
       .alert-head { flex-direction: column; }
       .alert-head-actions { justify-content: space-between; width: 100%; }
+      .demo-launcher { right: 12px; bottom: 16px; }
       .data-stream-item { grid-template-columns: 58px minmax(0, 1fr); }
       .run-row-head { align-items: flex-start; flex-wrap: wrap; }
       .run-row-time { margin-left: 0; }
@@ -783,7 +851,6 @@
           </div>
           <div class="actions">
             <span id="demo_data_badge" class="status-badge info" hidden><i data-lucide="database"></i>模拟数据</span>
-            <button class="button danger" type="button" onclick="runDemo('alerts')"><i data-lucide="triangle-alert"></i>模拟双传感器告警</button>
             <button id="run_patrol_button" class="button" type="button" onclick="runPatrol()"><i data-lucide="refresh-cw"></i>立即巡查</button>
           </div>
         </div>
@@ -858,8 +925,7 @@
             <p class="eyebrow">传感器触发与多模态证据统一进入真实 Agent 数据流</p>
           </div>
           <div class="actions">
-            <button class="button secondary" type="button" onclick="initializeDemo()"><i data-lucide="rotate-ccw"></i>重置案例</button>
-            <button class="button" type="button" onclick="runAllAnalysisCases()"><i data-lucide="play"></i>依次演示全部案例</button>
+            <span class="status-badge info"><i data-lucide="mouse-pointer-2"></i>请从监控总览注入 Demo</span>
           </div>
         </div>
         <div id="case_sequence_meta" class="message"></div>
@@ -978,7 +1044,7 @@
           <label id="asset_source_wrap" class="field wide">来源地址<input id="asset_source_url" placeholder="http://... 或 rtsp://..."></label>
           <label id="asset_state_wrap" class="field">状态<input id="asset_state" placeholder="ONLINE / off"></label>
         </div>
-        <div class="actions"><button class="button" type="button" onclick="createAsset()"><i data-lucide="plus"></i>创建资产</button><button class="button secondary" type="button" onclick="initializeDemo()"><i data-lucide="database"></i>初始化演示资产</button></div>
+        <div class="actions"><button class="button" type="button" onclick="createAsset()"><i data-lucide="plus"></i>创建资产</button></div>
         <div id="asset_message" class="message"></div>
       </section>
     </section>
@@ -1066,6 +1132,21 @@
       <div class="auth-actions"><button class="button secondary" type="button" onclick="testLlm()"><i data-lucide="plug-zap"></i>测试连接</button><button class="button" type="button" onclick="saveLlm()"><i data-lucide="save"></i>保存</button></div>
     </section>
   </div>
+  <aside id="demo_launcher" class="demo-launcher" aria-label="自动响应 Demo 注入">
+    <div class="demo-launcher-menu" role="menu" aria-label="Demo 场景选项">
+      <div class="demo-launcher-head"><strong>自动响应 Demo</strong><span>悬浮选择并注入</span></div>
+      <div class="demo-option-list">
+        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('success')"><i data-lucide="wind"></i><span><strong>低溶氧自动处置</strong><small>注入 B-01 异常，开启增氧并等待复核</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('alerts')"><i data-lucide="triangle-alert"></i><span><strong>双传感器告警</strong><small>同时注入低溶氧与氨氮异常</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('failure')"><i data-lucide="shield-alert"></i><span><strong>复核失败升级</strong><small>模拟复核未恢复并提交人工任务</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('dedup')"><i data-lucide="copy-check"></i><span><strong>防重复动作</strong><small>设备已开启时验证幂等控制</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('approval')"><i data-lucide="stamp"></i><span><strong>L2 审批转人工</strong><small>注入高风险异常并提交审批任务</small></span></button>
+        <button class="demo-option" type="button" role="menuitem" onclick="injectDemo('multimodal')"><i data-lucide="layers-3"></i><span><strong>多模态案例序列</strong><small>启动摄像头、天气与知识证据流程</small></span></button>
+        <button class="demo-option reset" type="button" role="menuitem" onclick="initializeDemo()"><i data-lucide="rotate-ccw"></i><span><strong>重置演示数据</strong><small>恢复基础背景数据，不触发自动处置</small></span></button>
+      </div>
+    </div>
+    <button class="demo-launcher-toggle" type="button" title="自动响应 Demo 注入" aria-label="自动响应 Demo 注入"><i data-lucide="flask-conical"></i></button>
+  </aside>
   <aside id="alert_capsule" class="alert-capsule" hidden aria-label="活跃告警" onmouseleave="releaseAlertCapsuleHover()">
     <div class="alert-capsule-head">
       <button id="alert_capsule_toggle" class="alert-capsule-icon" type="button" aria-expanded="false" title="固定展开告警" onclick="toggleAlertCapsule(event)"><i data-lucide="bell-ring"></i></button>
@@ -1099,7 +1180,12 @@
     let selectedReportId = null;
     const PATROL_REVEAL_INTERVAL_MS = 700;
     const demoCatalog = [
-      ['success', '低溶氧处置中 · 待复核', '传感器阈值', '增氧机开启 → MQTT 确认 → 等待自动巡塘复核'],
+      ['success', '低溶氧自动处置', '传感器阈值', '注入 B-01 低溶氧 → 增氧机开启 → MQTT 确认 → 等待复核'],
+      ['alerts', '双传感器告警', '传感器阈值', '同时注入 B-01 低溶氧与 B-02 氨氮异常'],
+      ['failure', '复核失败升级', '复核流程', '注入低溶氧 → 模拟复核未恢复 → 提交人工任务'],
+      ['dedup', '防重复动作', '设备幂等', '设备已开启 → 注入低溶氧 → 不重复下发开启指令'],
+      ['approval', 'L2 审批转人工', '安全策略', '注入高风险异常 → 生成审批任务'],
+      ['multimodal', '多模态案例序列', '巡塘 SOP', '启动摄像头、天气与知识证据的 Agent 数据流'],
     ];
     const colors = ['#07966f', '#52a85d', '#e12e2e', '#c99324', '#e45a55', '#3971b8'];
     const llmPresets = [
@@ -1336,6 +1422,7 @@
       currentView = name;
       document.querySelectorAll('.view').forEach(node => node.classList.toggle('active', node.id === `view_${name}`));
       document.querySelectorAll('.nav-button').forEach(node => node.classList.toggle('active', node.dataset.view === name));
+      document.getElementById('demo_launcher').hidden = name !== 'monitor';
       if (name === 'analytics' || name === 'monitor') requestAnimationFrame(drawCharts);
       iconRefresh();
     }
@@ -2081,8 +2168,8 @@
       const cases = [...(currentState.analysis_cases || [])].sort((a,b) => a.sequence - b.sequence);
       if (!selectedCaseId || !cases.some(item => item.id === selectedCaseId)) selectedCaseId = cases[0]?.id || null;
       const selected = cases.find(item => item.id === selectedCaseId) || cases[0];
-      document.getElementById('demo_catalog').innerHTML = demoCatalog.map(item => `<article class="case-card"><div class="case-card-head"><div><span class="case-number">${escapeHtml(item[0].slice(0,1).toUpperCase())}</span><span class="case-title">${escapeHtml(item[1])}</span></div>${badge('NORMAL', '可演示')}</div><div class="case-category">${escapeHtml(item[2])}</div><div class="case-result">${escapeHtml(item[3])}</div><div class="case-card-actions"><button class="icon-button" type="button" title="运行此 Demo" onclick="event.stopPropagation();runDemo('${item[0]}')"><i data-lucide="play"></i></button></div></article>`).join('');
-      document.getElementById('case_summary_grid').innerHTML = cases.length ? cases.map(item => `<article class="case-card ${item.id === selected?.id ? 'active' : ''}" onclick="selectAnalysisCase('${item.id}')"><div class="case-card-head"><div><span class="case-number">${item.sequence}</span><span class="case-title">${escapeHtml(item.title)}</span></div>${badge(item.status === 'READY' ? 'PENDING' : item.status, item.status === 'READY' ? '待演示' : item.status)}</div><div class="case-category">${escapeHtml(item.category)} · ${escapeHtml(item.pond_id)}</div><div class="case-trigger">${escapeHtml(item.trigger)}</div><div class="case-result">${escapeHtml(item.result_summary || item.expected_result)}</div><div class="case-card-actions"><button class="icon-button" type="button" title="运行此案例" onclick="event.stopPropagation();runAnalysisCase('${item.id}')"><i data-lucide="play"></i></button></div></article>`).join('') : '<div class="empty">暂无分析案例，请初始化演示资产</div>';
+      document.getElementById('demo_catalog').innerHTML = demoCatalog.map(item => `<article class="case-card"><div class="case-card-head"><div><span class="case-number">${escapeHtml(item[0].slice(0,1).toUpperCase())}</span><span class="case-title">${escapeHtml(item[1])}</span></div>${badge('NORMAL', '总览注入')}</div><div class="case-category">${escapeHtml(item[2])}</div><div class="case-result">${escapeHtml(item[3])}</div></article>`).join('');
+      document.getElementById('case_summary_grid').innerHTML = cases.length ? cases.map(item => `<article class="case-card ${item.id === selected?.id ? 'active' : ''}" onclick="selectAnalysisCase('${item.id}')"><div class="case-card-head"><div><span class="case-number">${item.sequence}</span><span class="case-title">${escapeHtml(item.title)}</span></div>${badge(item.status === 'READY' ? 'PENDING' : item.status, item.status === 'READY' ? '待注入' : item.status)}</div><div class="case-category">${escapeHtml(item.category)} · ${escapeHtml(item.pond_id)}</div><div class="case-trigger">${escapeHtml(item.trigger)}</div><div class="case-result">${escapeHtml(item.result_summary || item.expected_result)}</div></article>`).join('') : '<div class="empty">暂无分析案例，请从监控总览注入 Demo</div>';
       if (!selected) {
         document.getElementById('case_flow_title').textContent = '选择一个案例查看实际数据流';
         document.getElementById('case_flow_status').textContent = '';
@@ -2095,7 +2182,7 @@
           ? `${selected.category} · ${selected.pond_id} · ${runStatusLabel(selectedRun.status)} · ${fmtDate(selectedRun.steps?.[0]?.created_at, true)}`
           : `${selected.category} · ${selected.pond_id} · 尚未运行`;
         document.getElementById('case_description').textContent = `${selected.description} 预期路径仅作参考；下方展示本次 AgentRun 实际经过的巡塘 SOP、模型、策略门和执行数据。`;
-        document.getElementById('case_flow_track').innerHTML = selectedRun ? runTraceMarkup(selectedRun) : '<div class="data-stream-empty">点击运行案例后显示实际数据流</div>';
+        document.getElementById('case_flow_track').innerHTML = selectedRun ? runTraceMarkup(selectedRun) : '<div class="data-stream-empty">从监控总览注入多模态 Demo 后显示实际数据流</div>';
         const weather = (currentState.weather_observations || []).find(item => item.id === `weather-${selected.pond_id}`);
         const observations = (currentState.camera_observations || []).filter(item => item.pond_id === selected.pond_id);
         const articles = (currentState.disease_knowledge || []).filter(item => selected.evidence_refs?.includes(item.id));
@@ -2109,7 +2196,7 @@
         document.getElementById('case_evidence_list').innerHTML = evidence.join('') || '<div class="empty">等待案例证据</div>';
       }
       if (!selected) document.getElementById('case_description').textContent = '';
-      document.getElementById('case_sequence_meta').textContent = cases.length ? `传感器触发 1 个 · 多模态 ${cases.length} 个 · 案例运行后按真实 AgentRun 显示数据流` : '';
+      document.getElementById('case_sequence_meta').textContent = cases.length ? `传感器触发与多模态案例统一由监控总览注入 · ${cases.length} 个多模态案例按真实 AgentRun 显示数据流` : '';
     }
     function renderCameraObservations() {
       const observations = currentState.camera_observations || [];
@@ -2130,12 +2217,7 @@
         await api('/api/v1/analysis-cases/run-all', {method:'POST'});
         showToast('全部案例已按顺序启动');
         await refresh();
-        clearInterval(analysisCasePollTimer);
-        analysisCasePollTimer = setInterval(async () => {
-          await refresh();
-          const running = (currentState.analysis_cases || []).some(item => item.status === 'RUNNING');
-          if (!running) clearInterval(analysisCasePollTimer);
-        }, 2500);
+        watchAnalysisCases();
       } catch (error) { showToast(`案例序列启动失败：${error.message}`, true); }
     }
     function setTrendMetric(metric) {
@@ -2284,7 +2366,29 @@
       catch (error) { showToast(error.status === 403 && !csrfToken ? '会话缺少写入凭据，请重新登录' : error.message, true); if (error.status === 403 && !csrfToken) document.getElementById('auth_layer').hidden = false; }
     }
     function initializeDemo() { return mutate(() => api('/api/v1/demo/init',{method:'POST'}), '演示资产已初始化'); }
-    function runDemo(mode) { return mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), mode === 'alerts' ? '已触发溶解氧 + 氨氮双传感器告警' : '故障闭环演示已触发'); }
+    async function injectDemo(mode) {
+      const messages = {
+        success: '已注入低溶氧自动处置 Demo',
+        alerts: '已注入溶解氧 + 氨氮双传感器告警 Demo',
+        failure: '已注入复核失败升级 Demo',
+        dedup: '已注入防重复动作 Demo',
+        approval: '已注入 L2 审批转人工 Demo',
+        multimodal: '已启动多模态案例序列 Demo',
+      };
+      await mutate(() => api(`/api/v1/demo/${mode}`,{method:'POST'}), messages[mode] || 'Demo 已注入');
+      if (mode === 'multimodal') watchAnalysisCases();
+    }
+    function watchAnalysisCases() {
+      clearInterval(analysisCasePollTimer);
+      analysisCasePollTimer = setInterval(async () => {
+        await refresh();
+        const running = (currentState.analysis_cases || []).some(item => item.status === 'RUNNING');
+        if (!running) {
+          clearInterval(analysisCasePollTimer);
+          analysisCasePollTimer = null;
+        }
+      }, 2500);
+    }
     function finishPatrolReveal(token) {
       if (token !== patrolRevealToken) return;
       clearTimeout(patrolRevealTimer);

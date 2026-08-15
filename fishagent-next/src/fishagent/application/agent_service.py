@@ -69,6 +69,16 @@ class _AnalysisCaseCancelled(RuntimeError):
 DO_RECOVERY_MARGIN = 0.8
 VERIFICATION_RETRY_SECONDS = 300
 
+DEMO_MODE_LABELS = {
+    "success": "低溶氧自动处置",
+    "alerts": "双传感器告警",
+    "failure": "复核失败升级",
+    "dedup": "防重复动作",
+    "approval": "L2 审批转人工",
+    "multimodal": "多模态案例序列",
+}
+AUTO_RESPONSE_DEMO_MODES = frozenset(DEMO_MODE_LABELS)
+
 
 class FishAgentSystem:
     def __init__(
@@ -2473,6 +2483,8 @@ class FishAgentSystem:
             return job
 
     def run_demo(self, mode: str) -> dict:
+        if mode not in AUTO_RESPONSE_DEMO_MODES:
+            raise ValueError("unknown demo mode: %s" % mode)
         self._cancel_analysis_case_sequence()
         self._reset_demo_with_telemetry()
         if mode == "alerts":
@@ -2496,10 +2508,36 @@ class FishAgentSystem:
                 self.store.force_verification_due(incident.id)
                 self._demo_reading("B-01", 2.3, source_event_id="demo-failure-review")
                 self.verify_incident(incident.id, force_escalation=True)
-        else:
+        elif mode == "multimodal":
+            self.start_analysis_case_sequence()
+        elif mode == "success":
             incident = self._demo_reading("B-01", 2.1, source_event_id="demo-success")
             # Leave the incident in VERIFY_PENDING. DO recovers gradually and
             # the next automatic patrol supplies the later verification data.
+        return self.snapshot()
+
+    def inject_demo(self, mode: str) -> dict:
+        """Inject an operator-selected scenario and let the normal flow respond."""
+        if mode == "init":
+            return self.initialize_demo()
+        if mode not in AUTO_RESPONSE_DEMO_MODES:
+            raise ValueError("unknown demo mode: %s" % mode)
+        state = self.run_demo(mode)
+        incident_ids = [item["id"] for item in state.get("incidents", [])]
+        self.store.emit(
+            "demo.injected",
+            "已注入自动响应 Demo：%s" % DEMO_MODE_LABELS[mode],
+            {
+                "mode": mode,
+                "label": DEMO_MODE_LABELS[mode],
+                "auto_response": True,
+                "transport": "mqtt",
+                "incident_ids": incident_ids,
+            },
+            actor_type="user",
+            resource_type="demo",
+            resource_id=mode,
+        )
         return self.snapshot()
 
     def snapshot(self) -> dict:

@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from fishagent.agent_runtime.crewai_runtime import CrewAIOrchestrator
-from fishagent.application.agent_service import FishAgentSystem
+from fishagent.application.agent_service import AUTO_RESPONSE_DEMO_MODES, DEMO_MODE_LABELS, FishAgentSystem
 from fishagent.core import AppConfig, LLMConfig, RuntimeConfigStore, new_llm_profile_id
 from fishagent.domain.models import RiskLevel, ScheduleStatus, VisionFrame, new_id, utcnow
 from fishagent.infrastructure.auth import auth_from_config
@@ -478,14 +478,35 @@ async def test_llm(request: Request) -> Any:
     return result
 
 
+@app.get("/api/v1/demo/options")
+async def demo_options(request: Request) -> dict:
+    authenticate(request, request.url.path)
+    descriptions = {
+        "success": "注入 B-01 低溶氧读数，自动进入增氧和复核流程",
+        "alerts": "同时注入 B-01 低溶氧与 B-02 氨氮异常",
+        "failure": "注入低溶氧并模拟复核未恢复，升级人工任务",
+        "dedup": "注入低溶氧但设备已开启，验证幂等控制",
+        "approval": "注入高风险异常，自动提交审批任务",
+        "multimodal": "启动水面、水下、天气和知识证据的多模态案例序列",
+    }
+    return {
+        "options": [
+            {"mode": mode, "label": DEMO_MODE_LABELS[mode], "description": descriptions[mode], "auto_response": True}
+            for mode in DEMO_MODE_LABELS
+        ]
+        + [{"mode": "init", "label": "重置演示数据", "description": "恢复四个池塘的基础背景数据，不触发自动处置", "auto_response": False}],
+    }
+
+
 @app.post("/api/v1/demo/{mode}")
 async def demo(request: Request, mode: str) -> Any:
     authenticate(request, "/api/v1/demo/%s" % mode, write=True)
-    if mode == "init":
-        return SYSTEM.initialize_demo()
-    if mode not in {"success", "failure", "dedup", "approval", "alerts"}:
+    if mode != "init" and mode not in AUTO_RESPONSE_DEMO_MODES:
         return problem(400, "Unknown demo mode")
-    return SYSTEM.run_demo(mode)
+    try:
+        return await asyncio.to_thread(SYSTEM.inject_demo, mode)
+    except ValueError as exc:
+        return problem(400, "Invalid demo mode", str(exc))
 
 
 @app.get("/api/v1/analysis-cases")

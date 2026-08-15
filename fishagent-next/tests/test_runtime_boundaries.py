@@ -376,6 +376,10 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('id="alert_capsule_list"', response.text)
         self.assertIn('class="alert-capsule-track"', response.text)
         self.assertIn('id="alert_panel"', response.text)
+        self.assertIn('id="demo_launcher"', response.text)
+        self.assertIn("onclick=\"injectDemo('alerts')\"", response.text)
+        self.assertIn("onclick=\"injectDemo('multimodal')\"", response.text)
+        self.assertIn("请从监控总览注入 Demo", response.text)
         self.assertIn('onclick="toggleAlertCapsule(event)"', response.text)
         self.assertIn('onclick="openAlertView(event)"', response.text)
         self.assertIn("function advanceCountdownTarget", response.text)
@@ -390,6 +394,26 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('class="alert-flow"', response.text)
         self.assertIn('function dismissIncident', response.text)
         self.assertIn("waterMetrics.map", response.text)
+
+    def test_demo_options_endpoint_exposes_auto_response_scenarios(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/api/v1/demo/options")
+
+        self.assertEqual(response.status_code, 200)
+        options = response.json()["options"]
+        modes = {item["mode"] for item in options}
+        self.assertTrue({"success", "alerts", "failure", "dedup", "approval", "multimodal"}.issubset(modes))
+        self.assertIn("init", modes)
+        self.assertTrue(next(item for item in options if item["mode"] == "alerts")["auto_response"])
+        self.assertFalse(next(item for item in options if item["mode"] == "init")["auto_response"])
+
+    def test_demo_endpoint_dispatches_to_injection_service(self) -> None:
+        with patch.object(SYSTEM, "inject_demo", return_value={"demo": "alerts"}) as inject, TestClient(app) as client:
+            response = client.post("/api/v1/demo/alerts")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"demo": "alerts"})
+        inject.assert_called_once_with("alerts")
 
     def test_agent_chat_endpoint_returns_audited_crewai_reply(self) -> None:
         run = AgentRun(id="run-chat-test", goal="对话：检查 B-02", status="COMPLETED", stop_reason="CREW_CHAT_COMPLETED")
