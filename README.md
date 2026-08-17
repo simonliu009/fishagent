@@ -1,6 +1,5 @@
 # 智渔 Agent
 
-根据上级目录 `智渔Agent-CrewAI-Python绿地开发计划.md` 落地的绿地垂直切片。
 
 当前版本使用 `uv` 管理 Python 版本和项目元数据，采用 FastAPI/Uvicorn Web、Celery Worker/Beat 和模块化领域服务，重点覆盖：
 
