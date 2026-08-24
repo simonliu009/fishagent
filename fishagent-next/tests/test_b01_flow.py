@@ -675,6 +675,40 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(details_by_action["llm.response"]["decision"]["action"], "EXECUTE")
         self.assertTrue(details_by_action["device.command_result"]["success"])
 
+    def test_multimodal_case_can_start_without_waiting_for_model(self) -> None:
+        started = Event()
+        release = Event()
+
+        class SlowOrchestrator:
+            available = True
+
+            def decide_incident(self, context):
+                started.set()
+                release.wait(timeout=2)
+                return SimpleNamespace(
+                    decision=IncidentDecision(
+                        action="MANUAL_REQUIRED",
+                        risk="L3",
+                        rationale="多模态证据需要人工确认",
+                        evidence_refs=context["incident"]["evidence"][0]["refs"],
+                    ),
+                    summary="manual review",
+                    delegated_agents=["vision-analysis-agent"],
+                    steps=[],
+                )
+
+        system = FishAgentSystem(agent_orchestrator=SlowOrchestrator())
+        system.initialize_demo()
+        self.assertTrue(system.start_analysis_case("case-floating-head-weather"))
+        self.assertTrue(started.wait(timeout=2))
+        self.assertEqual(system.store.analysis_cases["case-floating-head-weather"].status, "RUNNING")
+        release.set()
+        worker = system._analysis_case_thread
+        self.assertIsNotNone(worker)
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(system.store.analysis_cases["case-floating-head-weather"].status, "MANUAL_REQUIRED")
+
     def test_reset_cancels_case_sequence_before_next_case(self) -> None:
         started = Event()
         release = Event()

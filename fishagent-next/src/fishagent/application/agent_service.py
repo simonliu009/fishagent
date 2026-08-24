@@ -470,6 +470,56 @@ class FishAgentSystem:
         return "；".join(summaries)
 
     def run_analysis_case(self, case_id: str, generation: Optional[int] = None) -> AgentRun:
+        try:
+            return self._run_analysis_case(case_id, generation=generation)
+        except _AnalysisCaseCancelled:
+            raise
+        except Exception as exc:
+            case = self.store.analysis_cases.get(case_id)
+            if case is None:
+                raise
+            run = AgentRun(id=new_id("run"), goal="分析案例：%s" % case.title, status="FAILED")
+            run.stop_reason = "ANALYSIS_CASE_FAILED"
+            run.step("supervisor-agent", "analysis_case.failed", "多模态案例执行失败：%s" % exc)
+            self.store.agent_runs[run.id] = run
+            case.agent_run_id = run.id
+            case.status = "FAILED"
+            case.result_summary = "案例执行失败：%s" % exc
+            case.updated_at = utcnow()
+            self.store.emit(
+                "analysis_case.failed",
+                case.result_summary,
+                {"case_id": case.id, "run_id": run.id, "error": str(exc)},
+            )
+            self.snapshot()
+            return run
+
+    def start_analysis_case(self, case_id: str) -> bool:
+        """Start one case asynchronously so HTTP/UI callers never wait on the LLM."""
+        with self._analysis_case_lock:
+            case = self.store.analysis_cases.get(case_id)
+            if case is None:
+                raise KeyError(case_id)
+            if case.agent_run_id and case.agent_run_id in self.store.agent_runs:
+                return False
+            if case.status == "RUNNING":
+                return False
+            if self._analysis_case_thread and self._analysis_case_thread.is_alive():
+                return False
+            self._analysis_case_generation += 1
+            generation = self._analysis_case_generation
+            case.status = "RUNNING"
+            case.updated_at = utcnow()
+            self._analysis_case_thread = Thread(
+                target=self.run_analysis_case,
+                args=(case_id, generation),
+                name="fishagent-analysis-case",
+                daemon=True,
+            )
+            self._analysis_case_thread.start()
+            return True
+
+    def _run_analysis_case(self, case_id: str, generation: Optional[int] = None) -> AgentRun:
         """Turn one multimodal demo case into the normal incident decision flow."""
         with self._analysis_case_lock:
             if generation is not None and generation != self._analysis_case_generation:

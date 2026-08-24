@@ -8,6 +8,7 @@ import asyncio
 import csv
 import io
 import json
+import threading
 import time
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -78,6 +79,18 @@ def ingest_mqtt_and_persist(**payload: Any) -> Any:
 @asynccontextmanager
 async def lifespan(_application: FastAPI):
     global MQTT_ADAPTER
+    scheduler_stop = threading.Event()
+
+    def scheduler_loop() -> None:
+        """Run durable schedules in the FastAPI process used by start.sh."""
+        while not scheduler_stop.is_set():
+            try:
+                SYSTEM.run_due_jobs()
+            except Exception as exc:  # pragma: no cover - keeps the service loop alive
+                SYSTEM.store.emit("scheduler.error", "调度循环异常：%s" % exc)
+            if scheduler_stop.wait(5):
+                break
+
     if CONFIG.mqtt_enabled:
         MQTT_ADAPTER = MqttTelemetryAdapter(
             CONFIG.mqtt_host,
@@ -86,9 +99,13 @@ async def lifespan(_application: FastAPI):
             ingest_mqtt_and_persist,
         )
         MQTT_ADAPTER.start()
+    scheduler = threading.Thread(target=scheduler_loop, name="fishagent-scheduler", daemon=True)
+    scheduler.start()
     try:
         yield
     finally:
+        scheduler_stop.set()
+        scheduler.join(timeout=2)
         if MQTT_ADAPTER:
             MQTT_ADAPTER.stop()
         if DEVICE_GATEWAY:
@@ -546,12 +563,8 @@ async def run_analysis_case(request: Request, case_id: str) -> Any:
     if case_id not in SYSTEM.store.analysis_cases:
         return problem(404, "Analysis case not found")
     SYSTEM.store.activate_multimodal_demo_data()
-    run = await asyncio.to_thread(SYSTEM.run_analysis_case, case_id)
-    state = SYSTEM.snapshot()
-    run_data = next((item for item in state["agent_runs"] if item["id"] == run.id), None)
-    if run_data is None:
-        return encoded_response(409, {"detail": "案例执行期间演示数据已被重置，执行结果已作废", "state": state})
-    return encoded_response(202, {"run": run_data, "state": state})
+    started = SYSTEM.start_analysis_case(case_id)
+    return encoded_response(202, {"started": started, "case_id": case_id, "state": SYSTEM.snapshot()})
 
 
 @app.get("/api/v1/incidents")

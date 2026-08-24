@@ -535,6 +535,17 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn("event: done", response.text)
         self.assertIn("B-02 水质总体稳定。", response.text)
 
+    def test_fastapi_lifespan_starts_schedule_worker(self) -> None:
+        started = threading.Event()
+
+        def fake_run_due_jobs():
+            started.set()
+            return []
+
+        with patch.object(SYSTEM, "run_due_jobs", side_effect=fake_run_due_jobs):
+            with TestClient(app):
+                self.assertTrue(started.wait(timeout=2))
+
     def test_patrol_endpoint_persists_run_before_building_response(self) -> None:
         run = AgentRun(id="run-patrol-test", goal="执行全场巡查", status="COMPLETED", stop_reason="PATROL_COMPLETED")
         run_data = {

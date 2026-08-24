@@ -2744,7 +2744,7 @@
       try {
         requestAlertReveal();
         resetAssistantChatContext();
-        showDemoFeedback(`正在运行多模态案例：${title}，请稍候`, 300000);
+        showDemoFeedback(`已启动多模态案例：${title}，Agent 正在执行`, 300000);
         const succeeded = await mutate(
           () => api(`/api/v1/analysis-cases/${encodeURIComponent(caseId)}/run`, {method:'POST'}),
           `${title} 已完成`,
