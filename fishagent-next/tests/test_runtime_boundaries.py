@@ -356,6 +356,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
             response = client.get("/")
 
         self.assertEqual(response.status_code, 200)
+        self.assertIn('<div class="brand-name">智渔</div>', response.text)
+        self.assertIn('渔业养殖智能体监控管理平台', response.text)
         for view in ("monitor", "assistant", "management", "analytics"):
             self.assertIn(f'id="view_{view}"', response.text)
         for view in ("assets", "work", "schedules", "audit"):
