@@ -68,6 +68,23 @@
       background: var(--surface);
       border-bottom: 1px solid var(--line);
     }
+    .app-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 45;
+      display: grid;
+      place-items: center;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: blur(3px);
+    }
+    .app-loading-content { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-size: 15px; font-weight: 800; }
+    .app-loading-content svg { width: 22px; height: 22px; color: var(--brand-dark); animation: app-loading-pulse 1.2s ease-in-out infinite; }
+    .app-loading-dots { display: inline-flex; align-items: center; gap: 4px; min-width: 21px; height: 18px; }
+    .app-loading-dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: app-loading-dot 1.2s ease-in-out infinite; }
+    .app-loading-dots i:nth-child(2) { animation-delay: .16s; }
+    .app-loading-dots i:nth-child(3) { animation-delay: .32s; }
+    @keyframes app-loading-pulse { 0%, 100% { opacity: .55; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.08); } }
+    @keyframes app-loading-dot { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-4px); } }
     .brand { display: flex; align-items: center; gap: 11px; min-width: 230px; }
     .brand img { width: 40px; height: 40px; border-radius: 8px; }
     .brand-name { font-size: 18px; font-weight: 800; line-height: 1.1; }
@@ -945,6 +962,9 @@
   </style>
 </head>
 <body>
+  <div id="app_loading" class="app-loading" role="status" aria-live="polite">
+    <div class="app-loading-content"><i data-lucide="loader-circle" aria-hidden="true"></i><span>数据加载中，请稍候</span><span class="app-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+  </div>
   <header class="app-header">
     <div class="brand">
       <img src="/static/fish.svg" alt="智渔 Agent">
@@ -1362,6 +1382,8 @@
     let trendWindowHours = 12;
     let selectedReportId = null;
     let reportGenerationBusy = false;
+    let initialLoadPending = true;
+    const initialLoadingStartedAt = Date.now();
     let alertHistoryFilter = 'all';
     let alertHistoryPond = '';
     let alertHistoryVisibleCount = 12;
@@ -1397,6 +1419,16 @@
     }
 
     function iconRefresh() { if (window.lucide) window.lucide.createIcons({attrs: {'stroke-width': 1.8}}); }
+    function finishInitialLoading() {
+      if (!initialLoadPending) return;
+      const hide = () => {
+        if (!initialLoadPending) return;
+        initialLoadPending = false;
+        document.getElementById('app_loading')?.setAttribute('hidden', '');
+      };
+      const remaining = Math.max(0, 360 - (Date.now() - initialLoadingStartedAt));
+      window.setTimeout(hide, remaining);
+    }
     function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char])); }
     function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
     function pondNameWithoutId(pond) {
@@ -3001,6 +3033,8 @@
         }
       } catch (error) {
         if (error.status !== 401) { document.getElementById('footer_status').textContent = '数据刷新异常'; showToast(`刷新失败：${error.message}`, true); }
+      } finally {
+        finishInitialLoading();
       }
     }
     async function mutate(action, success, options = {}) {
@@ -3401,7 +3435,7 @@
     if (localStorage.getItem('fishagent_theme') === 'dark') document.body.classList.add('dark');
     syncAssetForm();
     iconRefresh();
-    api('/api/v1/auth/config').then(config => { document.getElementById('auth_layer').hidden = !config.enabled; return refresh(); }).catch(() => { document.getElementById('auth_layer').hidden = false; });
+    api('/api/v1/auth/config').then(config => { document.getElementById('auth_layer').hidden = !config.enabled; return refresh(); }).catch(() => { document.getElementById('auth_layer').hidden = false; finishInitialLoading(); });
     setInterval(updateCountdown, 1000);
     window.addEventListener('resize', () => requestAnimationFrame(drawCharts));
     window.addEventListener('keydown', event => { if (event.key === 'Escape') closeLlmDialog(); });
