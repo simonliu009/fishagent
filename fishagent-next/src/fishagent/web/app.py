@@ -809,13 +809,19 @@ async def upload_evidence(request: Request, file: UploadFile = File(...)) -> Any
     SYSTEM.store.emit(
         "evidence.uploaded",
         "证据文件已上传",
-        {"object_name": result["object_name"], "content_type": file.content_type},
+        {"object_name": result["object_name"], "filename": file.filename, "content_type": file.content_type, "size": len(data)},
         actor_type="user",
         actor_id=session.username,
         resource_type="evidence",
         resource_id=result["object_name"],
     )
-    return {"evidence": result, "state": SYSTEM.snapshot()}
+    evidence = {
+        **result,
+        "filename": file.filename or result["object_name"].rsplit("/", 1)[-1],
+        "content_type": file.content_type or "application/octet-stream",
+        "size": len(data),
+    }
+    return {"evidence": evidence, "state": SYSTEM.snapshot()}
 
 
 @app.post("/api/v1/cameras/{camera_id}/analyze")
@@ -901,6 +907,18 @@ async def upload_camera_frame(request: Request, camera_id: str, file: UploadFile
         request.headers.get("X-Correlation-ID"),
     )
     return encoded_response(201, {"frame": vision_frame.__dict__, "state": SYSTEM.snapshot()})
+
+
+@app.get("/api/v1/evidence/{object_name:path}/content")
+async def evidence_content(request: Request, object_name: str) -> Response:
+    session = authenticate(request, request.url.path)
+    if OBJECT_STORE is None:
+        return problem(503, "Object storage unavailable", "MinIO 未配置")
+    try:
+        data, content_type = OBJECT_STORE.get_bytes(object_name)
+        return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=300"})
+    except Exception as exc:
+        return problem(404, "Evidence not found", str(exc))
 
 
 @app.get("/api/v1/evidence/{object_name:path}")

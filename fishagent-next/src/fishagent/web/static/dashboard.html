@@ -419,6 +419,14 @@
     .task-report-checklist { display: grid; gap: 9px; margin-bottom: 12px; }
     .task-report-check-item { padding: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); }
     .task-report-check-item textarea { min-height: 68px; }
+    .task-report-photo-preview, .task-data-photo-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
+    .task-photo-thumb { width: 92px; height: 68px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-alt); object-fit: cover; }
+    .task-data-dialog { max-height: min(760px, calc(100vh - 32px)); overflow: auto; }
+    .task-data-section { margin-top: 13px; }
+    .task-data-section h3 { margin-bottom: 7px; color: var(--muted); font-size: 12px; }
+    .task-data-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .task-data-list li { padding: 8px 9px; border-left: 3px solid var(--brand); color: var(--ink); background: var(--surface-alt); font-size: 12px; line-height: 1.55; }
+    .task-data-value { color: var(--ink); font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
     .history-day { display: grid; gap: 9px; margin-top: 16px; }
     .history-day:first-child { margin-top: 0; }
     .history-day-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 2px 5px; border-bottom: 1px solid var(--line-strong); color: var(--ink); font-size: 13px; font-weight: 850; }
@@ -1255,16 +1263,26 @@
         <input id="task_report_id" type="hidden">
         <div id="task_report_checklist" class="task-report-checklist"></div>
         <div class="form-grid">
-          <label class="field wide">复测数据<textarea id="task_report_retest_data" rows="3" required placeholder="填写复测点位、时间和读数"></textarea></label>
-          <label class="field wide">设备实际状态<textarea id="task_report_device_status" rows="2" required placeholder="填写相关设备实际开关、在线和运行状态"></textarea></label>
-          <label class="field wide">已执行动作<textarea id="task_report_actions_taken" rows="2" required placeholder="填写现场实际执行的动作"></textarea></label>
           <label class="field">执行时间<input id="task_report_executed_at" type="datetime-local" required></label>
-          <label class="field">现场照片或记录<textarea id="task_report_photo_evidence" rows="2" required placeholder="填写照片编号、文件名或记录链接"></textarea></label>
+          <label class="field wide">现场照片附件<input id="task_report_photos" type="file" accept="image/*" multiple required onchange="previewTaskPhotos()"><span class="field-hint">至少上传 1 张现场照片，单张不超过 20MB。</span><div id="task_report_photo_preview" class="task-report-photo-preview"></div></label>
           <label class="field wide">补充说明<textarea id="task_report_notes" rows="2" placeholder="可选"></textarea></label>
         </div>
         <div id="task_report_message" class="message"></div>
-        <div class="auth-actions"><button id="task_report_submit" class="button" type="submit"><i data-lucide="send"></i>提交处理结果</button></div>
+        <div class="auth-actions"><button id="task_report_submit" class="button" type="submit"><i data-lucide="send"></i>提交处置数据</button></div>
       </form>
+    </section>
+  </div>
+  <div id="task_data_layer" class="auth-layer" hidden onclick="closeTaskData(event)">
+    <section class="auth-dialog modal-dialog task-data-dialog" role="dialog" aria-modal="true" aria-labelledby="task_data_title">
+      <div class="modal-head">
+        <div><h2 id="task_data_title">处置数据</h2><p class="eyebrow">已提交的人工执行记录和现场照片</p></div>
+        <button class="icon-button" type="button" title="关闭" onclick="closeTaskData()"><i data-lucide="x"></i></button>
+      </div>
+      <div id="task_data_context" class="task-report-context"></div>
+      <section class="task-data-section"><h3>人工执行清单</h3><ol id="task_data_checklist" class="task-data-list"></ol></section>
+      <section class="task-data-section"><h3>执行时间</h3><div id="task_data_executed_at" class="task-data-value"></div></section>
+      <section class="task-data-section"><h3>现场照片</h3><div id="task_data_photos" class="task-data-photo-grid"></div></section>
+      <section class="task-data-section"><h3>补充说明</h3><div id="task_data_notes" class="task-data-value"></div></section>
     </section>
   </div>
   <aside id="demo_launcher" class="demo-launcher" aria-label="Agent Demo 场景" onmouseenter="keepDemoLauncherOpen()" onmouseleave="scheduleDemoLauncherClose()">
@@ -2050,7 +2068,7 @@
       const approvals = currentState.approvals || [];
       const proposals = currentState.action_proposals || [];
       const runs = currentState.agent_runs || [];
-      const pendingItems = tasks.filter(item => ['OPEN','IN_PROGRESS'].includes(item.status)).map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, `<button class="button report-result small" onclick="openTaskReport('${item.id}')">${item.completion_report ? '已提交' : '提交处置数据'}</button>`, '请在任务中心填写现场清单并提交处置数据。'));
+      const pendingItems = tasks.filter(item => ['OPEN','IN_PROGRESS'].includes(item.status)).map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, item.completion_report ? `<button class="button report-result small" onclick="openTaskData('${item.id}')">查看数据</button>` : `<button class="button report-result small" onclick="openTaskReport('${item.id}')">提交处置数据</button>`, '请在任务中心填写现场清单并提交处置数据。'));
       approvals.filter(item => item.status === 'PENDING').forEach(item => {
         const proposal = proposals.find(proposal => proposal.id === item.proposal_id) || {};
         pendingItems.unshift(taskItem(proposal.rationale || '设备动作审批', `${proposal.pond_id || '--'} · 风险 ${proposal.risk || '--'}`, `<button class="button small" onclick="approveProposal('${proposal.id}')">批准</button><button class="button secondary small" onclick="rejectProposal('${proposal.id}')">拒绝</button>`));
@@ -2135,7 +2153,9 @@
         ? `<ol class="task-checklist">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`
         : '<span class="task-brief-value">请根据异常数据完成现场复核。</span>';
       const taskCompleted = task.status === 'COMPLETED' || reportReady;
-      const reportButton = `<button class="button report-result small" type="button" ${reportReady ? 'disabled' : `onclick="openTaskReport('${escapeHtml(task.id)}')"`}><i data-lucide="${reportReady ? 'check' : 'file-pen-line'}"></i>${reportReady ? '已提交' : '提交处置数据'}</button>`;
+      const reportButton = reportReady
+        ? `<button class="button report-result small" type="button" onclick="openTaskData('${escapeHtml(task.id)}')"><i data-lucide="eye"></i>查看数据</button>`
+        : `<button class="button report-result small" type="button" onclick="openTaskReport('${escapeHtml(task.id)}')"><i data-lucide="file-pen-line"></i>提交处置数据</button>`;
       const background = taskBackground(task.description);
       const backgroundMarkup = background ? `<details class="work-record-background"><summary>查看处理背景</summary><div class="work-record-description">${escapeHtml(background)}</div></details>` : '';
       const taskStatusClass = taskCompleted ? 'completed' : 'pending';
@@ -3226,16 +3246,66 @@
           return `<label class="field wide task-report-check-item"><span>执行清单 ${index + 1}：${escapeHtml(instruction)}</span><textarea data-task-checklist-result="${index}" rows="3" required placeholder="填写该项的实际执行结果">${escapeHtml(existing)}</textarea></label>`;
         }).join('')
         : '<div class="message">该任务没有拆分清单，请填写下面的现场处理结果。</div>';
-      document.getElementById('task_report_retest_data').value = report.retest_data || '';
-      document.getElementById('task_report_device_status').value = report.device_status || '';
-      document.getElementById('task_report_actions_taken').value = report.actions_taken || '';
       document.getElementById('task_report_executed_at').value = report.executed_at ? localDateTimeInputValue(report.executed_at) : localDateTimeInputValue();
-      document.getElementById('task_report_photo_evidence').value = report.photo_evidence || '';
+      document.getElementById('task_report_photos').value = '';
+      document.getElementById('task_report_photo_preview').innerHTML = '';
       document.getElementById('task_report_notes').value = report.notes || '';
       document.getElementById('task_report_message').textContent = '';
       document.getElementById('task_report_layer').hidden = false;
       iconRefresh();
-      requestAnimationFrame(() => document.getElementById('task_report_retest_data').focus());
+      requestAnimationFrame(() => document.getElementById('task_report_executed_at').focus());
+    }
+    function previewTaskPhotos() {
+      const input = document.getElementById('task_report_photos');
+      const preview = document.getElementById('task_report_photo_preview');
+      preview.innerHTML = '';
+      [...(input.files || [])].forEach(file => {
+        const image = document.createElement('img');
+        image.className = 'task-photo-thumb';
+        image.alt = file.name;
+        image.title = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)}MB`;
+        image.src = URL.createObjectURL(file);
+        image.addEventListener('load', () => URL.revokeObjectURL(image.src), {once:true});
+        preview.appendChild(image);
+      });
+    }
+    function openTaskData(taskId) {
+      const entry = workEntries().find(item => item.kind === 'manual' && item.task?.id === taskId);
+      if (!entry) return;
+      const task = entry.task;
+      const incident = (currentState.incidents || []).find(item => item.id === task.incident_id);
+      const report = task.completion_report || {};
+      const results = report.checklist_results || [];
+      document.getElementById('task_data_context').textContent = `${taskLocation(task, incident)} · ${taskAbnormalSummary(task, incident)}`;
+      document.getElementById('task_data_checklist').innerHTML = results.length
+        ? results.map(item => `<li><strong>${escapeHtml(item.instruction || `执行清单 ${item.index || ''}`)}</strong><br>${escapeHtml(item.result || '未填写')}</li>`).join('')
+        : '<li>暂无清单回报</li>';
+      document.getElementById('task_data_executed_at').textContent = report.executed_at ? fmtDate(report.executed_at) : '未填写';
+      document.getElementById('task_data_notes').textContent = report.notes || '无';
+      const photos = document.getElementById('task_data_photos');
+      const attachments = Array.isArray(report.photo_attachments) ? report.photo_attachments : [];
+      photos.innerHTML = attachments.length ? '' : (report.photo_evidence ? `<div class="task-data-value">${escapeHtml(report.photo_evidence)}</div>` : '<div class="task-data-value">暂无照片</div>');
+      attachments.forEach(attachment => {
+        const figure = document.createElement('figure');
+        figure.style.margin = '0';
+        const image = document.createElement('img');
+        image.className = 'task-photo-thumb';
+        image.alt = attachment.filename || '现场照片';
+        image.title = attachment.filename || '现场照片';
+        image.src = `/api/v1/evidence/${encodeURIComponent(attachment.object_name)}/content`;
+        image.onerror = () => { image.replaceWith(document.createTextNode('照片加载失败')); };
+        const caption = document.createElement('figcaption');
+        caption.textContent = attachment.filename || '现场照片';
+        caption.style.cssText = 'max-width:92px;margin-top:3px;color:var(--muted);font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        figure.append(image, caption);
+        photos.appendChild(figure);
+      });
+      document.getElementById('task_data_layer').hidden = false;
+      iconRefresh();
+    }
+    function closeTaskData(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('task_data_layer').hidden = true;
     }
     function closeTaskReport(event) {
       if (event && event.target !== event.currentTarget) return;
@@ -3254,19 +3324,33 @@
       }));
       const payload = {
         checklist_results: checklistResults,
-        retest_data: document.getElementById('task_report_retest_data').value.trim(),
-        device_status: document.getElementById('task_report_device_status').value.trim(),
-        actions_taken: document.getElementById('task_report_actions_taken').value.trim(),
         executed_at: document.getElementById('task_report_executed_at').value,
-        photo_evidence: document.getElementById('task_report_photo_evidence').value.trim(),
         notes: document.getElementById('task_report_notes').value.trim(),
       };
+      const files = [...(document.getElementById('task_report_photos').files || [])];
+      if (!files.length) {
+        document.getElementById('task_report_message').textContent = '请至少上传一张现场照片';
+        return;
+      }
       button.disabled = true;
-      message.textContent = '正在提交处理结果…';
+      message.textContent = '正在上传照片并提交处置数据…';
       try {
+        const attachments = [];
+        for (const file of files) {
+          if (!file.type.startsWith('image/')) throw new Error(`仅支持图片附件：${file.name}`);
+          if (file.size > 20 * 1024 * 1024) throw new Error(`单张照片不能超过 20MB：${file.name}`);
+          const formData = new FormData();
+          formData.append('file', file, file.name);
+          const uploaded = await api('/api/v1/evidence', {method:'POST', body:formData});
+          attachments.push({...uploaded.evidence, filename:file.name, content_type:file.type, size:file.size});
+        }
+        payload.photo_attachments = attachments;
         await api(`/api/v1/manual-tasks/${encodeURIComponent(taskReportTaskId)}/report`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
         closeTaskReport();
-        showToast('人工处理结果已上报');
+        workFilter = 'completed';
+        const workFilterNode = document.getElementById('work_filter');
+        if (workFilterNode) workFilterNode.value = workFilter;
+        showToast('处置数据已提交，任务已完成');
         await refresh();
       } catch (error) {
         message.textContent = `提交失败：${error.message}`;

@@ -55,6 +55,16 @@ class MinioObjectStore:
         )
         return {"bucket": self.bucket, "object_name": object_name, "etag": result.etag}
 
+    def get_bytes(self, object_name: str) -> tuple[bytes, str]:
+        response = self._get_client().get_object(self.bucket, object_name)
+        try:
+            data = response.read()
+            content_type = response.headers.get("Content-Type") or "application/octet-stream"
+            return data, content_type
+        finally:
+            response.close()
+            response.release_conn()
+
     def presigned_get(self, object_name: str, expires_seconds: int = 900) -> str:
         from datetime import timedelta
 

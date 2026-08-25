@@ -1302,16 +1302,14 @@ class B01FlowTest(unittest.TestCase):
                 {"result": "池中心 0.70mg/L，进水口 0.66mg/L，已拍照"},
                 {"result": "已核对投喂、残饵和换水记录，未发现漏记"},
             ],
-            "retest_data": "池中心 0.70mg/L；进水口 0.66mg/L",
-            "device_status": "增氧机在线，关闭",
-            "actions_taken": "暂停下一轮投喂，已通知养殖负责人",
             "executed_at": "2026-08-25T18:10",
-            "photo_evidence": "IMG-20260825-001",
+            "photo_attachments": [{"object_name": "evidence/IMG-20260825-001", "filename": "现场照片.jpg", "content_type": "image/jpeg", "size": 1024}],
             "notes": "等待负责人确认后决定后续换水",
         }
         submitted = system.submit_manual_task_report(task.id, report, "operator")
         self.assertEqual(submitted.status.value, "COMPLETED")
         self.assertEqual(len(submitted.completion_report["checklist_results"]), 2)
+        self.assertEqual(submitted.completion_report["photo_attachments"][0]["filename"], "现场照片.jpg")
         self.assertIsNotNone(submitted.completed_at)
 
     def test_due_job_dispatch_runs_verification(self) -> None:

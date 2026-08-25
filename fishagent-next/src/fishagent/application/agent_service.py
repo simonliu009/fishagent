@@ -1164,13 +1164,7 @@ class FishAgentSystem:
         if task.status == TaskStatus.COMPLETED:
             raise ValueError("任务已经完成，不能重复上报")
 
-        required_fields = {
-            "retest_data": "复测数据",
-            "device_status": "设备实际状态",
-            "actions_taken": "已执行动作",
-            "executed_at": "执行时间",
-            "photo_evidence": "现场照片或记录",
-        }
+        required_fields = {"executed_at": "执行时间"}
         missing = [label for key, label in required_fields.items() if not str(report.get(key) or "").strip()]
         if missing:
             raise ValueError("请完整填写：%s" % "、".join(missing))
@@ -1187,13 +1181,30 @@ class FishAgentSystem:
                 raise ValueError("请填写第%d项人工执行清单" % (index + 1))
             checklist_results.append({"index": index + 1, "instruction": instruction, "result": str(result).strip()})
 
+        attachments = report.get("photo_attachments")
+        if not isinstance(attachments, list) or not attachments:
+            raise ValueError("请至少上传一张现场照片")
+        normalized_attachments = []
+        for item in attachments:
+            if not isinstance(item, dict):
+                raise ValueError("现场照片附件格式无效")
+            object_name = str(item.get("object_name") or "").strip()
+            content_type = str(item.get("content_type") or "").strip().lower()
+            if not object_name or not content_type.startswith("image/"):
+                raise ValueError("现场照片附件必须是图片文件")
+            normalized_attachments.append(
+                {
+                    "object_name": object_name,
+                    "filename": str(item.get("filename") or object_name.rsplit("/", 1)[-1]).strip(),
+                    "content_type": content_type,
+                    "size": int(item.get("size") or 0),
+                }
+            )
+
         task.completion_report = {
             "checklist_results": checklist_results,
-            "retest_data": str(report["retest_data"]).strip(),
-            "device_status": str(report["device_status"]).strip(),
-            "actions_taken": str(report["actions_taken"]).strip(),
             "executed_at": str(report["executed_at"]).strip(),
-            "photo_evidence": str(report["photo_evidence"]).strip(),
+            "photo_attachments": normalized_attachments,
             "notes": str(report.get("notes") or "").strip(),
         }
         task.reported_at = utcnow()
