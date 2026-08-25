@@ -1198,6 +1198,16 @@ class FishAgentSystem:
                     "filename": str(item.get("filename") or object_name.rsplit("/", 1)[-1]).strip(),
                     "content_type": content_type,
                     "size": int(item.get("size") or 0),
+                    **(
+                        {
+                            "thumbnail_object_name": str(item.get("thumbnail_object_name") or "").strip(),
+                            "thumbnail_filename": str(item.get("thumbnail_filename") or "").strip(),
+                            "thumbnail_content_type": str(item.get("thumbnail_content_type") or "").strip().lower(),
+                            "thumbnail_size": int(item.get("thumbnail_size") or 0),
+                        }
+                        if str(item.get("thumbnail_object_name") or "").strip()
+                        else {}
+                    ),
                 }
             )
 
