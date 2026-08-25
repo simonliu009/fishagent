@@ -1247,7 +1247,7 @@
   <div id="task_report_layer" class="auth-layer" hidden onclick="closeTaskReport(event)">
     <section class="auth-dialog modal-dialog task-report-dialog" role="dialog" aria-modal="true" aria-labelledby="task_report_title">
       <div class="modal-head">
-        <div><h2 id="task_report_title">上报人工处理结果</h2><p class="eyebrow">完成现场清单后提交，提交后才允许完成任务</p></div>
+        <div><h2 id="task_report_title">提交处置数据</h2><p class="eyebrow">完成现场清单后提交，数据齐全后任务自动完成</p></div>
         <button class="icon-button" type="button" title="关闭" onclick="closeTaskReport()"><i data-lucide="x"></i></button>
       </div>
       <div id="task_report_context" class="task-report-context"></div>
@@ -2050,7 +2050,7 @@
       const approvals = currentState.approvals || [];
       const proposals = currentState.action_proposals || [];
       const runs = currentState.agent_runs || [];
-      const pendingItems = tasks.filter(item => ['OPEN','IN_PROGRESS'].includes(item.status)).map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, `<button class="button report-result small" onclick="openTaskReport('${item.id}')">${item.completion_report ? '修改上报' : '上报结果'}</button><button class="button secondary small" ${item.completion_report ? '' : 'disabled'} onclick="completeTask('${item.id}')">完成</button>`, '请在任务中心填写现场清单并上报处理结果。'));
+      const pendingItems = tasks.filter(item => ['OPEN','IN_PROGRESS'].includes(item.status)).map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, `<button class="button report-result small" onclick="openTaskReport('${item.id}')">${item.completion_report ? '已提交' : '提交处置数据'}</button>`, '请在任务中心填写现场清单并提交处置数据。'));
       approvals.filter(item => item.status === 'PENDING').forEach(item => {
         const proposal = proposals.find(proposal => proposal.id === item.proposal_id) || {};
         pendingItems.unshift(taskItem(proposal.rationale || '设备动作审批', `${proposal.pond_id || '--'} · 风险 ${proposal.risk || '--'}`, `<button class="button small" onclick="approveProposal('${proposal.id}')">批准</button><button class="button secondary small" onclick="rejectProposal('${proposal.id}')">拒绝</button>`));
@@ -2134,12 +2134,13 @@
       const checklistMarkup = checklist.length
         ? `<ol class="task-checklist">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`
         : '<span class="task-brief-value">请根据异常数据完成现场复核。</span>';
-      const reportButton = task.status === 'COMPLETED' ? '' : `<button class="button report-result small" type="button" onclick="openTaskReport('${escapeHtml(task.id)}')"><i data-lucide="file-pen-line"></i>${reportReady ? '修改上报' : '上报处理结果'}</button>`;
-      const completeButton = task.status === 'COMPLETED' ? '' : `<button class="button secondary small" type="button" ${reportReady ? '' : 'disabled title="请先提交完整处理结果"'} onclick="completeTask('${escapeHtml(task.id)}')"><i data-lucide="check"></i>完成任务</button>`;
+      const taskCompleted = task.status === 'COMPLETED' || reportReady;
+      const reportButton = `<button class="button report-result small" type="button" ${reportReady ? 'disabled' : `onclick="openTaskReport('${escapeHtml(task.id)}')"`}><i data-lucide="${reportReady ? 'check' : 'file-pen-line'}"></i>${reportReady ? '已提交' : '提交处置数据'}</button>`;
       const background = taskBackground(task.description);
       const backgroundMarkup = background ? `<details class="work-record-background"><summary>查看处理背景</summary><div class="work-record-description">${escapeHtml(background)}</div></details>` : '';
-      const taskStatusClass = task.status === 'COMPLETED' ? 'completed' : 'pending';
-      return `<article class="work-record manual-task-record"><div class="work-record-head"><div class="work-record-title">人工任务</div>${badge(entry.status, entry.statusLabel, `manual-task-status ${taskStatusClass}`)}</div><div class="task-brief-grid"><div class="task-brief-row"><span class="task-brief-label">告警位置</span><span class="task-brief-value">${escapeHtml(taskLocation(task, incident))}</span></div><div class="task-brief-row"><span class="task-brief-label">告警异常数据</span><span class="task-brief-value">${escapeHtml(taskAbnormalSummary(task, incident))}</span></div><div class="task-brief-row"><span class="task-brief-label">人工执行清单</span>${checklistMarkup}</div></div>${backgroundMarkup}<div class="work-record-actions">${reportButton}${completeButton}</div></article>`;
+      const taskStatusClass = taskCompleted ? 'completed' : 'pending';
+      const taskStatusText = taskCompleted ? '已完成' : entry.statusLabel;
+      return `<article class="work-record manual-task-record"><div class="work-record-head"><div class="work-record-title">人工任务</div>${badge(taskCompleted ? 'COMPLETED' : entry.status, taskStatusText, `manual-task-status ${taskStatusClass}`)}</div><div class="task-brief-grid"><div class="task-brief-row"><span class="task-brief-label">告警位置</span><span class="task-brief-value">${escapeHtml(taskLocation(task, incident))}</span></div><div class="task-brief-row"><span class="task-brief-label">告警异常数据</span><span class="task-brief-value">${escapeHtml(taskAbnormalSummary(task, incident))}</span></div><div class="task-brief-row"><span class="task-brief-label">人工执行清单</span>${checklistMarkup}</div></div>${backgroundMarkup}<div class="work-record-actions">${reportButton}</div></article>`;
     }
     function workEntryMarkup(entry) {
       const incident = (currentState.incidents || []).find(item => item.id === entry.incidentId);

@@ -1198,12 +1198,14 @@ class FishAgentSystem:
         }
         task.reported_at = utcnow()
         task.reported_by = str(reporter or "现场操作员").strip() or "现场操作员"
-        task.status = TaskStatus.IN_PROGRESS
+        task.status = TaskStatus.COMPLETED
+        task.completed_at = task.reported_at
         self.store.emit(
             "manual_task.report_submitted",
             "人工任务已上报处理结果：%s" % task.title,
             {"task_id": task.id, "reported_by": task.reported_by},
         )
+        self.store.emit("manual_task.completed", task.title, {"task_id": task.id, "source": "completion_report"})
         return task
 
     def complete_manual_task(self, task_id: str) -> ManualTask:

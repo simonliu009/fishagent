@@ -1310,12 +1310,9 @@ class B01FlowTest(unittest.TestCase):
             "notes": "等待负责人确认后决定后续换水",
         }
         submitted = system.submit_manual_task_report(task.id, report, "operator")
-        self.assertEqual(submitted.status.value, "IN_PROGRESS")
+        self.assertEqual(submitted.status.value, "COMPLETED")
         self.assertEqual(len(submitted.completion_report["checklist_results"]), 2)
-
-        completed = system.complete_manual_task(task.id)
-        self.assertEqual(completed.status.value, "COMPLETED")
-        self.assertIsNotNone(completed.completed_at)
+        self.assertIsNotNone(submitted.completed_at)
 
     def test_due_job_dispatch_runs_verification(self) -> None:
         system = FishAgentSystem()
