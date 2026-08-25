@@ -10,7 +10,7 @@ from fishagent.agent_runtime.crewai_runtime import CrewRunResult
 from fishagent.application.agent_service import FishAgentSystem
 from fishagent.application.policy import evaluate_action
 from fishagent.core import LLMConfig, RuntimeConfigStore
-from fishagent.domain.models import Device, IncidentStatus, JobStatus, RiskLevel, SensorReading, utcnow
+from fishagent.domain.models import AgentRun, Device, IncidentStatus, JobStatus, RiskLevel, SensorReading, utcnow
 from fishagent.infrastructure.auth import AuthManager
 from fishagent.infrastructure.gateways import GatewayResult, MqttDeviceGateway
 
@@ -420,6 +420,36 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(state["incidents"][0]["status"], "VERIFY_PENDING")
         self.assertEqual(state["verification_results"], [])
         self.assertIn("patrol-analysis-agent", state["agent_runs"][0]["delegated_agents"])
+
+    def test_reused_device_control_remains_linked_to_current_incident(self) -> None:
+        system = FishAgentSystem()
+        system.initialize_demo()
+        incident = system.ingest_do("B-01", 2.1, source_event_id="dedup-visible", auto_run=False)
+        self.assertIsNotNone(incident)
+
+        first_run = AgentRun(id="run-first-command", goal="执行设备控制", incident_id=incident.id, status="RUNNING")
+        first_command = system.request_action_execution(
+            first_run,
+            incident,
+            device_id="aerator-b01-1",
+            target_state="on",
+            risk=RiskLevel.L1,
+        )
+        second_run = AgentRun(id="run-reused-command", goal="再次确认设备控制", incident_id=incident.id, status="RUNNING")
+        reused_command = system.request_action_execution(
+            second_run,
+            incident,
+            device_id="aerator-b01-1",
+            target_state="on",
+            risk=RiskLevel.L1,
+        )
+
+        self.assertEqual(reused_command.id, first_command.id)
+        self.assertEqual(incident.command_ids, [first_command.id])
+        self.assertEqual(second_run.steps[-1].action, "deduplicate_command")
+        self.assertEqual(second_run.steps[-1].details["transport"], "MQTT")
+        self.assertEqual(second_run.steps[-1].details["device_id"], "aerator-b01-1")
+        self.assertEqual(second_run.steps[-1].details["target_state"], "on")
 
     def test_normal_do_does_not_create_incident(self) -> None:
         system = FishAgentSystem()
@@ -1256,6 +1286,36 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(state["verification_results"][0]["outcome"], "FAILED")
         self.assertTrue(state["manual_tasks"])
         self.assertEqual(state["manual_tasks"][0]["status"], "OPEN")
+
+    def test_manual_task_requires_complete_report_before_completion(self) -> None:
+        system = FishAgentSystem()
+        task = system.create_manual_task(
+            "模型驱动处置待人工确认：B-02 氨氮超标",
+            "处理背景：需要现场复核\n告警位置：B-02 草鱼生态池\n异常指标：氨氮 0.82mg/L（高于安全线 0.50mg/L）\n【人工执行清单】\n1. 复测氨氮并记录两个点位\n2. 核对投喂和换水记录\n【完成回报】记录现场结果",
+        )
+
+        with self.assertRaisesRegex(ValueError, "请先提交完整处理结果"):
+            system.complete_manual_task(task.id)
+
+        report = {
+            "checklist_results": [
+                {"result": "池中心 0.70mg/L，进水口 0.66mg/L，已拍照"},
+                {"result": "已核对投喂、残饵和换水记录，未发现漏记"},
+            ],
+            "retest_data": "池中心 0.70mg/L；进水口 0.66mg/L",
+            "device_status": "增氧机在线，关闭",
+            "actions_taken": "暂停下一轮投喂，已通知养殖负责人",
+            "executed_at": "2026-08-25T18:10",
+            "photo_evidence": "IMG-20260825-001",
+            "notes": "等待负责人确认后决定后续换水",
+        }
+        submitted = system.submit_manual_task_report(task.id, report, "operator")
+        self.assertEqual(submitted.status.value, "IN_PROGRESS")
+        self.assertEqual(len(submitted.completion_report["checklist_results"]), 2)
+
+        completed = system.complete_manual_task(task.id)
+        self.assertEqual(completed.status.value, "COMPLETED")
+        self.assertIsNotNone(completed.completed_at)
 
     def test_due_job_dispatch_runs_verification(self) -> None:
         system = FishAgentSystem()

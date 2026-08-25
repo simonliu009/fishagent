@@ -500,10 +500,9 @@ async def test_llm(request: Request) -> Any:
 async def demo_options(request: Request) -> dict:
     authenticate(request, request.url.path)
     descriptions = {
-        "success": "注入 B-01 低溶氧读数，自动进入增氧和复核流程",
         "alerts": "同时注入溶解氧与氨氮异常证据，演示双传感器告警闭环",
     }
-    ordinary_modes = ("success", "alerts")
+    ordinary_modes = ("alerts",)
     multimodal_options = [
         {
             "mode": "analysis_case:%s" % case["id"],
@@ -1432,12 +1431,32 @@ async def dismiss_incident(request: Request, incident_id: str, payload: JsonPayl
 
 @app.post("/api/v1/manual-tasks/{task_id}/complete")
 async def complete_task(request: Request, task_id: str) -> Any:
-    authenticate(request, request.url.path, write=True)
+    session = authenticate(request, request.url.path, write=True)
     try:
         task = SYSTEM.complete_manual_task(task_id)
     except KeyError as exc:
         return problem(404, "Manual task not found", str(exc))
-    return {"task": task.__dict__, "state": SYSTEM.snapshot()}
+    except ValueError as exc:
+        return problem(409, "Manual task cannot be completed", str(exc))
+    record_user_audit(session, "manual_task.completed.by_user", "人工任务已完成", {"task_id": task_id}, "manual_task", task_id, request.headers.get("X-Correlation-ID"))
+    return {"task": state_item("manual_tasks", task.id), "state": SYSTEM.snapshot()}
+
+
+@app.post("/api/v1/manual-tasks/{task_id}/report")
+async def report_manual_task(request: Request, task_id: str, payload: JsonPayload) -> Any:
+    session = authenticate(request, request.url.path, write=True)
+    try:
+        task = SYSTEM.submit_manual_task_report(
+            task_id,
+            payload.model_dump(),
+            reporter=getattr(session, "username", None) or "现场操作员",
+        )
+    except KeyError as exc:
+        return problem(404, "Manual task not found", str(exc))
+    except ValueError as exc:
+        return problem(409, "Manual task report incomplete", str(exc))
+    record_user_audit(session, "manual_task.report_submitted.by_user", "人工任务已上报处理结果", {"task_id": task_id}, "manual_task", task_id, request.headers.get("X-Correlation-ID"))
+    return {"task": state_item("manual_tasks", task.id), "state": SYSTEM.snapshot()}
 
 
 @app.post("/api/v1/scheduled-jobs:dispatch")

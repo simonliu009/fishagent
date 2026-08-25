@@ -897,6 +897,26 @@ class Handler(BaseHTTPRequestHandler):
             except KeyError as exc:
                 problem(self, 404, "Manual task not found", str(exc))
                 return
+            except ValueError as exc:
+                problem(self, 409, "Manual task cannot be completed", str(exc))
+                return
+            json_response(self, 200, {"task": task.__dict__, "state": SYSTEM.snapshot()})
+            return
+        if path.startswith("/api/v1/manual-tasks/") and path.endswith("/report"):
+            task_id = path.split("/")[-2]
+            payload = read_json_body(self)
+            try:
+                task = SYSTEM.submit_manual_task_report(
+                    task_id,
+                    payload,
+                    str(payload.get("reported_by") or "现场操作员"),
+                )
+            except KeyError as exc:
+                problem(self, 404, "Manual task not found", str(exc))
+                return
+            except ValueError as exc:
+                problem(self, 409, "Manual task report incomplete", str(exc))
+                return
             json_response(self, 200, {"task": task.__dict__, "state": SYSTEM.snapshot()})
             return
         if path == "/api/v1/manual-tasks":

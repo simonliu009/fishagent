@@ -395,6 +395,9 @@ class ManualTask:
     status: TaskStatus = TaskStatus.OPEN
     created_at: datetime = field(default_factory=utcnow)
     completed_at: Optional[datetime] = None
+    completion_report: Optional[Dict[str, Any]] = None
+    reported_at: Optional[datetime] = None
+    reported_by: Optional[str] = None
 
 
 @dataclass

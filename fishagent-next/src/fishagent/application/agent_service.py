@@ -71,7 +71,7 @@ VERIFICATION_RETRY_SECONDS = 300
 
 DEMO_MODE_LABELS = {
     "success": "低溶氧自动处置",
-    "alerts": "双传感器失效",
+    "alerts": "双传感器告警",
     "failure": "复核失败升级",
     "dedup": "防重复动作",
     "approval": "L2 审批转人工",
@@ -1145,8 +1145,71 @@ class FishAgentSystem:
         self.store.emit("manual_task.created", title, {"task_id": task.id, "incident_id": incident_id})
         return task
 
+    @staticmethod
+    def manual_task_checklist(description: str) -> list[str]:
+        lines = str(description or "").splitlines()
+        start = next((index for index, line in enumerate(lines) if "【人工执行清单】" in line), None)
+        if start is None:
+            return []
+        end = next((index for index, line in enumerate(lines[start + 1:], start + 1) if "【完成回报】" in line), len(lines))
+        checklist = []
+        for line in lines[start + 1:end]:
+            match = re.match(r"^\s*\d+[.、]\s*(.+?)\s*$", line)
+            if match:
+                checklist.append(match.group(1))
+        return checklist
+
+    def submit_manual_task_report(self, task_id: str, report: dict[str, Any], reporter: str = "现场操作员") -> ManualTask:
+        task = self.store.manual_tasks[task_id]
+        if task.status == TaskStatus.COMPLETED:
+            raise ValueError("任务已经完成，不能重复上报")
+
+        required_fields = {
+            "retest_data": "复测数据",
+            "device_status": "设备实际状态",
+            "actions_taken": "已执行动作",
+            "executed_at": "执行时间",
+            "photo_evidence": "现场照片或记录",
+        }
+        missing = [label for key, label in required_fields.items() if not str(report.get(key) or "").strip()]
+        if missing:
+            raise ValueError("请完整填写：%s" % "、".join(missing))
+
+        checklist = self.manual_task_checklist(task.description)
+        raw_results = report.get("checklist_results")
+        if not isinstance(raw_results, list) or len(raw_results) != len(checklist):
+            raise ValueError("请完整填写人工执行清单")
+        checklist_results = []
+        for index, instruction in enumerate(checklist):
+            item = raw_results[index]
+            result = item.get("result") if isinstance(item, dict) else item
+            if not str(result or "").strip():
+                raise ValueError("请填写第%d项人工执行清单" % (index + 1))
+            checklist_results.append({"index": index + 1, "instruction": instruction, "result": str(result).strip()})
+
+        task.completion_report = {
+            "checklist_results": checklist_results,
+            "retest_data": str(report["retest_data"]).strip(),
+            "device_status": str(report["device_status"]).strip(),
+            "actions_taken": str(report["actions_taken"]).strip(),
+            "executed_at": str(report["executed_at"]).strip(),
+            "photo_evidence": str(report["photo_evidence"]).strip(),
+            "notes": str(report.get("notes") or "").strip(),
+        }
+        task.reported_at = utcnow()
+        task.reported_by = str(reporter or "现场操作员").strip() or "现场操作员"
+        task.status = TaskStatus.IN_PROGRESS
+        self.store.emit(
+            "manual_task.report_submitted",
+            "人工任务已上报处理结果：%s" % task.title,
+            {"task_id": task.id, "reported_by": task.reported_by},
+        )
+        return task
+
     def complete_manual_task(self, task_id: str) -> ManualTask:
         task = self.store.manual_tasks[task_id]
+        if not task.completion_report:
+            raise ValueError("请先提交完整处理结果")
         task.status = TaskStatus.COMPLETED
         task.completed_at = utcnow()
         self.store.emit("manual_task.completed", task.title, {"task_id": task.id})
@@ -2311,15 +2374,28 @@ class FishAgentSystem:
         if existing:
             if existing.device_id != device_id or existing.pond_id != incident.pond_id or existing.target_state != target_state:
                 raise ValueError("idempotency key conflicts with an existing device command")
+            if existing.id not in incident.command_ids:
+                incident.command_ids.append(existing.id)
             run.step(
                 "execution-agent",
                 "deduplicate_command",
-                "幂等键已存在，复用已有设备命令",
+                "已确认设备控制：%s%s，当前状态为%s" % (
+                    device.name,
+                    "已开启" if existing.target_state == "on" else "已关闭",
+                    existing.status.value,
+                ),
                 details={
-                    "kind": "command_deduplicated",
+                    "kind": "execution_result",
                     "command_id": existing.id,
                     "device_id": existing.device_id,
+                    "device_name": device.name,
+                    "pond_id": existing.pond_id,
                     "target_state": existing.target_state,
+                    "status": existing.status.value,
+                    "risk": existing.risk.value,
+                    "policy_reason": existing.policy_reason,
+                    "transport": "MQTT",
+                    "success": existing.status == CommandStatus.CONFIRMED,
                     "idempotency_key": idempotency_key,
                 },
             )
@@ -3032,6 +3108,9 @@ class FishAgentSystem:
                     "status": item.status.value,
                     "created_at": item.created_at.isoformat(),
                     "completed_at": item.completed_at.isoformat() if item.completed_at else None,
+                    "completion_report": item.completion_report,
+                    "reported_at": item.reported_at.isoformat() if item.reported_at else None,
+                    "reported_by": item.reported_by,
                 }
                 for item in self.store.manual_tasks.values()
             ],

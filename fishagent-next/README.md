@@ -6,7 +6,7 @@
 
 - 养殖资产、传感器读数、设备影子状态。
 - 四池塘演示场景：B-01 至 B-04 各配套氨氮、亚硝酸根离子、浊度、叶绿素、溶解氧、pH、水温传感器，以及增氧机、投喂机、阀门、摄像头和 24 小时趋势模拟数据；总计 28 台设备中 27 台在线。
-- 默认初始化页面保持正常，异常通过监控总览右下角的 Agent Demo 浮动入口注入；常规演示保留低溶氧和双传感器失效，多模态案例纳入巡塘 SOP。
+- 默认初始化页面保持正常，异常通过监控总览右下角的 Agent Demo 浮动入口注入；常规演示保留双传感器告警，多模态案例纳入巡塘 SOP。
 - 水面/水下摄像头、天气上下文和病害知识库模拟数据，支持浮头、病害、摄食异常和天气防护四个多模态 Agent 案例。
 - 只读/低风险自动/中高风险阻断的安全策略。
 - HTTP API 与浏览器控制台，当前端口 `3000`；`3001` 保留给 Nginx。
@@ -137,9 +137,8 @@ MQTT 主题格式为 `farms/{farm_id}/ponds/{pond_id}/sensors/{sensor_id}`，消
 默认演示数据通过显式初始化或注入产生，不会在每次 Web 启动时隐式覆盖数据库状态。控制台推荐从监控总览右下角的浮动入口操作：
 
 1. **重置演示数据**：恢复四个池塘的正常背景数据，不触发自动处置。
-2. **低溶氧自动处置**：注入 B-01 低溶氧，Agent 决策开启增氧机，随后进入延迟复核。
-3. **双传感器失效**：同时注入溶解氧和氨氮异常，演示异常证据聚合和人工任务转派。
-4. **多模态案例**：将水面/水下图片、天气、知识库和传感器数据纳入巡塘 SOP，形成真实 Agent 运行轨迹。
+2. **双传感器告警**：同时注入溶解氧和氨氮异常，演示异常证据聚合和人工任务转派。
+3. **多模态案例**：将水面/水下图片、天气、知识库和传感器数据纳入巡塘 SOP，形成真实 Agent 运行轨迹。
 
 Demo 注入后页面会显示注入反馈并触发逐塘巡检；告警列表按事件逐条展示，决策、执行和复核结果会随着流程推进显示。
 
@@ -147,7 +146,6 @@ Demo 注入后页面会显示注入反馈并触发逐塘巡检；告警列表按
 
 ```bash
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/init
-curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/success
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/demo/alerts
 curl --noproxy localhost,127.0.0.1 http://localhost:3000/api/v1/demo/options
 curl --noproxy localhost,127.0.0.1 -X POST http://localhost:3000/api/v1/analysis-cases/case-floating-head-weather/run

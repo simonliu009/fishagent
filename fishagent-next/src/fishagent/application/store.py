@@ -805,6 +805,9 @@ class InMemoryStore:
                 status=TaskStatus(item.get("status", TaskStatus.OPEN.value)),
                 created_at=self._datetime(item.get("created_at")) or utcnow(),
                 completed_at=self._datetime(item.get("completed_at")),
+                completion_report=item.get("completion_report") if isinstance(item.get("completion_report"), dict) else None,
+                reported_at=self._datetime(item.get("reported_at")),
+                reported_by=item.get("reported_by"),
             )
             for item in payload.get("manual_tasks", [])
         }
