@@ -222,6 +222,8 @@
     }
     .button svg { width: 15px; height: 15px; }
     .button:hover { background: var(--brand-dark); }
+    .button.is-loading svg { animation: button-spin .8s linear infinite; }
+    @keyframes button-spin { to { transform: rotate(360deg); } }
     .button.report-result { color: #fff; background: var(--blue); border-color: var(--blue); }
     .button.report-result:hover { color: #fff; background: #2749bd; border-color: #2749bd; }
     .button.secondary { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
@@ -410,6 +412,8 @@
     .work-item-description { max-height: 260px; margin-top: 7px; padding-top: 7px; overflow: auto; border-top: 1px solid var(--line); color: var(--ink); font-size: 10px; line-height: 1.6; white-space: pre-line; }
     .work-item-actions { display: flex; gap: 5px; margin-top: 7px; }
     .work-toolbar, .history-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .work-toolbar { align-items: flex-end; }
+    .work-toolbar .button { align-self: flex-end; }
     .work-toolbar select, .history-toolbar select { min-width: 150px; }
     .work-list { display: grid; gap: 8px; }
     .work-record { padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-alt); }
@@ -1054,7 +1058,7 @@
         <div class="section-heading"><div><h2 class="section-title"><i data-lucide="clipboard-check"></i>任务中心</h2><p class="eyebrow">查看人工任务、设备审批和 Agent 运行任务</p></div><span id="work_meta" class="section-meta"></span></div>
         <div class="work-toolbar">
           <label class="field">任务范围<select id="work_filter" onchange="setWorkFilter(this.value)"><option value="attention">待处理</option><option value="all">全部任务</option><option value="manual">人工任务</option><option value="approval">设备审批</option><option value="agent">Agent 运行</option><option value="completed">已完成</option><option value="failed">失败 / 已取消</option></select></label>
-          <button class="button secondary small" type="button" onclick="refresh()"><i data-lucide="refresh-cw"></i>刷新任务</button>
+          <button id="refresh_work_button" class="button secondary small" type="button" onclick="refreshWorkTasks()"><i data-lucide="refresh-cw"></i>刷新任务</button>
         </div>
         <div id="work_list" class="work-list"></div>
         <div id="work_load_more" class="history-load-more" hidden><button class="button secondary" type="button" onclick="loadMoreWork()"><i data-lucide="chevrons-down"></i>加载更多任务</button></div>
@@ -2064,6 +2068,9 @@
         || (entry.kind === 'approval' && entry.status === 'PENDING')
         || (entry.kind === 'agent' && ['QUEUED','RUNNING','WAITING_APPROVAL'].includes(entry.status));
     }
+    function isVerificationRun(run) {
+      return String(run?.goal || '').startsWith('复核 ') || (run?.steps || []).some(step => step?.agent === 'verification-agent');
+    }
     function metricStat(label, value) {
       return `<span class="metric-stat"><span class="metric-stat-label">${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></span>`;
     }
@@ -2100,14 +2107,15 @@
       const approvals = currentState.approvals || [];
       const proposals = currentState.action_proposals || [];
       const runs = currentState.agent_runs || [];
+      const visibleRuns = runs.filter(item => !isVerificationRun(item));
       const pendingItems = tasks.filter(item => ['OPEN','IN_PROGRESS'].includes(item.status)).map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, item.completion_report ? `<button class="button report-result small" onclick="openTaskData('${item.id}')">查看数据</button>` : `<button class="button report-result small" onclick="openTaskReport('${item.id}')">提交处置数据</button>`, '请在任务中心填写现场清单并提交处置数据。'));
       const completedManualItems = tasks.filter(item => item.status === 'COMPLETED').map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, item.completion_report ? `<button class="button report-result small" onclick="openTaskData('${item.id}')">查看数据</button>` : '', '人工处置数据已提交，可查看现场清单结果和照片。'));
       approvals.filter(item => item.status === 'PENDING').forEach(item => {
         const proposal = proposals.find(proposal => proposal.id === item.proposal_id) || {};
         pendingItems.unshift(taskItem(proposal.rationale || '设备动作审批', `${proposal.pond_id || '--'} · 风险 ${proposal.risk || '--'}`, `<button class="button small" onclick="approveProposal('${proposal.id}')">批准</button><button class="button secondary small" onclick="rejectProposal('${proposal.id}')">拒绝</button>`));
       });
-      const runningItems = runs.filter(item => ['RUNNING','WAITING_APPROVAL'].includes(item.status)).slice(-6).map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status)));
-      const completedItems = completedManualItems.concat(runs.filter(item => ['COMPLETED','FAILED','CANCELLED'].includes(item.status)).slice(-6).reverse().map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status))));
+      const runningItems = visibleRuns.filter(item => ['RUNNING','WAITING_APPROVAL'].includes(item.status)).slice(-6).map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status)));
+      const completedItems = completedManualItems.concat(visibleRuns.filter(item => ['COMPLETED','FAILED','CANCELLED'].includes(item.status)).slice(-6).reverse().map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status))));
       const columns = [
         ['待处理','',pendingItems], ['进行中','running',runningItems], ['已完成','done',completedItems]
       ];
@@ -2128,7 +2136,7 @@
         entries.push({id:`approval:${approval.id}`, kind:'approval', kindLabel:'设备审批', status:approval.status, statusLabel:approvalStatusLabel(approval.status), createdAt:approval.created_at, title:proposal.rationale || '设备动作审批', description:proposal.device_id ? `设备：${deviceAssetLabel(proposal.device_id)}；目标：${targetStateLabel(proposal.target_state)}；原因：${proposal.rationale || '模型提出受控设备动作'}` : approval.reason || '等待现场负责人审核设备动作。', assignee:approval.decided_by || '现场负责人', priority:proposal.risk || '--', incidentId:approval.incident_id || proposal.incident_id, pondId:incident?.pond_id || proposal.pond_id, approval, proposal});
       });
       (currentState.agent_runs || []).forEach(run => {
-        if (run.goal === '执行全场巡查') return;
+        if (run.goal === '执行全场巡查' || isVerificationRun(run)) return;
         const incident = incidents.find(item => item.id === run.incident_id);
         const createdAt = run.steps?.[0]?.created_at || run.steps?.at(-1)?.created_at;
         entries.push({id:`agent:${run.id}`, kind:'agent', kindLabel:'Agent 运行', status:run.status, statusLabel:runStatusLabel(run.status), createdAt, title:run.goal, description:run.stop_reason ? `停止原因：${stopReasonLabel(run.stop_reason)}` : '查看运行轨迹了解智能体实际执行过程。', assignee:(run.delegated_agents || []).map(agentLabel).join(' → ') || '智渔AI', priority:'--', incidentId:run.incident_id, pondId:incident?.pond_id, run});
@@ -3032,10 +3040,26 @@
         } else {
           renderAll();
         }
+        return true;
       } catch (error) {
         if (error.status !== 401) { document.getElementById('footer_status').textContent = '数据刷新异常'; showToast(`刷新失败：${error.message}`, true); }
+        return false;
       } finally {
         finishInitialLoading();
+      }
+    }
+    async function refreshWorkTasks() {
+      const button = document.getElementById('refresh_work_button');
+      if (!button || button.disabled) return;
+      button.disabled = true;
+      button.classList.add('is-loading');
+      button.setAttribute('aria-busy', 'true');
+      try {
+        if (await refresh()) showToast('任务列表已刷新');
+      } finally {
+        button.disabled = false;
+        button.classList.remove('is-loading');
+        button.removeAttribute('aria-busy');
       }
     }
     async function mutate(action, success, options = {}) {
