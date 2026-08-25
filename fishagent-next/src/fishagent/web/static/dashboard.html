@@ -205,6 +205,8 @@
     }
     .button svg { width: 15px; height: 15px; }
     .button:hover { background: var(--brand-dark); }
+    .button.report-result { color: #fff; background: var(--blue); border-color: var(--blue); }
+    .button.report-result:hover { color: #fff; background: #2749bd; border-color: #2749bd; }
     .button.secondary { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
     .button.danger { color: var(--red); background: var(--surface); border-color: #f2baba; }
     .button.amber { color: #fff; background: var(--amber); }
@@ -225,6 +227,9 @@
     .status-badge.warning { color: #925800; background: var(--amber-soft); }
     .status-badge.danger { color: var(--red); background: var(--red-soft); }
     .status-badge.info { color: var(--blue); background: #eaf0ff; }
+    .status-badge.manual-task-status { min-height: 28px; padding: 4px 10px; border-radius: 6px; color: #fff; font-size: 13px; font-weight: 850; }
+    .status-badge.manual-task-status.pending { background: var(--red); }
+    .status-badge.manual-task-status.completed { background: var(--brand); }
     .patrol-summary-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1414,7 +1419,7 @@
       if (['RUNNING','EXECUTING','QUEUED','SENT','ACKNOWLEDGED'].includes(status)) return 'info';
       return '';
     }
-    function badge(status, label) { return `<span class="status-badge ${statusTone(status)}">${escapeHtml(label || status || '--')}</span>`; }
+    function badge(status, label, extraClass = '') { return `<span class="status-badge ${statusTone(status)} ${extraClass}">${escapeHtml(label || status || '--')}</span>`; }
     function showToast(message, error = false) {
       const node = document.getElementById('toast');
       node.textContent = message;
@@ -2045,7 +2050,7 @@
       const approvals = currentState.approvals || [];
       const proposals = currentState.action_proposals || [];
       const runs = currentState.agent_runs || [];
-      const pendingItems = tasks.filter(item => ['OPEN','IN_PROGRESS'].includes(item.status)).map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, `<button class="button small" onclick="openTaskReport('${item.id}')">${item.completion_report ? '修改上报' : '上报结果'}</button><button class="button secondary small" ${item.completion_report ? '' : 'disabled'} onclick="completeTask('${item.id}')">完成</button>`, '请在任务中心填写现场清单并上报处理结果。'));
+      const pendingItems = tasks.filter(item => ['OPEN','IN_PROGRESS'].includes(item.status)).map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, `<button class="button report-result small" onclick="openTaskReport('${item.id}')">${item.completion_report ? '修改上报' : '上报结果'}</button><button class="button secondary small" ${item.completion_report ? '' : 'disabled'} onclick="completeTask('${item.id}')">完成</button>`, '请在任务中心填写现场清单并上报处理结果。'));
       approvals.filter(item => item.status === 'PENDING').forEach(item => {
         const proposal = proposals.find(proposal => proposal.id === item.proposal_id) || {};
         pendingItems.unshift(taskItem(proposal.rationale || '设备动作审批', `${proposal.pond_id || '--'} · 风险 ${proposal.risk || '--'}`, `<button class="button small" onclick="approveProposal('${proposal.id}')">批准</button><button class="button secondary small" onclick="rejectProposal('${proposal.id}')">拒绝</button>`));
@@ -2129,11 +2134,12 @@
       const checklistMarkup = checklist.length
         ? `<ol class="task-checklist">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`
         : '<span class="task-brief-value">请根据异常数据完成现场复核。</span>';
-      const reportButton = task.status === 'COMPLETED' ? '' : `<button class="button small" type="button" onclick="openTaskReport('${escapeHtml(task.id)}')"><i data-lucide="file-pen-line"></i>${reportReady ? '修改上报' : '上报处理结果'}</button>`;
+      const reportButton = task.status === 'COMPLETED' ? '' : `<button class="button report-result small" type="button" onclick="openTaskReport('${escapeHtml(task.id)}')"><i data-lucide="file-pen-line"></i>${reportReady ? '修改上报' : '上报处理结果'}</button>`;
       const completeButton = task.status === 'COMPLETED' ? '' : `<button class="button secondary small" type="button" ${reportReady ? '' : 'disabled title="请先提交完整处理结果"'} onclick="completeTask('${escapeHtml(task.id)}')"><i data-lucide="check"></i>完成任务</button>`;
       const background = taskBackground(task.description);
       const backgroundMarkup = background ? `<details class="work-record-background"><summary>查看处理背景</summary><div class="work-record-description">${escapeHtml(background)}</div></details>` : '';
-      return `<article class="work-record manual-task-record"><div class="work-record-head"><div class="work-record-title">人工任务</div>${badge(entry.status, entry.statusLabel)}</div><div class="task-brief-grid"><div class="task-brief-row"><span class="task-brief-label">告警位置</span><span class="task-brief-value">${escapeHtml(taskLocation(task, incident))}</span></div><div class="task-brief-row"><span class="task-brief-label">告警异常数据</span><span class="task-brief-value">${escapeHtml(taskAbnormalSummary(task, incident))}</span></div><div class="task-brief-row"><span class="task-brief-label">人工执行清单</span>${checklistMarkup}</div></div>${backgroundMarkup}<div class="work-record-actions">${reportButton}${completeButton}</div></article>`;
+      const taskStatusClass = task.status === 'COMPLETED' ? 'completed' : 'pending';
+      return `<article class="work-record manual-task-record"><div class="work-record-head"><div class="work-record-title">人工任务</div>${badge(entry.status, entry.statusLabel, `manual-task-status ${taskStatusClass}`)}</div><div class="task-brief-grid"><div class="task-brief-row"><span class="task-brief-label">告警位置</span><span class="task-brief-value">${escapeHtml(taskLocation(task, incident))}</span></div><div class="task-brief-row"><span class="task-brief-label">告警异常数据</span><span class="task-brief-value">${escapeHtml(taskAbnormalSummary(task, incident))}</span></div><div class="task-brief-row"><span class="task-brief-label">人工执行清单</span>${checklistMarkup}</div></div>${backgroundMarkup}<div class="work-record-actions">${reportButton}${completeButton}</div></article>`;
     }
     function workEntryMarkup(entry) {
       const incident = (currentState.incidents || []).find(item => item.id === entry.incidentId);
