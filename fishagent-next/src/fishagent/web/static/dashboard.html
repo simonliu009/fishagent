@@ -2101,12 +2101,13 @@
       const proposals = currentState.action_proposals || [];
       const runs = currentState.agent_runs || [];
       const pendingItems = tasks.filter(item => ['OPEN','IN_PROGRESS'].includes(item.status)).map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, item.completion_report ? `<button class="button report-result small" onclick="openTaskData('${item.id}')">查看数据</button>` : `<button class="button report-result small" onclick="openTaskReport('${item.id}')">提交处置数据</button>`, '请在任务中心填写现场清单并提交处置数据。'));
+      const completedManualItems = tasks.filter(item => item.status === 'COMPLETED').map(item => taskItem(item.title, `${item.priority} · ${item.assignee}`, item.completion_report ? `<button class="button report-result small" onclick="openTaskData('${item.id}')">查看数据</button>` : '', '人工处置数据已提交，可查看现场清单结果和照片。'));
       approvals.filter(item => item.status === 'PENDING').forEach(item => {
         const proposal = proposals.find(proposal => proposal.id === item.proposal_id) || {};
         pendingItems.unshift(taskItem(proposal.rationale || '设备动作审批', `${proposal.pond_id || '--'} · 风险 ${proposal.risk || '--'}`, `<button class="button small" onclick="approveProposal('${proposal.id}')">批准</button><button class="button secondary small" onclick="rejectProposal('${proposal.id}')">拒绝</button>`));
       });
       const runningItems = runs.filter(item => ['RUNNING','WAITING_APPROVAL'].includes(item.status)).slice(-6).map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status)));
-      const completedItems = runs.filter(item => ['COMPLETED','FAILED','CANCELLED'].includes(item.status)).slice(-6).reverse().map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status)));
+      const completedItems = completedManualItems.concat(runs.filter(item => ['COMPLETED','FAILED','CANCELLED'].includes(item.status)).slice(-6).reverse().map(item => taskItem(item.goal, item.stop_reason ? stopReasonLabel(item.stop_reason) : runStatusLabel(item.status))));
       const columns = [
         ['待处理','',pendingItems], ['进行中','running',runningItems], ['已完成','done',completedItems]
       ];
@@ -2180,11 +2181,11 @@
     function manualTaskMarkup(entry, incident) {
       const task = entry.task;
       const checklist = taskChecklist(task.description);
-      const reportReady = Boolean(task.completion_report || task.reported_at);
+      const reportReady = Boolean(task.completion_report);
       const checklistMarkup = checklist.length
         ? `<ol class="task-checklist">${checklist.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ol>`
         : '<span class="task-brief-value">请根据异常数据完成现场复核。</span>';
-      const taskCompleted = task.status === 'COMPLETED' || reportReady;
+      const taskCompleted = task.status === 'COMPLETED';
       const reportButton = reportReady
         ? `<button class="button report-result small" type="button" onclick="openTaskData('${escapeHtml(task.id)}')"><i data-lucide="eye"></i>查看数据</button>`
         : `<button class="button report-result small" type="button" onclick="openTaskReport('${escapeHtml(task.id)}')"><i data-lucide="file-pen-line"></i>提交处置数据</button>`;
@@ -3381,7 +3382,7 @@
         payload.photo_attachments = attachments;
         await api(`/api/v1/manual-tasks/${encodeURIComponent(taskReportTaskId)}/report`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
         closeTaskReport();
-        workFilter = 'completed';
+        workFilter = 'all';
         const workFilterNode = document.getElementById('work_filter');
         if (workFilterNode) workFilterNode.value = workFilter;
         showToast('处置数据已提交，任务已完成');

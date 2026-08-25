@@ -481,6 +481,8 @@ class RuntimeBoundaryTests(unittest.TestCase):
         self.assertIn('type="file"', response.text)
         self.assertIn('function openTaskData', response.text)
         self.assertIn('/api/v1/evidence/${encodeURIComponent(attachment.object_name)}/content', response.text)
+        self.assertIn("workFilter = 'all'", response.text)
+        self.assertIn('const completedManualItems', response.text)
         self.assertNotIn('id="task_report_retest_data"', response.text)
         self.assertNotIn('id="task_report_device_status"', response.text)
         self.assertNotIn('id="task_report_actions_taken"', response.text)

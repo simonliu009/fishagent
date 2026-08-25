@@ -1293,6 +1293,10 @@ class B01FlowTest(unittest.TestCase):
             "模型驱动处置待人工确认：B-02 氨氮超标",
             "处理背景：需要现场复核\n告警位置：B-02 草鱼生态池\n异常指标：氨氮 0.82mg/L（高于安全线 0.50mg/L）\n【人工执行清单】\n1. 复测氨氮并记录两个点位\n2. 核对投喂和换水记录\n【完成回报】记录现场结果",
         )
+        other_task = system.create_manual_task(
+            "另一条人工任务",
+            "【人工执行清单】\n1. 检查设备\n【完成回报】记录现场结果",
+        )
 
         with self.assertRaisesRegex(ValueError, "请先提交完整处理结果"):
             system.complete_manual_task(task.id)
@@ -1311,6 +1315,7 @@ class B01FlowTest(unittest.TestCase):
         self.assertEqual(len(submitted.completion_report["checklist_results"]), 2)
         self.assertEqual(submitted.completion_report["photo_attachments"][0]["filename"], "现场照片.jpg")
         self.assertIsNotNone(submitted.completed_at)
+        self.assertEqual(system.store.manual_tasks[other_task.id].status.value, "OPEN")
 
     def test_due_job_dispatch_runs_verification(self) -> None:
         system = FishAgentSystem()
