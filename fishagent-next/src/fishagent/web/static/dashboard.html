@@ -1324,7 +1324,7 @@
     </section>
   </div>
   <div id="task_photo_lightbox" class="auth-layer task-photo-lightbox" hidden onclick="closeTaskPhoto(event)">
-    <section class="auth-dialog task-photo-dialog" role="dialog" aria-modal="true" aria-labelledby="task_photo_title">
+    <section class="task-photo-dialog" role="dialog" aria-modal="true" aria-labelledby="task_photo_title">
       <div class="modal-head"><div><h2 id="task_photo_title">现场照片</h2><p id="task_photo_filename" class="eyebrow"></p></div><button class="icon-button" type="button" title="关闭" onclick="closeTaskPhoto()"><i data-lucide="x"></i></button></div>
       <div class="task-photo-viewer"><div id="task_photo_loading" class="task-photo-loading"><div>正在加载完整图片…</div><div id="task_photo_progress" class="task-photo-progress"><div id="task_photo_progress_bar" class="task-photo-progress-bar"></div></div><div id="task_photo_progress_text">准备加载</div></div><img id="task_photo_full" class="task-photo-full" alt="现场照片" hidden><div id="task_photo_error" class="task-photo-error" hidden></div></div>
     </section>
@@ -3403,6 +3403,8 @@
       taskPhotoObjectUrl = null;
       image.hidden = true;
       image.removeAttribute('src');
+      image.style.width = '';
+      image.style.height = '';
       loading.hidden = false;
       error.hidden = true;
       progress.classList.remove('indeterminate');
@@ -3443,7 +3445,18 @@
           progressText.textContent = '加载完成';
           taskPhotoObjectUrl = URL.createObjectURL(new Blob(chunks, {type: response.headers.get('content-type') || attachment.content_type || 'image/jpeg'}));
         }
-        image.onload = () => { if (token === taskPhotoLoadToken) { loading.hidden = true; image.hidden = false; } };
+        image.onload = () => {
+          if (token !== taskPhotoLoadToken) return;
+          const width = image.naturalWidth;
+          const height = image.naturalHeight;
+          if (width && height) {
+            const scale = Math.min(window.innerWidth / width, window.innerHeight / height);
+            image.style.width = `${Math.max(1, Math.round(width * scale))}px`;
+            image.style.height = `${Math.max(1, Math.round(height * scale))}px`;
+          }
+          loading.hidden = true;
+          image.hidden = false;
+        };
         image.src = taskPhotoObjectUrl;
       } catch (loadError) {
         if (token !== taskPhotoLoadToken) return;
